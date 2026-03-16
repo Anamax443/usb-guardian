@@ -500,25 +500,52 @@ Offline agenti:
 ### Identita a oprávnění – kdo co smí
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│ Komponenta          │ Účet              │ Oprávnění          │
-├─────────────────────┼───────────────────┼────────────────────┤
-│ Agent (Windows Svc) │ SYSTEM            │ lokální PC, WMI    │
-│                     │                   │ PnpDevice disable  │
-│                     │                   │ HTTP client → API  │
-├─────────────────────┼───────────────────┼────────────────────┤
-│ REST API (Win Svc)  │ AXINETWORK\       │ db_datareader      │
-│                     │ gmsa-SQL$         │ db_datawriter      │
-│                     │                   │ POUZE USBGuardian  │
-├─────────────────────┼───────────────────┼────────────────────┤
-│ IT admin (SSMS/UI)  │ AXINETWORK\       │ db_datareader      │
-│                     │ trnkam (nebo      │ db_datawriter      │
-│                     │ IT skupina)       │ POUZE USBGuardian  │
-├─────────────────────┼───────────────────┼────────────────────┤
-│ SQL Server          │ –                 │ hostuje DB         │
-│ B-S-W-SQL-04        │                   │ přijímá pouze      │
-│                     │                   │ Windows Auth       │
-└─────────────────────┴───────────────────┴────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│ Komponenta          │ Účet                │ Oprávnění           │
+├─────────────────────┼─────────────────────┼─────────────────────┤
+│ Agent (Windows Svc) │ SYSTEM              │ lokální PC, WMI     │
+│                     │ → na síti jako:     │ PnpDevice disable   │
+│                     │ AXINETWORK\PC-01$   │ HTTP → REST API     │
+├─────────────────────┼─────────────────────┼─────────────────────┤
+│ REST API (Win Svc)  │ AXINETWORK\         │ db_datareader       │
+│                     │ gmsa-SQL$           │ db_datawriter       │
+│                     │                     │ POUZE USBGuardian   │
+├─────────────────────┼─────────────────────┼─────────────────────┤
+│ IT admin (Swagger)  │ AXINETWORK\         │ db_datareader       │
+│                     │ SQL Admins2         │ db_datawriter       │
+│                     │                     │ POUZE USBGuardian   │
+├─────────────────────┼─────────────────────┼─────────────────────┤
+│ SQL Server          │ –                   │ hostuje DB          │
+│ B-S-W-SQL-04        │                     │ pouze Windows Auth  │
+└─────────────────────┴─────────────────────┴─────────────────────┘
+```
+
+### AD skupina USB-Guardian-Clients
+
+```
+Skupina:  AXINETWORK\USB-Guardian-Clients
+Typ:      Security, Global
+Členové:  Domain Computers (všechny firemní stroje automaticky)
+
+Vytvoření:
+  New-ADGroup -Name "USB-Guardian-Clients" -GroupCategory Security -GroupScope Global
+  Add-ADGroupMember -Identity "USB-Guardian-Clients" -Members (Get-ADGroup "Domain Computers")
+
+Jak funguje:
+  Nový stroj připojí do domény
+    → automaticky v Domain Computers
+    → automaticky dostane přístup na REST API
+    → žádná ruční správa
+
+  Vyřazení stroje:
+    → odebrat z Domain Computers nebo přímo z USB-Guardian-Clients
+    → stroj ztratí přístup na API
+    → agent stále funguje offline s cached whitelistem
+
+REST API ověřuje příslušnost ke skupině:
+  → AXINETWORK\USB-Guardian-Clients (firemní stroje)
+  → AXINETWORK\SQL Admins2 (IT admini přes Swagger)
+  → ostatní → HTTP 401 Unauthorized
 ```
 
 ---

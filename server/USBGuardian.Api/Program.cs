@@ -37,7 +37,18 @@ builder.Services.AddAuthentication(
     Microsoft.AspNetCore.Authentication.Negotiate.NegotiateDefaults.AuthenticationScheme)
     .AddNegotiate();
 
-builder.Services.AddAuthorization();
+// ── Authorization – pouze počítače v AD skupině ───────────────
+// AD skupina: AXINETWORK\USB-Guardian-Clients
+// Členové: Domain Computers → všechny firemní stroje automaticky
+builder.Services.AddAuthorization(options =>
+{
+    options.AddPolicy("USBGuardianClients", policy =>
+        policy.RequireAssertion(ctx =>
+            // Firemní stroje přes Domain Computers
+            ctx.User.IsInRole(@"AXINETWORK\USB-Guardian-Clients")
+            // IT admini přes browser/Swagger
+            || ctx.User.IsInRole(@"AXINETWORK\SQL Admins2")));
+});
 
 // ── Logging ───────────────────────────────────────────────────
 builder.Logging.AddEventLog(settings =>
