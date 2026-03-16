@@ -167,7 +167,53 @@ public class DeviceMonitor : BackgroundService
         var mediaType     = wmi["MediaType"]?.ToString() ?? string.Empty;
         device.Type       = DetermineDeviceType(interfaceType, mediaType);
 
+        // Zjistíme drive letters přiřazené tomuto médiu (F:, G: atd.)
+        var deviceId = wmi["DeviceID"]?.ToString() ?? string.Empty;
+        device.DriveLetters = GetDriveLetters(deviceId);
+
         return device;
+    }
+
+    // --------------------------------------------------------
+    // Zjistí drive letters pro dané fyzické zařízení
+    // Cesta WMI: Win32_DiskDrive → Win32_DiskPartition → Win32_LogicalDisk
+    // --------------------------------------------------------
+    private List<string> GetDriveLetters(string deviceId)
+    {
+        var letters = new List<string>();
+
+        try
+        {
+            // Escapování zpětných lomítek pro WMI dotaz
+            var escapedId = deviceId.Replace(@"\", @"\\");
+
+            using var diskQuery = new ManagementObjectSearcher(
+                $"ASSOCIATORS OF {{Win32_DiskDrive.DeviceID='{escapedId}'}} " +
+                "WHERE AssocClass=Win32_DiskDriveToDiskPartition");
+
+            foreach (ManagementObject partition in diskQuery.Get())
+            {
+                using var logicalQuery = new ManagementObjectSearcher(
+                    $"ASSOCIATORS OF {{Win32_DiskPartition.DeviceID='{partition["DeviceID"]}'}} " +
+                    "WHERE AssocClass=Win32_LogicalDiskToPartition");
+
+                foreach (ManagementObject logical in logicalQuery.Get())
+                {
+                    var name = logical["Name"]?.ToString();
+                    if (!string.IsNullOrEmpty(name))
+                    {
+                        // Uložíme jen písmeno bez dvojtečky (např. "F" ne "F:")
+                        letters.Add(name.Replace(":", "").Trim());
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Nelze zjistit drive letters pro {DeviceId}", deviceId);
+        }
+
+        return letters;
     }
 
     // --------------------------------------------------------

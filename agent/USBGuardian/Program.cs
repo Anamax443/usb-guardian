@@ -59,13 +59,21 @@ builder.Services.AddSingleton(sp =>
 
 builder.Services.AddSingleton(sp =>
 {
+    var logger = sp.GetRequiredService<ILogger<DeviceBlocker>>();
+    return new DeviceBlocker(logger);
+});
+
+builder.Services.AddSingleton(sp =>
+{
     var config   = builder.Configuration;
     var logger   = sp.GetRequiredService<ILogger<PolicyEnforcer>>();
     var notif    = sp.GetRequiredService<NotificationService>();
     var iLogger  = sp.GetRequiredService<IncidentLogger>();
+    var blocker  = sp.GetRequiredService<DeviceBlocker>();
     var mode     = config["policy:mode"] ?? "warn";
     var expired  = config["policy:onExpiredWhitelist"] ?? "warn";
-    return new PolicyEnforcer(logger, notif, iLogger, mode, expired);
+    var contact  = config["notifications:toast:contactMessage"] ?? "Kontaktujte IT oddeleni";
+    return new PolicyEnforcer(logger, notif, iLogger, blocker, mode, expired, contact);
 });
 
 // Hlavní background service – WMI monitoring

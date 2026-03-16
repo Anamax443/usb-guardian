@@ -37,6 +37,12 @@ public class DeviceInfo
     /// <summary>Verze firmware zařízení</summary>
     public string FirmwareRevision { get; set; } = string.Empty;
 
+    /// <summary>
+    /// Písmena disků přiřazená tomuto médiu (např. ["F", "G"])
+    /// Zjišťuje se přes WMI Win32_DiskDrive → Win32_DiskPartition → Win32_LogicalDisk
+    /// </summary>
+    public List<string> DriveLetters { get; set; } = new();
+
     /// <summary>Čas připojení</summary>
     public DateTime ConnectedAt { get; set; } = DateTime.UtcNow;
 

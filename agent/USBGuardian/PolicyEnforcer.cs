@@ -2,8 +2,8 @@
 // PolicyEnforcer.cs
 // Rozhoduje co se stane když je detekováno nepovolené médium.
 // Chování řídí agent.config.json → žádná reinstalace při změně.
-// Fáze 1: pouze WARN
-// Fáze 2: přidáme BLOCK (zakomentovaná sekce označena)
+// policy.mode = "warn"  → pouze varování, médium funguje
+// policy.mode = "block" → médium uzamčeno přes DeviceIoControl
 // ============================================================
 
 using Microsoft.Extensions.Logging;
@@ -16,21 +16,27 @@ public class PolicyEnforcer
     private readonly ILogger<PolicyEnforcer> _logger;
     private readonly NotificationService _notification;
     private readonly IncidentLogger _incidentLogger;
-    private readonly string _mode;           // "warn" nebo "block"
-    private readonly string _onExpired;      // chování po expiraci whitelistu
+    private readonly DeviceBlocker _deviceBlocker;
+    private readonly string _mode;       // "warn" nebo "block"
+    private readonly string _onExpired;  // chování po expiraci whitelistu
+    private readonly string _contactMessage;
 
     public PolicyEnforcer(
         ILogger<PolicyEnforcer> logger,
         NotificationService notification,
         IncidentLogger incidentLogger,
+        DeviceBlocker deviceBlocker,
         string mode,
-        string onExpired)
+        string onExpired,
+        string contactMessage)
     {
-        _logger       = logger;
-        _notification = notification;
+        _logger         = logger;
+        _notification   = notification;
         _incidentLogger = incidentLogger;
-        _mode         = mode.ToLower();
-        _onExpired    = onExpired.ToLower();
+        _deviceBlocker  = deviceBlocker;
+        _mode           = mode.ToLower();
+        _onExpired      = onExpired.ToLower();
+        _contactMessage = contactMessage;
     }
 
     // --------------------------------------------------------
@@ -62,12 +68,7 @@ public class PolicyEnforcer
                 break;
 
             case IncidentAction.Blocked:
-                // ====================================================
-                // FÁZE 2 – BLOCK MODE (zatím neaktivní)
-                // HandleBlock(device);
-                // ====================================================
-                _logger.LogWarning("Block mode nakonfigurován ale ještě neimplementován – přechod na warn");
-                HandleWarn(device);
+                HandleBlock(device);
                 break;
         }
     }
@@ -81,7 +82,61 @@ public class PolicyEnforcer
             title: "Nepovolené paměťové médium",
             message: $"Médium \"{device.FriendlyName}\" nebylo schváleno IT oddělením.\n" +
                      "Může se jednat o bezpečnostní hrozbu.\n" +
-                     "Kontaktujte IT oddělení pro schválení.");
+                     _contactMessage);
+    }
+
+    // --------------------------------------------------------
+    // Block mode – médium uzamčeno přes DeviceIoControl
+    // Pokud nelze zjistit drive letter → fallback na warn
+    // --------------------------------------------------------
+    private void HandleBlock(DeviceInfo device)
+    {
+        if (device.DriveLetters.Count == 0)
+        {
+            _logger.LogWarning(
+                "Block mode: nelze zjistit drive letter pro {Device} – fallback na warn",
+                device.FriendlyName);
+            HandleWarn(device);
+            return;
+        }
+
+        var blockedLetters = new List<string>();
+        var failedLetters  = new List<string>();
+
+        // Zablokujeme každý drive letter přiřazený k médiu
+        foreach (var letter in device.DriveLetters)
+        {
+            var result = _deviceBlocker.BlockDrive(letter);
+
+            if (result.IsSuccess)
+            {
+                blockedLetters.Add(letter);
+                _logger.LogWarning("Drive {Letter}: zablokován", letter);
+            }
+            else
+            {
+                failedLetters.Add(letter);
+                _logger.LogError("Drive {Letter}: blokování selhalo – {Error}",
+                    letter, result.ErrorMessage);
+            }
+        }
+
+        // Notifikace uživateli
+        if (blockedLetters.Count > 0)
+        {
+            var drives = string.Join(", ", blockedLetters.Select(l => $"{l}:"));
+            _notification.ShowWarning(
+                title: "Přístup k médiu byl zablokován",
+                message: $"Médium \"{device.FriendlyName}\" ({drives}) nebylo schváleno IT oddělením.\n" +
+                         "Přístup byl zablokován z bezpečnostních důvodů.\n" +
+                         _contactMessage);
+        }
+
+        // Pokud blokování selhalo pro část disků → warn jako fallback
+        if (failedLetters.Count > 0)
+        {
+            HandleWarn(device);
+        }
     }
 
     // --------------------------------------------------------
@@ -96,7 +151,7 @@ public class PolicyEnforcer
             {
                 "strict_block" => IncidentAction.Blocked,
                 "block_new"    => IncidentAction.Blocked,
-                _              => IncidentAction.Warned    // default = warn
+                _              => IncidentAction.Warned
             };
         }
 
@@ -104,7 +159,7 @@ public class PolicyEnforcer
         return _mode switch
         {
             "block" => IncidentAction.Blocked,
-            _       => IncidentAction.Warned    // default = warn
+            _       => IncidentAction.Warned
         };
     }
 }

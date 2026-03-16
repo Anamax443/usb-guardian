@@ -13,22 +13,22 @@ což je nezbytné pro terénní pracovníky na hotspotu nebo mimo doménu.
 ## Architektura komponent
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    Windows Service                          │
-│                                                             │
-│  ┌──────────────┐    ┌───────────────┐    ┌─────────────┐  │
-│  │DeviceMonitor │───▶│WhitelistChecker│───▶│PolicyEnforcer│ │
-│  │  (WMI)       │    │  (JSON cache) │    │(warn/block) │  │
-│  └──────────────┘    └───────────────┘    └──────┬──────┘  │
-│                                                  │         │
-│                             ┌────────────────────┼──────┐  │
-│                             ▼                    ▼      │  │
-│                    ┌─────────────┐    ┌──────────────┐  │  │
-│                    │Notification │    │IncidentLogger│  │  │
-│                    │ Service     │    │  (SQLite)    │  │  │
-│                    │(Toast/Email)│    └──────────────┘  │  │
-│                    └─────────────┘                      │  │
-└─────────────────────────────────────────────────────────┘  │
+┌──────────────────────────────────────────────────────────────────┐
+│                        Windows Service                           │
+│                                                                  │
+│  ┌──────────────┐    ┌────────────────┐    ┌──────────────────┐  │
+│  │DeviceMonitor │───▶│WhitelistChecker│───▶│ PolicyEnforcer   │  │
+│  │  (WMI)       │    │  (JSON cache)  │    │ (warn / block)   │  │
+│  └──────────────┘    └────────────────┘    └────────┬─────────┘  │
+│                                                     │            │
+│                          ┌──────────────────────────┼────────┐   │
+│                          ▼                ▼          ▼        │   │
+│                 ┌──────────────┐  ┌────────────┐  ┌────────┐ │   │
+│                 │Notification  │  │Incident    │  │Device  │ │   │
+│                 │Service       │  │Logger      │  │Blocker │ │   │
+│                 │(Toast/Email) │  │(SQLite)    │  │(IOCTL) │ │   │
+│                 └──────────────┘  └────────────┘  └────────┘ │   │
+└──────────────────────────────────────────────────────────────┘   │
 ```
 
 ---
@@ -43,6 +43,7 @@ což je nezbytné pro terénní pracovníky na hotspotu nebo mimo doménu.
   - `USBSTOR\DISK&VEN_xxx&PROD_xxx` – storage zařízení (textové názvy)
 - **Filtr:** Přeskakuje interní disky (SATA, NVMe, SCSI)
 - **Data ze zařízení:** VendorId, ProductId, SerialNumber, FriendlyName, kapacita, firmware
+- **Drive letters:** WMI asociace `Win32_DiskDrive → Win32_DiskPartition → Win32_LogicalDisk`
 
 ### WhitelistChecker
 - **Zdroj:** JSON soubor `C:\ProgramData\USBGuardian\whitelist\whitelist.json`
@@ -53,9 +54,18 @@ což je nezbytné pro terénní pracovníky na hotspotu nebo mimo doménu.
 
 ### PolicyEnforcer
 - **Řídí se:** `policy.mode` v `agent.config.json`
-- **Fáze 1:** `warn` – uživatel dostane Toast, médium funguje
-- **Fáze 2:** `block` – médium zablokováno (připraveno v kódu, disabled)
-- **Degraded mód:** Při expiraci whitelistu dle `onExpiredWhitelist`
+- **warn:** uživatel dostane Toast, médium funguje
+- **block:** médium uzamčeno přes DeviceBlocker (DeviceIoControl)
+- **Fallback:** pokud nelze zjistit drive letter → automaticky přejde na warn
+- **Degraded mód:** při expiraci whitelistu dle `onExpiredWhitelist`
+
+### DeviceBlocker
+- **Technologie:** Win32 API – `DeviceIoControl` přes P/Invoke (`kernel32.dll`)
+- **Metoda:** `FSCTL_DISMOUNT_VOLUME` + `FSCTL_LOCK_VOLUME`
+- **Efekt:** Médium je vidět v systému ale nelze číst ani zapisovat
+- **Reverzibilní:** Odblokování zavřením handle – bez nutnosti odpojit zařízení
+- **Vyžaduje:** Admin práva (Windows Service musí běžet pod privilegovaným účtem)
+- **Fallback:** Pokud lock selže (médium aktivně používáno) → přejde na warn
 
 ### NotificationService
 - **Technologie:** Windows Toast Notification přes PowerShell
@@ -159,26 +169,30 @@ C:\ProgramData\USBGuardian\
 
 ## Fáze vývoje
 
-### ✅ Fáze 1 – Aktuální
+### ✅ Fáze 1 – Dokončeno
 - WMI monitoring USB/SD médií
-- Whitelist (lokální JSON soubor)
+- Whitelist (lokální JSON soubor, chráněný ACL)
 - Windows Toast notifikace
-- SQLite log incidentů
+- SQLite log incidentů (VendorId, ProductId, Serial, kapacita, firmware)
 - Konfigurovatelný warn/block mód
 
-### 🔜 Fáze 2 – Plánováno
-- Block mode (zablokování přístupu k médiu)
-- Email notifikace přes Microsoft Graph API (Shared Mailbox)
+### ✅ Fáze 2 – Dokončeno
+- Block mode – DeviceIoControl (FSCTL_DISMOUNT + FSCTL_LOCK)
+- Drive letter detection (WMI asociace)
+- Fallback warn při selhání blokování
+
+### 🔜 Fáze 3 – Plánováno
+- Email notifikace přes Microsoft Graph API (Shared Mailbox, bez extra licence)
 - Dočasný override kód od IT
 - Instalační skript s UAC elevation
 
-### 📋 Fáze 3 – Plánováno
+### 📋 Fáze 4 – Plánováno
 - Centrální REST API server
 - Synchronizace whitelistu z serveru
 - Synchronizace incidentů na SQL Server
 - RSA podpis whitelistu
 
-### 📋 Fáze 4 – Plánováno
+### 📋 Fáze 5 – Plánováno
 - Admin UI (React / Blazor)
 - Dashboard se statistikami
 - Správa whitelistu přes web
@@ -193,12 +207,41 @@ C:\ProgramData\USBGuardian\
 | Agent | C# / .NET | 8.0 |
 | Hosting | Windows Service | – |
 | Device detection | WMI / System.Management | – |
+| Block mode | Win32 DeviceIoControl / P/Invoke | – |
 | Local storage | SQLite / Microsoft.Data.Sqlite | 8.0 |
 | Notifications | PowerShell Toast | – |
-| Email (Fáze 2) | Microsoft Graph API / MSAL | – |
-| Server (Fáze 3) | Python FastAPI nebo .NET | TBD |
-| Database (Fáze 3) | SQL Server | TBD |
-| Admin UI (Fáze 4) | React nebo Blazor | TBD |
+| Email (Fáze 3) | Microsoft Graph API / MSAL | – |
+| Server (Fáze 4) | Python FastAPI nebo .NET | TBD |
+| Database (Fáze 4) | SQL Server | TBD |
+| Admin UI (Fáze 5) | React nebo Blazor | TBD |
+
+---
+
+## Struktura projektu
+
+```
+usb-guardian/
+├── agent/
+│   ├── USBGuardian.sln
+│   └── USBGuardian/
+│       ├── DeviceMonitor.cs        ← WMI listener, parsování, drive letters
+│       ├── WhitelistChecker.cs     ← porovnání s whitelistem, cache, expirace
+│       ├── PolicyEnforcer.cs       ← rozhodovací logika warn/block
+│       ├── DeviceBlocker.cs        ← blokování přes DeviceIoControl (P/Invoke)
+│       ├── NotificationService.cs  ← Windows Toast notifikace
+│       ├── IncidentLogger.cs       ← SQLite log incidentů
+│       ├── Program.cs              ← vstupní bod, DI konfigurace
+│       ├── Models/
+│       │   ├── DeviceInfo.cs       ← model zařízení (VID, PID, serial, kapacita, drive letters)
+│       │   ├── Incident.cs         ← model incidentu
+│       │   └── WhitelistEntry.cs   ← model záznamu whitelistu
+│       └── Config/
+│           └── agent.config.json   ← hlavní konfigurace
+├── whitelist/
+│   └── whitelist.json              ← ukázkový whitelist (kopírovat do ProgramData)
+└── docs/
+    └── architecture.md             ← tato dokumentace
+```
 
 ---
 
