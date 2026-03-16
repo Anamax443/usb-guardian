@@ -5,6 +5,7 @@
 // (přepínání dle přítomnosti --console argumentu).
 // ============================================================
 
+using System.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -41,11 +42,11 @@ builder.Services.AddSingleton(sp =>
 
 builder.Services.AddSingleton(sp =>
 {
-    var config = builder.Configuration;
-    var logger = sp.GetRequiredService<ILogger<IncidentLogger>>();
-    var dbPath = Path.Combine(exeDir,
-        config["logging:dbPath"] ?? @"logs\incidents.db");
-    return new IncidentLogger(logger, dbPath);
+    var config    = builder.Configuration;
+    var logger    = sp.GetRequiredService<ILogger<IncidentLogger>>();
+    var queuePath = config["logging:queuePath"]
+                    ?? @"C:\ProgramData\USBGuardian\queue";
+    return new IncidentLogger(logger, queuePath);
 });
 
 builder.Services.AddSingleton(sp =>
@@ -78,6 +79,38 @@ builder.Services.AddSingleton(sp =>
 
 // Hlavní background service – WMI monitoring
 builder.Services.AddHostedService<DeviceMonitor>();
+
+// ── Sync services – pouze pokud je syncUrl nakonfigurováno ───
+var syncUrl = builder.Configuration["whitelist:syncUrl"] ?? string.Empty;
+
+if (!string.IsNullOrEmpty(syncUrl))
+{
+    // Synchronizace whitelistu ze serveru
+    builder.Services.AddHostedService(sp =>
+    {
+        var config   = builder.Configuration;
+        var logger   = sp.GetRequiredService<ILogger<WhitelistSync>>();
+        var wlPath   = config["whitelist:localPath"]
+                       ?? @"C:\ProgramData\USBGuardian\whitelist\whitelist.json";
+        var interval = int.Parse(
+            config["whitelist:syncIntervalMinutes"] ?? "15");
+        return new WhitelistSync(logger, syncUrl, wlPath, interval);
+    });
+
+    // Odesílání incidentů na server
+    builder.Services.AddHostedService(sp =>
+    {
+        var logger        = sp.GetRequiredService<ILogger<IncidentSync>>();
+        var iLogger       = sp.GetRequiredService<IncidentLogger>();
+        return new IncidentSync(logger, syncUrl, iLogger);
+    });
+
+    Console.WriteLine($"Sync aktivní → {syncUrl}");
+}
+else
+{
+    Console.WriteLine("Sync vypnut (whitelist:syncUrl není nastaven)");
+}
 
 // ── Spuštění ─────────────────────────────────────────────────
 // Pokud běží jako Windows Service → UseWindowsService()

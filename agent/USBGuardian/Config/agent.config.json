@@ -6,7 +6,7 @@
   },
   "whitelist": {
     "localPath": "C:\\ProgramData\\USBGuardian\\whitelist\\whitelist.json",
-    "syncUrl": "",
+    "syncUrl": "http://YOUR_API_SERVER:5050",
     "syncIntervalMinutes": 15,
     "signatureVerification": false
   },
@@ -34,7 +34,7 @@
     }
   },
   "logging": {
-    "dbPath": "C:\\ProgramData\\USBGuardian\\logs\\incidents.db",
+    "queuePath": "C:\\ProgramData\\USBGuardian\\queue",
     "logLevel": "Information"
   }
 }

@@ -36,15 +36,18 @@ public class Incident
     public bool SentToServer { get; set; } = false;
 }
 
-/// <summary>Typ akce provedené při incidentu</summary>
+/// <summary>Typ akce provedené při připojení média</summary>
 public enum IncidentAction
 {
+    /// <summary>Médium povoleno – je na whitelistu</summary>
+    Allowed,
+
     /// <summary>Uživatel byl varován, médium funguje</summary>
     Warned,
 
-    /// <summary>Přístup k médiu byl zablokován (Fáze 2)</summary>
+    /// <summary>Přístup k médiu byl zablokován</summary>
     Blocked,
 
-    /// <summary>Dočasně povoleno override kódem od IT (Fáze 2)</summary>
+    /// <summary>Dočasně povoleno override kódem od IT (Fáze 3)</summary>
     TemporarilyAllowed
 }

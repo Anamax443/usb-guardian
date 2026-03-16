@@ -1,0 +1,18 @@
+{
+  // ============================================================
+  // appsettings.local.json – PŘÍKLAD lokálního přepisu
+  // Zkopírujte jako appsettings.local.json a upravte
+  // Tento soubor se NECOMMITUJE (.gitignore)
+  // ============================================================
+
+  "ConnectionStrings": {
+    "DefaultConnection": "Server=B-S-W-SQL-04;Database=USBGuardian;Integrated Security=true;TrustServerCertificate=true;"
+  },
+
+  "Authorization": {
+    "AllowedGroups": [
+      "AXINETWORK\\USB-Guardian-Clients",
+      "AXINETWORK\\SQL Admins2"
+    ]
+  }
+}

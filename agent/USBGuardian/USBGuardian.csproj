@@ -28,4 +28,11 @@
     <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="8.0.0" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Kopírovat config do output složky při každém buildu -->
+    <None Update="Config\agent.config.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
 </Project>

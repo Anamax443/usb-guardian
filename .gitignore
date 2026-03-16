@@ -5,8 +5,12 @@ obj/
 *.suo
 .vs/
 
-# Lokální konfigurace s tajnými údaji - NIKDY necommitovat
+# Lokální konfigurace – NIKDY necommitovat (obsahují doménové názvy, servery)
 agent/USBGuardian/Config/agent.config.local.json
+server/USBGuardian.Api/appsettings.local.json
+
+# Publikované výstupy
+publish/
 
 # SQLite databáze incidentů (lokální data)
 *.db

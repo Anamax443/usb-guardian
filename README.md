@@ -151,18 +151,39 @@ Klíč pro whitelist: `VendorId:ProductId:SerialNumber` (case-insensitive)
 
 ## Konfigurace
 
-Soubor: `agent\USBGuardian\Config\agent.config.json`
+### Přístup bez hardcoded hodnot
 
-| Klíč | Hodnoty | Popis |
+Projekt neobsahuje žádné hardcoded názvy domén, serverů ani skupin. Vše je konfigurovatelné – projekt lze bezpečně publikovat jako open source.
+
+**Agent** – `agent\USBGuardian\Config\agent.config.json`:
+
+| Klíč | Výchozí | Popis |
 |------|---------|-------|
-| `policy.mode` | `warn` / `block` | Warn = varovat, Block = zablokovat (Fáze 2) |
-| `policy.maxOfflineAgeDays` | číslo | Po kolika dnech offline přejít do degraded módu |
-| `policy.onExpiredWhitelist` | `warn` / `block_new` / `strict_block` | Chování po expiraci whitelistu |
-| `notifications.toast.enabled` | `true` / `false` | Windows Toast notifikace |
-| `notifications.toast.contactMessage` | text | Zpráva zobrazená uživateli |
-| `notifications.email.enabled` | `true` / `false` | Email notifikace (Fáze 2) |
-| `logging.dbPath` | cesta | Cesta k SQLite databázi incidentů |
-| `logging.logLevel` | `Debug` / `Information` / `Warning` | Úroveň logování |
+| `policy.mode` | `warn` | `warn` = varovat, `block` = zablokovat |
+| `policy.maxOfflineAgeDays` | `30` | Max stáří whitelistu offline |
+| `policy.onExpiredWhitelist` | `warn` | `warn` / `block_new` / `strict_block` |
+| `whitelist.syncUrl` | `http://YOUR_API_SERVER:5050` | URL API serveru |
+| `whitelist.syncIntervalMinutes` | `15` | Interval synchronizace |
+| `notifications.toast.enabled` | `true` | Windows Toast notifikace |
+| `notifications.toast.contactMessage` | text | Zpráva uživateli |
+| `logging.queuePath` | `C:\ProgramData\USBGuardian\queue` | Složka pro denní log soubory |
+
+**API Server** – `server\USBGuardian.Api\appsettings.json`:
+
+| Klíč | Popis |
+|------|-------|
+| `ConnectionStrings.DefaultConnection` | SQL Server connection string (Integrated Security) |
+| `Authorization.AllowedGroups` | AD skupiny s přístupem k API |
+| `Urls` | Port API serveru |
+
+### Lokální přepisy (necommitují se)
+
+```
+agent/USBGuardian/Config/agent.config.local.json      ← přepis pro agenta
+server/USBGuardian.Api/appsettings.local.json          ← přepis pro API server
+```
+
+Viz `*.example` soubory jako šablonu.
 
 ## Datové úložiště
 
@@ -171,17 +192,25 @@ Soubor: `agent\USBGuardian\Config\agent.config.json`
 C:\ProgramData\USBGuardian\whitelist\whitelist.json
 ```
 - Pouze IT admin má write přístup (Administrators + SYSTEM)
-- Uživatelé mají pouze read přístup
-- Obsahuje seznam schválených médií s metadaty
+- Automaticky synchronizován ze serveru každých 15 minut
 
-### Log incidentů
+### Log fronty (denní soubory)
 ```
-C:\ProgramData\USBGuardian\logs\incidents.db
+C:\ProgramData\USBGuardian\queue\log_HOSTNAME_2026-03-16.json
 ```
-- SQLite databáze – jeden soubor, nulová instalace
-- Funguje plně offline
-- Ve Fázi 3 bude synchronizována na centrální SQL Server
-- Uložená data: čas, PC, uživatel, zařízení (výrobce, model, serial, kapacita, firmware), akce
+- Denní JSON soubory – jedno připojení = jeden záznam
+- Loguje VŠE: povolená i nepovolená média
+- Po úspěšném odeslání na server soubor smazán
+- Při výpadku sítě soubor zůstane a sync zkusí příště
+- Soubory starší 3 měsíce automaticky smazány
+
+### Centrální databáze
+```
+SQL Server → databáze USBGuardian
+  → tabulka Incidents  (všechna připojení)
+  → tabulka WhitelistDevices (schválená média)
+  → tabulka Computers  (evidence stanic)
+```
 
 ## Struktura projektu
 

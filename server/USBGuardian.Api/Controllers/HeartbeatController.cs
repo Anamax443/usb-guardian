@@ -13,6 +13,7 @@ namespace USBGuardian.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
+[Microsoft.AspNetCore.Authorization.Authorize(Policy = "USBGuardianClients")]
 public class HeartbeatController : ControllerBase
 {
     private readonly AppDbContext _db;

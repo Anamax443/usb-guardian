@@ -200,24 +200,22 @@ public class DeviceMonitor : BackgroundService
     }
 
     // --------------------------------------------------------
-    // Zpracování zařízení – whitelist + policy
+    // Zpracování zařízení – whitelist + policy + log vždy
     // --------------------------------------------------------
     private void ProcessDevice(DeviceInfo device)
     {
         var wlStatus  = _whitelistChecker.GetStatus();
         var isAllowed = _whitelistChecker.IsAllowed(device);
 
-        if (!isAllowed)
-        {
-            _policyEnforcer.HandleUnauthorizedDevice(
-                device,
-                _whitelistChecker.GetVersion(),
-                wlStatus);
-        }
-        else
-        {
+        // Logujeme VŠE – povolená i nepovolená (kompletní audit trail)
+        _policyEnforcer.HandleDevice(
+            device,
+            _whitelistChecker.GetVersion(),
+            isAllowed,
+            wlStatus);
+
+        if (isAllowed)
             _logger.LogInformation("Médium povoleno: {Device}", device);
-        }
     }
 
     // --------------------------------------------------------

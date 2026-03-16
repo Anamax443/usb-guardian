@@ -1,0 +1,11 @@
+{
+  // ============================================================
+  // agent.config.local.json – PŘÍKLAD lokálního přepisu
+  // Zkopírujte jako agent.config.local.json a upravte
+  // Tento soubor se NECOMMITUJE (.gitignore)
+  // ============================================================
+
+  "whitelist": {
+    "syncUrl": "http://B-S-W-SQL-04:5050"
+  }
+}

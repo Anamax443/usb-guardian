@@ -263,6 +263,59 @@ DEGRADED → whitelist expiroval
 
 ---
 
+## Konfigurace bez hardcoded hodnot (Open Source ready)
+
+Projekt neobsahuje žádné hardcoded názvy domén, serverů, skupin ani hesla.
+Lze bezpečně publikovat jako open source nebo sdílet mezi organizacemi.
+
+### Princip
+
+```
+Repozitář (veřejný)          Lokální přepis (NECOMMITUJE SE)
+─────────────────────        ──────────────────────────────
+agent.config.json            agent.config.local.json
+  syncUrl: YOUR_API_SERVER     syncUrl: http://B-S-W-SQL-04:5050
+
+appsettings.json             appsettings.local.json
+  Server: YOUR_SQL_SERVER      Server: B-S-W-SQL-04
+  AllowedGroups: YOUR_DOMAIN   AllowedGroups: AXINETWORK\...
+```
+
+### Co patří do repozitáře
+
+```
+✅ agent.config.json              – šablona s YOUR_* placeholdery
+✅ appsettings.json               – šablona s YOUR_* placeholdery
+✅ *.example soubory              – příklady lokálních přepisů
+✅ .gitignore                     – chrání *.local.json soubory
+✅ Kód                            – žádné hardcoded hodnoty
+```
+
+### Co NEPATŘÍ do repozitáře
+
+```
+❌ agent.config.local.json        – obsahuje skutečný hostname serveru
+❌ appsettings.local.json         – obsahuje název domény a SQL Serveru
+❌ whitelist.json v ProgramData   – firemní data
+❌ queue/*.json                   – záznamy připojení
+```
+
+### Autentizace – proč žádná hesla
+
+```
+Agent → API Server:
+  Windows Authentication (Kerberos)
+  Agent se prezentuje jako HOSTNAME$ (účet počítače v AD)
+  Žádné heslo – AD ověřuje automaticky
+
+API Server → SQL Server:
+  Integrated Security (gMSA účet)
+  gMSA heslo rotuje automaticky – AD spravuje
+  Connection string neobsahuje heslo
+
+→ Lze bezpečně commitovat connection stringy do repozitáře
+```
+
 ## Zabezpečení dat
 
 ### Adresář ProgramData

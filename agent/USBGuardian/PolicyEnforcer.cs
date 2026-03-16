@@ -40,38 +40,57 @@ public class PolicyEnforcer
     }
 
     // --------------------------------------------------------
-    // Hlavní vstupní bod – zavolá se při detekci neznámého média
+    // Hlavní vstupní bod – zavolá se při detekci jakéhokoli média
+    // Logujeme VŠE – povolená i nepovolená
     // --------------------------------------------------------
-    public void HandleUnauthorizedDevice(DeviceInfo device, string whitelistVersion,
-        WhitelistStatus whitelistStatus = WhitelistStatus.Valid)
+    public void HandleDevice(DeviceInfo device, string whitelistVersion,
+        bool isAllowed, WhitelistStatus whitelistStatus = WhitelistStatus.Valid)
     {
+        if (isAllowed)
+        {
+            // Povolené médium – zalogujeme jako Allowed
+            var allowedIncident = new Incident
+            {
+                Device           = device,
+                Action           = IncidentAction.Allowed,
+                WhitelistVersion = whitelistVersion
+            };
+            _incidentLogger.LogConnection(allowedIncident);
+            return;
+        }
+
+        // Nepovolené médium
         _logger.LogWarning(
             "Neautorizované médium: {Device} | Uživatel: {User} | PC: {Host}",
             device, Environment.UserName, Environment.MachineName);
 
         var action = DetermineAction(whitelistStatus);
 
-        // Zalogovat incident do SQLite
         var incident = new Incident
         {
             Device           = device,
             Action           = action,
             WhitelistVersion = whitelistVersion
         };
-        _incidentLogger.LogIncident(incident);
+        _incidentLogger.LogConnection(incident);
 
-        // Provést akci dle policy
         switch (action)
         {
             case IncidentAction.Warned:
                 HandleWarn(device);
                 break;
-
             case IncidentAction.Blocked:
                 HandleBlock(device);
                 break;
         }
     }
+
+    // --------------------------------------------------------
+    // Zpětná kompatibilita – pro nepovolená média
+    // --------------------------------------------------------
+    public void HandleUnauthorizedDevice(DeviceInfo device, string whitelistVersion,
+        WhitelistStatus whitelistStatus = WhitelistStatus.Valid)
+        => HandleDevice(device, whitelistVersion, false, whitelistStatus);
 
     // --------------------------------------------------------
     // Warn mode – uživatel dostane notifikaci, médium funguje
