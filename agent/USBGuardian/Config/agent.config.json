@@ -5,7 +5,7 @@
     "onExpiredWhitelist": "warn"
   },
   "whitelist": {
-    "localPath": "whitelist\\whitelist.json",
+    "localPath": "C:\\ProgramData\\USBGuardian\\whitelist\\whitelist.json",
     "syncUrl": "",
     "syncIntervalMinutes": 15,
     "signatureVerification": false
@@ -34,7 +34,7 @@
     }
   },
   "logging": {
-    "dbPath": "logs\\incidents.db",
+    "dbPath": "C:\\ProgramData\\USBGuardian\\logs\\incidents.db",
     "logLevel": "Information"
   }
 }
