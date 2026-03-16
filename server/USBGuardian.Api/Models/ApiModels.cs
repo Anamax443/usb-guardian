@@ -1,0 +1,68 @@
+// ============================================================
+// ApiModels.cs
+// DTO modely pro REST API komunikaci agent ↔ server
+// ============================================================
+
+namespace USBGuardian.Api.Models;
+
+// ── Agent → Server: odeslání incidentů ───────────────────────
+public class IncidentBatchRequest
+{
+    /// <summary>Hostname odesílajícího agenta</summary>
+    public string Hostname { get; set; } = string.Empty;
+
+    /// <summary>Verze agenta</summary>
+    public string AgentVersion { get; set; } = string.Empty;
+
+    /// <summary>Seznam incidentů (batch pro úsporu požadavků)</summary>
+    public List<IncidentDto> Incidents { get; set; } = new();
+}
+
+public class IncidentDto
+{
+    public DateTime Timestamp { get; set; }
+    public string Username { get; set; } = string.Empty;
+    public string VendorId { get; set; } = string.Empty;
+    public string ProductId { get; set; } = string.Empty;
+    public string SerialNumber { get; set; } = string.Empty;
+    public string FriendlyName { get; set; } = string.Empty;
+    public string DeviceType { get; set; } = string.Empty;
+    public long SizeBytes { get; set; }
+    public string FirmwareRevision { get; set; } = string.Empty;
+    public string PnpDeviceId { get; set; } = string.Empty;
+    public string Action { get; set; } = string.Empty;
+    public string WhitelistVersion { get; set; } = string.Empty;
+}
+
+// ── Server → Agent: whitelist ─────────────────────────────────
+public class WhitelistResponse
+{
+    public string Version { get; set; } = string.Empty;
+    public DateTime IssuedAt { get; set; }
+    public DateTime ValidUntil { get; set; }
+    public string Signature { get; set; } = string.Empty;
+    public List<WhitelistDeviceDto> Devices { get; set; } = new();
+}
+
+public class WhitelistDeviceDto
+{
+    public string VendorId { get; set; } = string.Empty;
+    public string ProductId { get; set; } = string.Empty;
+    public string SerialNumber { get; set; } = string.Empty;
+    public string Description { get; set; } = string.Empty;
+    public DateTime ApprovedAt { get; set; }
+    public string ApprovedBy { get; set; } = string.Empty;
+}
+
+// ── Server → Agent: heartbeat odpověď ────────────────────────
+public class HeartbeatResponse
+{
+    /// <summary>Aktuální verze whitelistu na serveru</summary>
+    public string CurrentWhitelistVersion { get; set; } = string.Empty;
+
+    /// <summary>True pokud agent má zastaralý whitelist</summary>
+    public bool WhitelistUpdateAvailable { get; set; }
+
+    /// <summary>Serverový čas pro sync</summary>
+    public DateTime ServerTime { get; set; } = DateTime.UtcNow;
+}

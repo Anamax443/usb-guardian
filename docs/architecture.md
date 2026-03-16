@@ -347,3 +347,224 @@ Pro kompletní reinstalaci ze zdrojového kódu:
 Všechna konfigurace je v gitu. Jediné co není v gitu:
 - `C:\ProgramData\USBGuardian\whitelist\whitelist.json` – záloha whitelistu
 - `C:\ProgramData\USBGuardian\logs\incidents.db` – historická data incidentů
+
+---
+
+## Server – REST API (Fáze 3)
+
+### Technologie
+- **Framework:** ASP.NET Core 8.0 Web API
+- **Hosting:** Windows Service
+- **Databáze:** SQL Server 16 (`B-S-W-SQL-04`, databáze `USBGuardian`)
+- **ORM:** Dapper (lightweight, rychlý)
+- **Auth DB:** Windows Authentication přes gMSA (`AXINETWORK\gmsa-SQLS$`)
+- **Auth API:** API klíč v hlavičce `X-Api-Key` (GUID per stanice)
+
+### API Endpointy
+
+| Method | Endpoint | Popis |
+|--------|----------|-------|
+| GET | `/health` | Health check – agent testuje dostupnost |
+| GET | `/api/whitelist` | Agent stáhne aktuální whitelist |
+| POST | `/api/whitelist/device` | IT admin přidá zařízení |
+| POST | `/api/incidents/batch` | Agent odešle batch incidentů |
+| GET | `/api/incidents/stats` | Statistiky pro dashboard |
+
+### Databázové schéma
+
+| Tabulka | Popis |
+|---------|-------|
+| `Whitelist` | Schválená média (VID, PID, Serial, metadata) |
+| `WhitelistVersion` | Historie verzí – každá změna = nová verze |
+| `Incidents` | Log incidentů ze všech stanic |
+| `Agents` | Evidence stanic + API klíče |
+
+### Offline provoz agenta
+Agent testuje `/health` každých 15 minut.
+- **Online:** sync whitelistu + odeslání čekajících incidentů
+- **Offline:** lokální SQLite cache, `SentToServer = 0`
+- **Reconnect:** automatický batch upload všech čekajících incidentů
+
+---
+
+## Tok dat systémem – detailní popis
+
+### Přehled účastníků
+
+```
+[Firemní stanice]          [Síť]          [Server]              [Databáze]
+  Agent                                    REST API              SQL Server
+  (Windows Service)                        (Windows Service)     USBGuardian
+  běží jako: SYSTEM        HTTPS:5050      běží jako: gmsa-SQL$  B-S-W-SQL-04
+  lokální: SQLite                          Windows Auth
+```
+
+---
+
+### Scénář 1 – Agent ONLINE, médium vloženo
+
+```
+1. Uživatel zasune USB médium
+       ↓
+2. Windows WMI event → DeviceMonitor detekuje zařízení
+   → přečte: VendorId, ProductId, SerialNumber, kapacita, PnpDeviceId
+       ↓
+3. WhitelistChecker porovná s lokálním whitelist.json
+   (lokální cache, platná 5 minut)
+       ↓
+   ┌─────────────────┐         ┌──────────────────────────┐
+   │ NA WHITELISTU   │         │ NENÍ NA WHITELISTU        │
+   │ → log "Allowed" │         │ → PolicyEnforcer          │
+   │ → nic dalšího   │         │   warn: Toast notifikace  │
+   └─────────────────┘         │   block: Disable-PnpDevice│
+                               │ → IncidentLogger          │
+                               │   uloží do SQLite         │
+                               │   SentToServer = 0        │
+                               └──────────────────────────┘
+       ↓
+4. WhitelistSync (background thread, každých 15 min)
+   → GET http://api-server:5050/api/heartbeat
+     ?hostname=PC-01&whitelistVersion=2026-03-16-v1
+   ← { whitelistUpdateAvailable: true, currentVersion: "v2" }
+       ↓
+5. Pokud nová verze whitelistu:
+   → GET http://api-server:5050/api/whitelist
+   ← JSON s novým whitelistem
+   → uloží do lokálního whitelist.json (přepíše)
+       ↓
+6. IncidentSync (background thread)
+   → vezme všechny incidenty kde SentToServer = 0
+   → POST http://api-server:5050/api/incidents
+     { hostname, agentVersion, incidents: [...] }
+   ← { accepted: 3 }
+   → označí incidenty jako SentToServer = 1
+```
+
+---
+
+### Scénář 2 – Agent OFFLINE (hotspot, domácí síť)
+
+```
+1. USB médium vloženo → stejná detekce jako online
+       ↓
+2. WhitelistChecker použije lokální cached whitelist.json
+   → porovnání proběhne lokálně bez sítě
+       ↓
+3. Incident uložen do SQLite, SentToServer = 0
+       ↓
+4. WhitelistSync se pokouší každých 15 min:
+   → ping na api-server selže (timeout)
+   → agent zůstane v offline stavu
+   → whitelist cache stárne
+       ↓
+5. Whitelist expiruje (ValidUntil):
+   → dle policy.onExpiredWhitelist:
+      "warn"         → stále funguje, jen loguje
+      "block_new"    → nová neznámá média blokuje
+      "strict_block" → blokuje vše
+       ↓
+6. Notebook se vrátí na firemní síť:
+   → ConnectivityChecker detekuje dostupnost API
+   → okamžitý sync whitelistu
+   → batch upload všech pending incidentů
+```
+
+---
+
+### Scénář 3 – IT admin přidá nové médium do whitelistu
+
+```
+IT admin (SSMS nebo budoucí Admin UI)
+       ↓
+POST /api/whitelist/devices
+{ vendorId, productId, serialNumber, description, approvedBy }
+       ↓
+REST API (běží jako AXINETWORK\gmsa-SQL$)
+   → ověří duplicitu
+   → INSERT do WhitelistDevices
+   → vytvoří novou WhitelistVersion (verze bump)
+   → SQL Server zapíše přes gMSA účet
+       ↓
+Při příštím heartbeatu agentů:
+   → všechny online agenty detekují novou verzi
+   → stáhnou aktualizovaný whitelist
+   → uloží lokálně
+       ↓
+Offline agenti:
+   → dostanou novou verzi při příštím připojení
+   → do té doby fungují se starou cached verzí
+```
+
+---
+
+### Identita a oprávnění – kdo co smí
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ Komponenta          │ Účet              │ Oprávnění          │
+├─────────────────────┼───────────────────┼────────────────────┤
+│ Agent (Windows Svc) │ SYSTEM            │ lokální PC, WMI    │
+│                     │                   │ PnpDevice disable  │
+│                     │                   │ HTTP client → API  │
+├─────────────────────┼───────────────────┼────────────────────┤
+│ REST API (Win Svc)  │ AXINETWORK\       │ db_datareader      │
+│                     │ gmsa-SQL$         │ db_datawriter      │
+│                     │                   │ POUZE USBGuardian  │
+├─────────────────────┼───────────────────┼────────────────────┤
+│ IT admin (SSMS/UI)  │ AXINETWORK\       │ db_datareader      │
+│                     │ trnkam (nebo      │ db_datawriter      │
+│                     │ IT skupina)       │ POUZE USBGuardian  │
+├─────────────────────┼───────────────────┼────────────────────┤
+│ SQL Server          │ –                 │ hostuje DB         │
+│ B-S-W-SQL-04        │                   │ přijímá pouze      │
+│                     │                   │ Windows Auth       │
+└─────────────────────┴───────────────────┴────────────────────┘
+```
+
+---
+
+### Komunikační kanály
+
+```
+Agent → REST API:
+  Protokol:    HTTP (HTTPS v produkci s certifikátem)
+  Port:        5050
+  Auth:        Windows Authentication (Negotiate/Kerberos)
+  Směr:        jednosměrně agent → server
+  Frekvence:   heartbeat každých 15 min
+               incident batch při každém online eventu
+
+REST API → SQL Server:
+  Protokol:    TDS (SQL Server Native)
+  Port:        1433
+  Auth:        Windows Authentication (gMSA účet)
+  Směr:        jednosměrně API → DB
+  Poznámka:    gMSA heslo rotuje automaticky (AD spravuje)
+
+Agent → lokální SQLite:
+  Protokol:    přímý soubor
+  Umístění:    C:\ProgramData\USBGuardian\logs\incidents.db
+  Účel:        offline buffer, nikdy se neztratí data
+```
+
+---
+
+### Co se stane při výpadku serveru
+
+```
+REST API server nedostupný:
+  → Agent funguje normálně (offline-first design)
+  → Incidenty se hromadí v SQLite (SentToServer = 0)
+  → Whitelist funguje z cache (platný do ValidUntil)
+  → Po obnovení serveru: automatický sync bez zásahu
+
+SQL Server nedostupný:
+  → REST API vrátí HTTP 500
+  → Agent přejde do offline módu
+  → Stejný efekt jako výpadek API serveru
+
+Výpadek agenta (restart PC):
+  → Windows Service se automaticky restartuje
+  → SQLite data jsou persistentní (přežijí restart)
+  → Při startu: okamžitý sync pokud je online
+```
