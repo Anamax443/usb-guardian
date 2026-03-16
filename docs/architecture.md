@@ -423,14 +423,81 @@ Pro kompletní reinstalaci ze zdrojového kódu:
 1. Klonovat repo: `git clone https://github.com/Anamax443/usb-guardian.git`
 2. Vytvořit složky v ProgramData (viz README – Instalace)
 3. Zkopírovat `whitelist\whitelist.json` do `C:\ProgramData\USBGuardian\whitelist\`
-4. Editovat `agent\USBGuardian\Config\agent.config.json` – zkontrolovat cesty
+4. Editovat `agent\USBGuardian\Config\agent.config.local.json` – nastavit syncUrl
 5. Buildovat: `cd agent\USBGuardian && dotnet build`
 6. Spustit: `dotnet run -- --console` (vývojový režim)
 7. Nebo nainstalovat jako service (produkce) – viz README
 
 Všechna konfigurace je v gitu. Jediné co není v gitu:
 - `C:\ProgramData\USBGuardian\whitelist\whitelist.json` – záloha whitelistu
-- `C:\ProgramData\USBGuardian\logs\incidents.db` – historická data incidentů
+- `C:\ProgramData\USBGuardian\queue\*.json` – záznamy čekající na sync
+
+---
+
+## Nasazení API serveru
+
+### Proč SMB nefunguje (C$)
+
+SQL server `B-S-W-SQL-04` má záměrně **vypnuté SMB/File and Printer Sharing** ve firewallu:
+
+```
+Důvod: Bezpečnostní hardening DB serverů
+  → SMB na DB serveru = bezpečnostní riziko
+  → Útočník přes SMB může číst/zapisovat soubory
+  → Standardní praxe: SMB na DB serverech vypnout
+  → NEMĚŇTE toto nastavení
+```
+
+### Správný způsob nasazení – SCP přes SSH
+
+Server má otevřený **port 22 (SSH/SCP)** – použijte tento způsob vždy:
+
+```powershell
+# 1. Publishnout API na dev stroji
+cd D:\git\usb-guardian\server\USBGuardian.Api
+dotnet publish -c Release -r win-x64 --self-contained -o "D:\deploy\USBGuardian.Api"
+
+# 2. Zkopírovat na server přes SCP
+scp -r "D:\deploy\USBGuardian.Api" admintrnka@B-S-W-SQL-04:/C:/USBGuardian.Api
+```
+
+### Instalace Windows Service na serveru (přes SSH)
+
+```powershell
+# Připojit se na server
+ssh admintrnka@B-S-W-SQL-04
+
+# Na serveru – nainstalovat Windows Service pod gMSA účtem
+sc.exe create "USB Guardian API" `
+    binPath="C:\USBGuardian.Api\USBGuardian.Api.exe" `
+    obj="AXINETWORK\gmsa-SQL$" `
+    start=auto
+
+# Otevřít port 5050 ve firewallu
+New-NetFirewallRule -DisplayName "USB Guardian API" `
+    -Direction Inbound -Protocol TCP -LocalPort 5050 -Action Allow
+
+# Nakonfigurovat appsettings.local.json
+# (zkopírovat ze šablony a upravit)
+
+# Spustit service
+Start-Service "USB Guardian API"
+Get-Service "USB Guardian API"
+```
+
+### Ověření po nasazení
+
+```powershell
+# Test SSH konektivity
+ssh admintrnka@B-S-W-SQL-04 "hostname && whoami"
+
+# Test API dostupnosti
+Test-NetConnection -ComputerName B-S-W-SQL-04 -Port 5050
+
+# Test API endpointu
+Invoke-WebRequest -Uri "http://B-S-W-SQL-04:5050/api/whitelist/version" `
+    -UseDefaultCredentials -AllowUnencryptedAuthentication
+```
 
 ---
 
