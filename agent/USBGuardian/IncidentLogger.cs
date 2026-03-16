@@ -2,9 +2,9 @@
 // IncidentLogger.cs
 // Loguje VŠECHNA připojení médií (povolená i nepovolená).
 // Ukládá do denních JSON souborů ve frontě.
-// Formát: log_2026-03-16.json
-// Soubory starší 3 měsíce se automaticky mažou.
-// IncidentSync odesílá uzavřené soubory (ne aktuální den).
+// Formát: log_HOSTNAME_2026-03-16.json
+// Po odeslání přesune do sent\ složky (ne smaže) – audit trail.
+// Sent soubory starší sentRetentionDays se automaticky mažou.
 // ============================================================
 
 using System.Text.Json;
@@ -17,22 +17,28 @@ public class IncidentLogger
 {
     private readonly ILogger<IncidentLogger> _logger;
     private readonly string _queuePath;
-
-    // Maximální stáří souborů – starší se smažou automaticky
-    private const int MaxAgeDays = 90; // 3 měsíce
+    private readonly string _sentPath;
+    private readonly int _sentRetentionDays;
 
     // Zámek pro thread-safe zápis do denního souboru
     private readonly object _writeLock = new();
 
-    public IncidentLogger(ILogger<IncidentLogger> logger, string queuePath)
+    public IncidentLogger(
+        ILogger<IncidentLogger> logger,
+        string queuePath,
+        string sentPath,
+        int sentRetentionDays = 90)
     {
-        _logger    = logger;
-        _queuePath = queuePath;
+        _logger            = logger;
+        _queuePath         = queuePath;
+        _sentPath          = sentPath;
+        _sentRetentionDays = sentRetentionDays;
 
         Directory.CreateDirectory(_queuePath);
+        Directory.CreateDirectory(_sentPath);
 
-        // Při startu uklidíme staré soubory
-        CleanupOldFiles();
+        // Při startu uklidíme staré sent soubory
+        CleanupSentFiles();
     }
 
     // --------------------------------------------------------
@@ -84,7 +90,6 @@ public class IncidentLogger
 
         lock (_writeLock)
         {
-            // Načteme existující denní log nebo vytvoříme nový
             DailyLog daily;
 
             if (File.Exists(filePath))
@@ -99,7 +104,7 @@ public class IncidentLogger
                 daily = new DailyLog
                 {
                     Date     = today.ToString("yyyy-MM-dd"),
-                    Hostname = Environment.MachineName
+                    Hostname = hostname
                 };
             }
 
@@ -117,7 +122,7 @@ public class IncidentLogger
 
     // --------------------------------------------------------
     // Vrátí seznam souborů připravených k odeslání
-    // = všechny soubory KROMĚ dnešního (ten se ještě zapisuje)
+    // = všechny soubory KROMĚ dnešního
     // --------------------------------------------------------
     public List<string> GetFilesReadyToSync()
     {
@@ -128,8 +133,7 @@ public class IncidentLogger
             .GetFiles(_queuePath, $"log_{hostname}_*.json")
             .Where(f =>
             {
-                var name = Path.GetFileNameWithoutExtension(f);
-                // Formát: log_HOSTNAME_2026-03-16 → datum je poslední část
+                var name  = Path.GetFileNameWithoutExtension(f);
                 var parts = name.Split('_');
                 if (parts.Length >= 3 &&
                     DateTime.TryParse(parts[^1], out var fileDate))
@@ -141,37 +145,47 @@ public class IncidentLogger
     }
 
     // --------------------------------------------------------
-    // Smazání souboru po úspěšném odeslání
+    // Přesune odeslaný soubor do sent\ složky (audit trail)
     // --------------------------------------------------------
-    public void DeleteFile(string filePath)
+    public void MoveTeSent(string filePath)
     {
         try
         {
-            File.Delete(filePath);
-            _logger.LogDebug("Soubor smazán po odeslání: {File}",
-                Path.GetFileName(filePath));
+            var fileName = Path.GetFileName(filePath);
+            var sentPath = Path.Combine(_sentPath, fileName);
+
+            // Pokud soubor se stejným názvem v sent\ existuje, přidáme timestamp
+            if (File.Exists(sentPath))
+                sentPath = Path.Combine(_sentPath,
+                    $"{Path.GetFileNameWithoutExtension(fileName)}_{DateTime.UtcNow:HHmmss}.json");
+
+            File.Move(filePath, sentPath);
+
+            _logger.LogDebug("Soubor přesunut do sent: {File}", fileName);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Nelze smazat soubor: {File}", filePath);
+            _logger.LogWarning(ex, "Nelze přesunout soubor do sent: {File}",
+                Path.GetFileName(filePath));
         }
     }
 
     // --------------------------------------------------------
-    // Úklid souborů starších 3 měsíce
+    // Úklid sent\ souborů starších sentRetentionDays
     // --------------------------------------------------------
-    private void CleanupOldFiles()
+    private void CleanupSentFiles()
     {
         try
         {
-            var cutoff  = DateTime.UtcNow.Date.AddDays(-MaxAgeDays);
-            var files   = Directory.GetFiles(_queuePath, "log_*.json");
+            var cutoff  = DateTime.UtcNow.Date.AddDays(-_sentRetentionDays);
+            var files   = Directory.GetFiles(_sentPath, "log_*.json");
             var deleted = 0;
 
             foreach (var file in files)
             {
                 var name  = Path.GetFileNameWithoutExtension(file);
                 var parts = name.Split('_');
+                // Datum je třetí část: log_HOSTNAME_2026-03-15
                 if (parts.Length >= 3 &&
                     DateTime.TryParse(parts[^1], out var fileDate))
                 {
@@ -185,17 +199,17 @@ public class IncidentLogger
 
             if (deleted > 0)
                 _logger.LogInformation(
-                    "Uklidil {Count} souborů starších {Days} dní",
-                    deleted, MaxAgeDays);
+                    "Uklidil {Count} sent souborů starších {Days} dní",
+                    deleted, _sentRetentionDays);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Chyba při úklidu starých souborů");
+            _logger.LogWarning(ex, "Chyba při úklidu sent složky");
         }
     }
 
     // --------------------------------------------------------
-    // Statistika fronty (pro log při startu)
+    // Statistika fronty
     // --------------------------------------------------------
     public (int files, int totalRecords) GetQueueStats()
     {
@@ -229,10 +243,10 @@ public class IncidentLogger
 
 public class DailyLog
 {
-    public string       Date        { get; set; } = string.Empty;
-    public string       Hostname    { get; set; } = string.Empty;
-    public int          RecordCount { get; set; }
-    public List<DeviceRecord> Records { get; set; } = new();
+    public string            Date        { get; set; } = string.Empty;
+    public string            Hostname    { get; set; } = string.Empty;
+    public int               RecordCount { get; set; }
+    public List<DeviceRecord> Records   { get; set; } = new();
 }
 
 public class DeviceRecord

@@ -107,23 +107,23 @@ public class IncidentSync : BackgroundService
 
         try
         {
-            // Načteme denní log
             var json    = await File.ReadAllTextAsync(filePath);
             var daily   = JsonSerializer.Deserialize<DailyLog>(json,
                 new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
 
             if (daily == null || daily.Records.Count == 0)
             {
-                // Prázdný soubor – rovnou smažeme
-                _incidentLogger.DeleteFile(filePath);
+                // Prázdný soubor – přesuneme do sent
+                _incidentLogger.MoveTeSent(filePath);
                 return;
             }
 
-            // Sestavíme batch request pro API
+            // Sestavíme batch request – včetně názvu zdrojového souboru
             var request = new
             {
                 hostname     = Environment.MachineName,
                 agentVersion = "1.0.0",
+                sourceFile   = fileName,   // ← pro audit trail v SQL
                 incidents    = daily.Records.Select(r => new
                 {
                     timestamp        = r.Timestamp,
@@ -137,7 +137,8 @@ public class IncidentSync : BackgroundService
                     firmwareRevision = r.FirmwareRevision,
                     pnpDeviceId      = r.PnpDeviceId,
                     action           = r.Action,
-                    whitelistVersion = r.WhitelistVersion
+                    whitelistVersion = r.WhitelistVersion,
+                    sourceFile       = fileName  // ← na úrovni každého záznamu
                 }).ToList()
             };
 
@@ -152,25 +153,23 @@ public class IncidentSync : BackgroundService
             if (response.IsSuccessStatusCode)
             {
                 _logger.LogInformation(
-                    "Soubor {File} odeslán ({Count} záznamů) – mažu",
+                    "Soubor {File} odeslán ({Count} záznamů) – přesouvám do sent",
                     fileName, daily.Records.Count);
 
-                // Úspěch → soubor smažeme
-                _incidentLogger.DeleteFile(filePath);
+                // Úspěch → přesuneme do sent\ (ne smažeme)
+                _incidentLogger.MoveTeSent(filePath);
             }
             else
             {
                 _logger.LogWarning(
                     "Odeslání {File} selhalo: {Status} – zkusím příště",
                     fileName, response.StatusCode);
-                // Soubor zůstane pro příští pokus
             }
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex,
                 "Chyba při odesílání {File} – zkusím příště", fileName);
-            // Soubor zůstane pro příští pokus
         }
     }
 

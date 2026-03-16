@@ -76,6 +76,9 @@ public class IncidentsController : ControllerBase
             PnpDeviceId      = dto.PnpDeviceId,
             Action           = dto.Action,
             WhitelistVersion = dto.WhitelistVersion,
+            SourceFile       = !string.IsNullOrEmpty(dto.SourceFile)
+                               ? dto.SourceFile
+                               : request.SourceFile,  // fallback na batch úroveň
             ReceivedAt       = DateTime.UtcNow,
             SourceIp         = sourceIp
         }).ToList();

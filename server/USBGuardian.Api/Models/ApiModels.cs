@@ -14,24 +14,30 @@ public class IncidentBatchRequest
     /// <summary>Verze agenta</summary>
     public string AgentVersion { get; set; } = string.Empty;
 
+    /// <summary>Název zdrojového souboru – pro audit trail (log_HOSTNAME_2026-03-15.json)</summary>
+    public string SourceFile { get; set; } = string.Empty;
+
     /// <summary>Seznam incidentů (batch pro úsporu požadavků)</summary>
     public List<IncidentDto> Incidents { get; set; } = new();
 }
 
 public class IncidentDto
 {
-    public DateTime Timestamp { get; set; }
-    public string Username { get; set; } = string.Empty;
-    public string VendorId { get; set; } = string.Empty;
-    public string ProductId { get; set; } = string.Empty;
-    public string SerialNumber { get; set; } = string.Empty;
-    public string FriendlyName { get; set; } = string.Empty;
-    public string DeviceType { get; set; } = string.Empty;
-    public long SizeBytes { get; set; }
-    public string FirmwareRevision { get; set; } = string.Empty;
-    public string PnpDeviceId { get; set; } = string.Empty;
-    public string Action { get; set; } = string.Empty;
-    public string WhitelistVersion { get; set; } = string.Empty;
+    public DateTime Timestamp        { get; set; }
+    public string   Username         { get; set; } = string.Empty;
+    public string   VendorId         { get; set; } = string.Empty;
+    public string   ProductId        { get; set; } = string.Empty;
+    public string   SerialNumber     { get; set; } = string.Empty;
+    public string   FriendlyName     { get; set; } = string.Empty;
+    public string   DeviceType       { get; set; } = string.Empty;
+    public long     SizeBytes        { get; set; }
+    public string   FirmwareRevision { get; set; } = string.Empty;
+    public string   PnpDeviceId      { get; set; } = string.Empty;
+    public string   Action           { get; set; } = string.Empty;
+    public string   WhitelistVersion { get; set; } = string.Empty;
+
+    /// <summary>Název zdrojového souboru – pro audit trail</summary>
+    public string   SourceFile       { get; set; } = string.Empty;
 }
 
 // ── Server → Agent: whitelist ─────────────────────────────────

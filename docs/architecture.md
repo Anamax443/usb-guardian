@@ -746,3 +746,268 @@ Výpadek agenta (restart PC):
   → SQLite data jsou persistentní (přežijí restart)
   → Při startu: okamžitý sync pokud je online
 ```
+
+---
+
+## Kompletní průvodce nasazením
+
+Tento průvodce popisuje vše co bylo potřeba nastavit pro funkční nasazení USB Guardian v prostředí AXINETWORK. Slouží jako checklist pro nasazení v jiné organizaci.
+
+### 1. Active Directory
+
+#### Vytvoření skupiny USB-Guardian-Clients
+```powershell
+# Spustit na Domain Controlleru nebo stroji s RSAT
+New-ADGroup `
+    -Name "USB-Guardian-Clients" `
+    -SamAccountName "USB-Guardian-Clients" `
+    -GroupCategory Security `
+    -GroupScope Global `
+    -Description "Pocitace a uzivatele s pristupem na USB Guardian REST API"
+
+# Přidat Domain Computers (všechny firemní PC automaticky)
+Add-ADGroupMember `
+    -Identity "USB-Guardian-Clients" `
+    -Members (Get-ADGroup "Domain Computers")
+
+# Přidat IT adminy pro přístup přes Swagger/browser
+Add-ADGroupMember `
+    -Identity "USB-Guardian-Clients" `
+    -Members "jmeno.admina"
+```
+
+#### Registrace SPN pro gMSA účet
+```powershell
+# POVINNÉ – bez SPN Kerberos autentizace nefunguje
+setspn -S HTTP/B-S-W-SQL-04 "AXINETWORK\gmsa-SQL$"
+setspn -S HTTP/B-S-W-SQL-04.axinetwork.loc "AXINETWORK\gmsa-SQL$"
+
+# Ověření
+setspn -L "AXINETWORK\gmsa-SQL$"
+# Výstup musí obsahovat:
+#   HTTP/B-S-W-SQL-04
+#   HTTP/B-S-W-SQL-04.axinetwork.loc
+```
+
+> **Pozor:** Bez SPN registrace API poběží ale Kerberos autentizace nebude fungovat – klienti se nepřihlásí správně (isAuthenticated: false).
+
+---
+
+### 2. SQL Server (B-S-W-SQL-04)
+
+#### Databáze a uživatelé
+```sql
+-- Spustit v SSMS jako sysadmin
+
+-- 1. Vytvoření databáze
+-- Spustit: database/01_create_database.sql
+
+-- 2. Oprava gMSA účtu (pozor na $ na konci!)
+USE USBGuardian;
+IF NOT EXISTS (SELECT name FROM sys.database_principals WHERE name = 'AXINETWORK\gmsa-SQL$')
+BEGIN
+    CREATE USER [AXINETWORK\gmsa-SQL$] FOR LOGIN [AXINETWORK\gmsa-SQL$];
+END
+ALTER ROLE db_datareader ADD MEMBER [AXINETWORK\gmsa-SQL$];
+ALTER ROLE db_datawriter ADD MEMBER [AXINETWORK\gmsa-SQL$];
+
+-- 3. Přidat IT admina pro vývoj/testování
+CREATE USER [AXINETWORK\jmeno.admina] FOR LOGIN [AXINETWORK\jmeno.admina];
+ALTER ROLE db_datareader ADD MEMBER [AXINETWORK\jmeno.admina];
+ALTER ROLE db_datawriter ADD MEMBER [AXINETWORK\jmeno.admina];
+
+-- 4. Vytvoření tabulek
+-- Spustit: database/02_create_tables.sql
+
+-- 5. Přidání SourceFile sloupce
+-- Spustit: database/03_add_sourcefile.sql
+
+-- 6. Seed dat – první whitelist verze a zařízení
+INSERT INTO dbo.WhitelistVersions (Version, IssuedAt, ValidUntil, IssuedBy, IsActive)
+VALUES ('2026-03-16-v1', GETUTCDATE(), DATEADD(DAY, 30, GETUTCDATE()), 'it-admin', 1);
+
+INSERT INTO dbo.WhitelistDevices (VendorId, ProductId, SerialNumber, Description, ApprovedBy, IsActive)
+VALUES ('KINGSTON', 'DATATRAVELER_2.0', '4B018CD154C9',
+        'Kingston DataTraveler 14GB – IT oddeleni', 'it-admin', 1);
+```
+
+---
+
+### 3. API Server (B-S-W-SQL-04)
+
+#### Přenos souborů přes SCP (SMB je vypnuto – správně!)
+```powershell
+# Publishnout na dev stroji
+cd D:\git\usb-guardian\server\USBGuardian.Api
+dotnet publish -c Release -r win-x64 --self-contained -o "D:\deploy\USBGuardian.Api"
+
+# Zkopírovat na server přes SCP (SSH port 22)
+scp -r "D:\deploy\USBGuardian.Api" admintrnka@B-S-W-SQL-04:/C:/USBGuardian.Api
+```
+
+> **Proč ne SMB?** SQL Server má záměrně vypnuté File and Printer Sharing (SMB) ve firewallu. Je to správný bezpečnostní hardening – neměňte to. Vždy používejte SCP.
+
+#### Konfigurace
+```powershell
+# Na serveru přes RDP nebo SSH
+@'
+{
+  "ConnectionStrings": {
+    "DefaultConnection": "Server=localhost;Database=USBGuardian;Integrated Security=true;TrustServerCertificate=true;"
+  },
+  "Authorization": {
+    "AllowedGroups": [
+      "AXINETWORK\\USB-Guardian-Clients",
+      "AXINETWORK\\SQL Admins2"
+    ]
+  }
+}
+'@ | Set-Content -Path "C:\USBGuardian.Api\appsettings.local.json" -Encoding UTF8
+```
+
+#### Instalace Windows Service
+```powershell
+# Na serveru (RDP nebo SSH)
+sc.exe create "USB Guardian API" `
+    binPath="C:\USBGuardian.Api\USBGuardian.Api.exe" `
+    obj="AXINETWORK\gmsa-SQL$" `
+    start=auto
+
+# Firewall – otevřít port 5050
+New-NetFirewallRule `
+    -DisplayName "USB Guardian API" `
+    -Direction Inbound `
+    -Protocol TCP `
+    -LocalPort 5050 `
+    -Action Allow
+
+# Spustit
+Start-Service "USB Guardian API"
+Get-Service "USB Guardian API"
+```
+
+#### Update API (při nové verzi)
+```powershell
+# Na serveru – zastavit service
+Stop-Service "USB Guardian API"
+
+# Na dev stroji – zkopírovat nové soubory
+scp "D:\deploy\USBGuardian.Api\USBGuardian.Api.exe" admintrnka@B-S-W-SQL-04:/C:/USBGuardian.Api/USBGuardian.Api.exe
+scp "D:\deploy\USBGuardian.Api\USBGuardian.Api.dll" admintrnka@B-S-W-SQL-04:/C:/USBGuardian.Api/USBGuardian.Api.dll
+
+# Na serveru – spustit
+Start-Service "USB Guardian API"
+```
+
+---
+
+### 4. Klientský PC (agent)
+
+#### Složky a práva
+```powershell
+# Spustit jako Administrator
+$folders = @(
+    "C:\ProgramData\USBGuardian\whitelist",
+    "C:\ProgramData\USBGuardian\queue",
+    "C:\ProgramData\USBGuardian\sent"
+)
+
+foreach ($folder in $folders) {
+    New-Item -ItemType Directory -Force -Path $folder
+    icacls $folder /grant "SYSTEM:(OI)(CI)F"
+    icacls $folder /grant "Administrators:(OI)(CI)F"
+}
+
+# queue a sent – Users mohou zapisovat (agent běží jako SYSTEM v produkci)
+# Pro vývoj (--console) potřebuje uživatel práva:
+icacls "C:\ProgramData\USBGuardian\queue" /grant "Users:(OI)(CI)M"
+icacls "C:\ProgramData\USBGuardian\sent"  /grant "Users:(OI)(CI)M"
+
+# whitelist – Users jen čtou
+icacls "C:\ProgramData\USBGuardian\whitelist" /grant "Users:(OI)(CI)R"
+```
+
+#### Lokální konfigurace
+```powershell
+# Vytvořit lokální přepis (necommituje se do gitu)
+@'
+{
+  "whitelist": {
+    "syncUrl": "http://B-S-W-SQL-04:5050"
+  }
+}
+'@ | Set-Content `
+    -Path "D:\git\usb-guardian\agent\USBGuardian\Config\agent.config.local.json" `
+    -Encoding UTF8
+```
+
+#### Spuštění (vývojový režim)
+```powershell
+cd D:\git\usb-guardian\agent\USBGuardian
+dotnet run -- --console
+```
+
+---
+
+### 5. Ověření funkčnosti
+
+#### Test konektivity
+```powershell
+# Test portu
+Test-NetConnection -ComputerName B-S-W-SQL-04 -Port 5050
+
+# Test API
+Invoke-WebRequest `
+    -Uri "http://B-S-W-SQL-04:5050/api/whitelist/version" `
+    -UseDefaultCredentials `
+    -AllowUnencryptedAuthentication | Select-Object -ExpandProperty Content
+```
+
+#### Test end-to-end sync
+```powershell
+# Vytvořit testovací soubor ve frontě
+@'
+{
+  "Date": "2026-03-15",
+  "Hostname": "NAZEVPC",
+  "RecordCount": 1,
+  "Records": [{
+    "Timestamp": "2026-03-15T10:00:00Z",
+    "Username": "testuser",
+    "VendorId": "KINGSTON",
+    "ProductId": "DATATRAVELER_2.0",
+    "SerialNumber": "TEST123",
+    "FriendlyName": "Test Device",
+    "DeviceType": "UsbFlashDrive",
+    "SizeBytes": 0,
+    "SizeFormatted": "0 B",
+    "FirmwareRevision": "",
+    "PnpDeviceId": "TEST",
+    "Action": "Allowed",
+    "WhitelistVersion": "2026-03-16-v1"
+  }]
+}
+'@ | Set-Content "C:\ProgramData\USBGuardian\queue\log_NAZEVPC_2026-03-15.json" -Encoding UTF8
+
+# Spustit agenta – po minutě se soubor odešle a přesune do sent\
+```
+
+#### Ověření v SSMS
+```sql
+SELECT TOP 10 * FROM USBGuardian.dbo.Incidents ORDER BY ReceivedAt DESC;
+-- Zkontrolovat: SourceFile sloupec obsahuje název souboru
+```
+
+---
+
+### 6. Známé problémy a řešení
+
+| Problém | Příčina | Řešení |
+|---------|---------|--------|
+| `Cannot find path C:\ProgramData\USBGuardian\queue` | Složka neexistuje | Spustit setup script (krok 4) |
+| `Login failed for user AXINETWORK\trnkam` | Uživatel nemá přístup k DB | Přidat uživatele do db_datareader/db_datawriter |
+| `isAuthenticated: false` | Chybí SPN registrace pro gMSA | Spustit setspn příkazy (krok 1) |
+| `SMB Síťový název nelze nalézt` | SMB záměrně vypnuto na SQL serveru | Používat SCP místo UNC cest |
+| `Access to path is denied` při přesunu do sent\ | Uživatel nemá práva na složku | Přidat `Users:(OI)(CI)M` práva |
+| `YOUR_SQL_SERVER` ve startup logu | appsettings.local.json nenačten | Zkontrolovat cestu a obsah souboru |
+| `no such column: PnpDeviceId` | Stará SQLite DB | Smazat incidents.db (přepnuto na file-based logging) |

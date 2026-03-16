@@ -42,11 +42,15 @@ builder.Services.AddSingleton(sp =>
 
 builder.Services.AddSingleton(sp =>
 {
-    var config    = builder.Configuration;
-    var logger    = sp.GetRequiredService<ILogger<IncidentLogger>>();
-    var queuePath = config["logging:queuePath"]
-                    ?? @"C:\ProgramData\USBGuardian\queue";
-    return new IncidentLogger(logger, queuePath);
+    var config            = builder.Configuration;
+    var logger            = sp.GetRequiredService<ILogger<IncidentLogger>>();
+    var queuePath         = config["logging:queuePath"]
+                            ?? @"C:\ProgramData\USBGuardian\queue";
+    var sentPath          = config["logging:sentPath"]
+                            ?? @"C:\ProgramData\USBGuardian\sent";
+    var sentRetentionDays = int.Parse(
+                            config["logging:sentRetentionDays"] ?? "90");
+    return new IncidentLogger(logger, queuePath, sentPath, sentRetentionDays);
 });
 
 builder.Services.AddSingleton(sp =>

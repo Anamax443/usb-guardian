@@ -64,6 +64,10 @@ public class Incident
     public string PnpDeviceId { get; set; } = string.Empty;
     public string Action { get; set; } = string.Empty;
     public string WhitelistVersion { get; set; } = string.Empty;
+
+    /// <summary>Název zdrojového souboru – audit trail (log_HOSTNAME_2026-03-15.json)</summary>
+    public string? SourceFile { get; set; }
+
     public DateTime ReceivedAt { get; set; } = DateTime.UtcNow;
     public string? SourceIp { get; set; }
 }

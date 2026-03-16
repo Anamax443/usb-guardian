@@ -34,7 +34,9 @@
     }
   },
   "logging": {
-    "queuePath": "C:\\ProgramData\\USBGuardian\\queue",
-    "logLevel": "Information"
+    "queuePath":          "C:\\ProgramData\\USBGuardian\\queue",
+    "sentPath":           "C:\\ProgramData\\USBGuardian\\sent",
+    "sentRetentionDays":  90,
+    "logLevel":           "Information"
   }
 }
