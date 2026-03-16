@@ -1,0 +1,16 @@
+{
+  "version": "2026-03-16-v1",
+  "issuedAt": "2026-03-16T00:00:00Z",
+  "validUntil": "2026-04-16T00:00:00Z",
+  "signature": "",
+  "devices": [
+    {
+      "vendorId": "0951",
+      "productId": "1666",
+      "serialNumber": "VLOŽTE_SERIAL",
+      "description": "Příklad: Kingston DataTraveler – IT oddělení",
+      "approvedAt": "2026-03-16T00:00:00Z",
+      "approvedBy": "it-admin"
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+# .NET build výstupy
+bin/
+obj/
+*.user
+*.suo
+.vs/
+
+# Lokální konfigurace s tajnými údaji - NIKDY necommitovat
+agent/USBGuardian/Config/agent.config.local.json
+
+# SQLite databáze incidentů (lokální data)
+*.db
+*.db-shm
+*.db-wal
+
+# Logy
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db

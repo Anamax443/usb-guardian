@@ -1,0 +1,220 @@
+// ============================================================
+// DeviceMonitor.cs
+// Sleduje připojení paměťových médií přes WMI události.
+// WMI = Windows Management Instrumentation – vestavěno v každém Windows.
+// Spouští se jako BackgroundService (část Windows Service).
+// ============================================================
+
+using System.Management;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using USBGuardian.Models;
+
+namespace USBGuardian;
+
+public class DeviceMonitor : BackgroundService
+{
+    private readonly ILogger<DeviceMonitor> _logger;
+    private readonly WhitelistChecker _whitelistChecker;
+    private readonly PolicyEnforcer _policyEnforcer;
+
+    // WMI watchers – jeden pro připojení, pro budoucí potřebu i odpojení
+    private ManagementEventWatcher? _connectWatcher;
+
+    public DeviceMonitor(
+        ILogger<DeviceMonitor> logger,
+        WhitelistChecker whitelistChecker,
+        PolicyEnforcer policyEnforcer)
+    {
+        _logger           = logger;
+        _whitelistChecker = whitelistChecker;
+        _policyEnforcer   = policyEnforcer;
+    }
+
+    // --------------------------------------------------------
+    // Spuštění monitoringu (volá se při startu Windows Service)
+    // --------------------------------------------------------
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        _logger.LogInformation("USB Guardian spuštěn – zahajuji monitoring zařízení");
+
+        StartWmiWatcher();
+
+        // Čekáme dokud není service zastaven
+        try
+        {
+            await Task.Delay(Timeout.Infinite, stoppingToken);
+        }
+        catch (TaskCanceledException)
+        {
+            // Normální ukončení při StopAsync
+        }
+        finally
+        {
+            StopWmiWatcher();
+            _logger.LogInformation("USB Guardian zastaven");
+        }
+    }
+
+    // --------------------------------------------------------
+    // Inicializace WMI event watcheru
+    // Sleduje Win32_USBHub a Win32_DiskDrive pro detekci médií
+    // --------------------------------------------------------
+    private void StartWmiWatcher()
+    {
+        try
+        {
+            // WQL dotaz: sleduj připojení jakéhokoli USB zařízení
+            // __InstanceCreationEvent = nová instance WMI objektu = nové zařízení
+            var query = new WqlEventQuery(
+                "__InstanceCreationEvent",
+                TimeSpan.FromSeconds(2),     // polling interval
+                "TargetInstance ISA 'Win32_DiskDrive'");
+
+            _connectWatcher = new ManagementEventWatcher(query);
+            _connectWatcher.EventArrived += OnDeviceConnected;
+            _connectWatcher.Start();
+
+            _logger.LogInformation("WMI watcher spuštěn (Win32_DiskDrive)");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Chyba při spuštění WMI watcheru – monitoring nebude fungovat");
+        }
+    }
+
+    private void StopWmiWatcher()
+    {
+        try
+        {
+            _connectWatcher?.Stop();
+            _connectWatcher?.Dispose();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Chyba při zastavování WMI watcheru");
+        }
+    }
+
+    // --------------------------------------------------------
+    // Callback – zavolá se při každém připojení zařízení
+    // --------------------------------------------------------
+    private void OnDeviceConnected(object sender, EventArrivedEventArgs e)
+    {
+        try
+        {
+            var targetInstance = e.NewEvent["TargetInstance"] as ManagementBaseObject;
+            if (targetInstance == null) return;
+
+            // Přečteme vlastnosti WMI objektu Win32_DiskDrive
+            var device = ParseDeviceFromWmi(targetInstance);
+
+            // Přeskočíme interní disky (interface != USB)
+            if (!IsRemovableMedia(targetInstance))
+            {
+                _logger.LogDebug("Přeskočeno interní zařízení: {Device}", device.FriendlyName);
+                return;
+            }
+
+            _logger.LogInformation("Detekováno médium: {Device}", device);
+
+            // Ověření proti whitelistu
+            var wlStatus  = _whitelistChecker.GetStatus();
+            var isAllowed = _whitelistChecker.IsAllowed(device);
+
+            if (!isAllowed)
+            {
+                // Nepovolené médium → PolicyEnforcer rozhodne co dál
+                _policyEnforcer.HandleUnauthorizedDevice(
+                    device,
+                    _whitelistChecker.GetVersion(),
+                    wlStatus);
+            }
+            else
+            {
+                _logger.LogInformation("Médium povoleno: {Device}", device);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Chyba při zpracování události připojení zařízení");
+        }
+    }
+
+    // --------------------------------------------------------
+    // Parsování WMI objektu na náš model DeviceInfo
+    // --------------------------------------------------------
+    private DeviceInfo ParseDeviceFromWmi(ManagementBaseObject wmi)
+    {
+        // PNPDeviceID formát: USBSTOR\DISK&VEN_KINGSTON&PROD_DT_101_G2&REV_1.00\...&SERIAL
+        var pnpId = wmi["PNPDeviceID"]?.ToString() ?? string.Empty;
+
+        var device = new DeviceInfo
+        {
+            FriendlyName = wmi["Caption"]?.ToString() ?? "Neznámé zařízení",
+            SerialNumber = wmi["SerialNumber"]?.ToString() ?? ExtractSerialFromPnp(pnpId),
+        };
+
+        // Extrakce VID a PID z PNPDeviceID
+        ExtractVidPid(pnpId, device);
+
+        // Určení typu média dle InterfaceType
+        var interfaceType = wmi["InterfaceType"]?.ToString() ?? string.Empty;
+        device.Type = DetermineDeviceType(interfaceType, wmi["MediaType"]?.ToString() ?? string.Empty);
+
+        return device;
+    }
+
+    // --------------------------------------------------------
+    // Filtr: přeskočit interní disky (SATA, SCSI, NVMe)
+    // --------------------------------------------------------
+    private bool IsRemovableMedia(ManagementBaseObject wmi)
+    {
+        var interfaceType = wmi["InterfaceType"]?.ToString() ?? string.Empty;
+
+        // Zajímají nás pouze USB zařízení
+        // SD karty přes vestavěnou čtečku se mohou zobrazit jako "SD" nebo "USB"
+        return interfaceType.Equals("USB", StringComparison.OrdinalIgnoreCase)
+            || interfaceType.Equals("SD",  StringComparison.OrdinalIgnoreCase);
+    }
+
+    // --------------------------------------------------------
+    // Extrakce VID a PID z PNPDeviceID řetězce
+    // --------------------------------------------------------
+    private void ExtractVidPid(string pnpId, DeviceInfo device)
+    {
+        // Příklad: USB\VID_0951&PID_1666\...
+        var parts = pnpId.Split('\\', '&');
+
+        foreach (var part in parts)
+        {
+            if (part.StartsWith("VID_", StringComparison.OrdinalIgnoreCase))
+                device.VendorId = part.Substring(4);
+
+            if (part.StartsWith("PID_", StringComparison.OrdinalIgnoreCase))
+                device.ProductId = part.Substring(4);
+        }
+    }
+
+    // --------------------------------------------------------
+    // Záložní extrakce sériového čísla z PNPDeviceID
+    // --------------------------------------------------------
+    private string ExtractSerialFromPnp(string pnpId)
+    {
+        // Sériové číslo je typicky poslední segment po posledním '\'
+        var lastSegment = pnpId.Split('\\').LastOrDefault() ?? string.Empty;
+
+        // Odstraníme "&0" nebo podobné sufixy
+        var ampIdx = lastSegment.IndexOf('&');
+        return ampIdx > 0 ? lastSegment[..ampIdx] : lastSegment;
+    }
+
+    private DeviceType DetermineDeviceType(string interfaceType, string mediaType) =>
+        interfaceType.ToUpper() switch
+        {
+            "USB" when mediaType.Contains("Removable") => DeviceType.UsbFlashDrive,
+            "USB" when mediaType.Contains("Fixed")     => DeviceType.UsbHdd,
+            "SD"                                       => DeviceType.SdCard,
+            _                                          => DeviceType.Unknown
+        };
+}

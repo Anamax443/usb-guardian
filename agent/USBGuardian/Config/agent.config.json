@@ -1,0 +1,40 @@
+{
+  "policy": {
+    "mode": "warn",
+    "maxOfflineAgeDays": 30,
+    "onExpiredWhitelist": "warn"
+  },
+  "whitelist": {
+    "localPath": "whitelist\\whitelist.json",
+    "syncUrl": "",
+    "syncIntervalMinutes": 15,
+    "signatureVerification": false
+  },
+  "notifications": {
+    "toast": {
+      "enabled": true,
+      "contactMessage": "Kontaktujte IT oddeleni"
+    },
+    "email": {
+      "enabled": false,
+      "provider": "microsoft_graph",
+      "graph": {
+        "tenantId": "",
+        "clientId": "",
+        "clientSecret": "",
+        "senderAddress": ""
+      },
+      "recipients": {
+        "immediate": [],
+        "digest": []
+      },
+      "immediateAlertOn": [ "block", "warn" ],
+      "digestSchedule": "daily",
+      "digestTime": "08:00"
+    }
+  },
+  "logging": {
+    "dbPath": "logs\\incidents.db",
+    "logLevel": "Information"
+  }
+}
