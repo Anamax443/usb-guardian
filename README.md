@@ -8,9 +8,10 @@ Každé USB médium, SD karta nebo USB disk musí být schváleno IT oddělením
 | Fáze | Popis | Stav |
 |------|-------|------|
 | 1 | Windows agent – detekce + warn + Toast + SQLite log | ✅ Hotovo |
-| 2 | Block mode + Email notifikace (Microsoft Graph API) | 🔜 Připraveno v configu |
-| 3 | Centrální server + whitelist sync + SQL Server | 📋 Plánováno |
-| 4 | Admin UI – dashboard + statistiky + reporty | 📋 Plánováno |
+| 2 | Block mode – IOCTL lock, drive letter detection, admin práva | ✅ Hotovo |
+| 3 | Email notifikace (Microsoft Graph API) + instalační skript | 🔜 Plánováno |
+| 4 | Centrální server + whitelist sync + SQL Server | 📋 Plánováno |
+| 5 | Admin UI – dashboard + statistiky + reporty | 📋 Plánováno |
 
 ## Jak to funguje
 
@@ -63,6 +64,12 @@ Copy-Item whitelist\whitelist.json "C:\ProgramData\USBGuardian\whitelist\"
 cd agent\USBGuardian
 dotnet run -- --console
 ```
+
+> **Block mode vyžaduje admin práva.** Pro testování blokování spusťte v elevated PowerShell:
+> ```powershell
+> Start-Process powershell -Verb RunAs -ArgumentList "-NoExit -Command `"cd 'D:\git\usb-guardian\agent\USBGuardian'; dotnet run -- --console`""
+> ```
+> V produkci (Windows Service) agent běží jako SYSTEM – admin práva jsou automatická.
 
 ### 4. Instalace jako Windows Service (produkce)
 

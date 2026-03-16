@@ -86,55 +86,35 @@ public class PolicyEnforcer
     }
 
     // --------------------------------------------------------
-    // Block mode – médium uzamčeno přes DeviceIoControl
-    // Pokud nelze zjistit drive letter → fallback na warn
+    // Block mode – zařízení deaktivováno přes Disable-PnpDevice
+    // Nevyžaduje drive letter – funguje vždy
     // --------------------------------------------------------
     private void HandleBlock(DeviceInfo device)
     {
-        if (device.DriveLetters.Count == 0)
+        if (string.IsNullOrEmpty(device.PnpDeviceId))
         {
             _logger.LogWarning(
-                "Block mode: nelze zjistit drive letter pro {Device} – fallback na warn",
+                "Block mode: PNPDeviceID není k dispozici pro {Device} – fallback na warn",
                 device.FriendlyName);
             HandleWarn(device);
             return;
         }
 
-        var blockedLetters = new List<string>();
-        var failedLetters  = new List<string>();
+        var result = _deviceBlocker.BlockDevice(device.PnpDeviceId);
 
-        // Zablokujeme každý drive letter přiřazený k médiu
-        foreach (var letter in device.DriveLetters)
+        if (result.IsSuccess)
         {
-            var result = _deviceBlocker.BlockDrive(letter);
-
-            if (result.IsSuccess)
-            {
-                blockedLetters.Add(letter);
-                _logger.LogWarning("Drive {Letter}: zablokován", letter);
-            }
-            else
-            {
-                failedLetters.Add(letter);
-                _logger.LogError("Drive {Letter}: blokování selhalo – {Error}",
-                    letter, result.ErrorMessage);
-            }
-        }
-
-        // Notifikace uživateli
-        if (blockedLetters.Count > 0)
-        {
-            var drives = string.Join(", ", blockedLetters.Select(l => $"{l}:"));
+            _logger.LogWarning("Zařízení {Device} ZABLOKOVÁNO", device.FriendlyName);
             _notification.ShowWarning(
                 title: "Přístup k médiu byl zablokován",
-                message: $"Médium \"{device.FriendlyName}\" ({drives}) nebylo schváleno IT oddělením.\n" +
-                         "Přístup byl zablokován z bezpečnostních důvodů.\n" +
+                message: $"Médium \"{device.FriendlyName}\" nebylo schváleno IT oddělením.\n" +
+                         "Zařízení bylo deaktivováno z bezpečnostních důvodů.\n" +
                          _contactMessage);
         }
-
-        // Pokud blokování selhalo pro část disků → warn jako fallback
-        if (failedLetters.Count > 0)
+        else
         {
+            _logger.LogError("Blokování selhalo pro {Device}: {Error}",
+                device.FriendlyName, result.ErrorMessage);
             HandleWarn(device);
         }
     }

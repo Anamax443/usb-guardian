@@ -79,11 +79,13 @@ což je nezbytné pro terénní pracovníky na hotspotu nebo mimo doménu.
 
 ### DeviceBlocker
 - **Technologie:** Win32 API – `DeviceIoControl` přes P/Invoke (`kernel32.dll`)
-- **Metoda:** `FSCTL_DISMOUNT_VOLUME` + `FSCTL_LOCK_VOLUME`
-- **Efekt:** Médium je vidět v systému ale nelze číst ani zapisovat
-- **Reverzibilní:** Odblokování zavřením handle – bez nutnosti odpojit zařízení
-- **Vyžaduje:** Admin práva (Windows Service musí běžet pod privilegovaným účtem)
-- **Fallback:** Pokud lock selže (médium aktivně používáno) → přejde na warn
+- **Primární metoda:** `FSCTL_DISMOUNT_VOLUME` + `FSCTL_LOCK_VOLUME` na drive letter (`\\.\F:`)
+- **Fallback:** `Disable-PnpDevice` přes PowerShell na PNPDeviceID (pokud drive letter není k dispozici)
+- **Efekt:** Médium je nepřístupné – Windows vrátí "Přístup odepřen"
+- **Reverzibilní:** Odblokování zavřením handle nebo `Enable-PnpDevice`
+- **Vyžaduje:** Admin práva
+  - Produkce (Windows Service): běží jako SYSTEM – automaticky
+  - Vývoj: spustit přes elevated PowerShell (`Start-Process powershell -Verb RunAs`)
 
 ### NotificationService
 - **Technologie:** Windows Toast Notification přes PowerShell
@@ -195,9 +197,12 @@ C:\ProgramData\USBGuardian\
 - Konfigurovatelný warn/block mód
 
 ### ✅ Fáze 2 – Dokončeno
-- Block mode – DeviceIoControl (FSCTL_DISMOUNT + FSCTL_LOCK)
-- Drive letter detection (WMI asociace)
-- Fallback warn při selhání blokování
+- Block mode – FSCTL_LOCK_VOLUME přes DeviceIoControl
+- Drive letter detection (dual WMI watcher – Win32_DiskDrive + Win32_LogicalDisk)
+- Korelace přes DiskIndex + pending dictionary
+- Fallback warn při selhání drive letter detekce
+- PNPDeviceID uloženo pro každé zařízení
+- Admin práva vyžadována pro block mode (Windows Service = SYSTEM, vývoj = elevated PS)
 
 ### 🔜 Fáze 3 – Plánováno
 - Email notifikace přes Microsoft Graph API (Shared Mailbox, bez extra licence)
@@ -242,15 +247,15 @@ usb-guardian/
 ├── agent/
 │   ├── USBGuardian.sln
 │   └── USBGuardian/
-│       ├── DeviceMonitor.cs        ← WMI listener, parsování, drive letters
+│       ├── DeviceMonitor.cs        ← dual WMI watcher, parsování, DiskIndex korelace
 │       ├── WhitelistChecker.cs     ← porovnání s whitelistem, cache, expirace
 │       ├── PolicyEnforcer.cs       ← rozhodovací logika warn/block
-│       ├── DeviceBlocker.cs        ← blokování přes DeviceIoControl (P/Invoke)
+│       ├── DeviceBlocker.cs        ← IOCTL lock + PnpDevice fallback
 │       ├── NotificationService.cs  ← Windows Toast notifikace
 │       ├── IncidentLogger.cs       ← SQLite log incidentů
 │       ├── Program.cs              ← vstupní bod, DI konfigurace
 │       ├── Models/
-│       │   ├── DeviceInfo.cs       ← model zařízení (VID, PID, serial, kapacita, drive letters)
+│       │   ├── DeviceInfo.cs       ← model zařízení (VID, PID, serial, kapacita, PnpDeviceId)
 │       │   ├── Incident.cs         ← model incidentu
 │       │   └── WhitelistEntry.cs   ← model záznamu whitelistu
 │       └── Config/

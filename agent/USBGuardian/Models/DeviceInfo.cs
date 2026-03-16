@@ -23,6 +23,9 @@ public class DeviceInfo
     /// <summary>Čitelný název z Windows (např. "Kingston DataTraveler")</summary>
     public string FriendlyName { get; set; } = string.Empty;
 
+    /// <summary>Plný PNPDeviceID – používá se pro deaktivaci zařízení</summary>
+    public string PnpDeviceId { get; set; } = string.Empty;
+
     /// <summary>Typ média</summary>
     public DeviceType Type { get; set; } = DeviceType.Unknown;
 

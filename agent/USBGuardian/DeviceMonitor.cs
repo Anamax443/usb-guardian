@@ -263,6 +263,7 @@ public class DeviceMonitor : BackgroundService
             SerialNumber     = wmi["SerialNumber"]?.ToString() ?? ExtractSerialFromPnp(pnpId),
             FirmwareRevision = wmi["FirmwareRevision"]?.ToString() ?? string.Empty,
             SizeBytes        = long.TryParse(wmi["Size"]?.ToString(), out var size) ? size : 0,
+            PnpDeviceId      = pnpId,
         };
 
         ExtractVidPid(pnpId, device);
