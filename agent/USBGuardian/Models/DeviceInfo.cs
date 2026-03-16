@@ -26,6 +26,17 @@ public class DeviceInfo
     /// <summary>Typ média</summary>
     public DeviceType Type { get; set; } = DeviceType.Unknown;
 
+    /// <summary>Kapacita média v bajtech (0 = nezjištěno)</summary>
+    public long SizeBytes { get; set; } = 0;
+
+    /// <summary>Kapacita v čitelném formátu (např. "15,5 GB")</summary>
+    public string SizeFormatted => SizeBytes > 0
+        ? $"{SizeBytes / 1_073_741_824.0:F1} GB"
+        : "neznámá";
+
+    /// <summary>Verze firmware zařízení</summary>
+    public string FirmwareRevision { get; set; } = string.Empty;
+
     /// <summary>Čas připojení</summary>
     public DateTime ConnectedAt { get; set; } = DateTime.UtcNow;
 
@@ -37,7 +48,7 @@ public class DeviceInfo
         $"{VendorId.ToUpper()}:{ProductId.ToUpper()}:{SerialNumber.ToUpper()}";
 
     public override string ToString() =>
-        $"{FriendlyName} [{UniqueKey}]";
+        $"{FriendlyName} [{UniqueKey}] {SizeFormatted}";
 }
 
 public enum DeviceType

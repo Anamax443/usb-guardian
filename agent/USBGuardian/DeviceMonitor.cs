@@ -146,21 +146,26 @@ public class DeviceMonitor : BackgroundService
     // --------------------------------------------------------
     private DeviceInfo ParseDeviceFromWmi(ManagementBaseObject wmi)
     {
-        // PNPDeviceID formát: USBSTOR\DISK&VEN_KINGSTON&PROD_DT_101_G2&REV_1.00\...&SERIAL
+        // PNPDeviceID může mít dva formáty:
+        //   USB\VID_0951&PID_1666\...                          → klasický USB
+        //   USBSTOR\DISK&VEN_KINGSTON&PROD_DATATRAVELER_2.0\... → storage formát
         var pnpId = wmi["PNPDeviceID"]?.ToString() ?? string.Empty;
 
         var device = new DeviceInfo
         {
-            FriendlyName = wmi["Caption"]?.ToString() ?? "Neznámé zařízení",
-            SerialNumber = wmi["SerialNumber"]?.ToString() ?? ExtractSerialFromPnp(pnpId),
+            FriendlyName     = wmi["Caption"]?.ToString() ?? "Neznámé zařízení",
+            SerialNumber     = wmi["SerialNumber"]?.ToString() ?? ExtractSerialFromPnp(pnpId),
+            FirmwareRevision = wmi["FirmwareRevision"]?.ToString() ?? string.Empty,
+            SizeBytes        = long.TryParse(wmi["Size"]?.ToString(), out var size) ? size : 0,
         };
 
-        // Extrakce VID a PID z PNPDeviceID
+        // Extrakce VID/PID nebo VEN/PROD z PNPDeviceID
         ExtractVidPid(pnpId, device);
 
-        // Určení typu média dle InterfaceType
+        // Určení typu média dle InterfaceType + MediaType
         var interfaceType = wmi["InterfaceType"]?.ToString() ?? string.Empty;
-        device.Type = DetermineDeviceType(interfaceType, wmi["MediaType"]?.ToString() ?? string.Empty);
+        var mediaType     = wmi["MediaType"]?.ToString() ?? string.Empty;
+        device.Type       = DetermineDeviceType(interfaceType, mediaType);
 
         return device;
     }
@@ -179,20 +184,35 @@ public class DeviceMonitor : BackgroundService
     }
 
     // --------------------------------------------------------
-    // Extrakce VID a PID z PNPDeviceID řetězce
+    // Extrakce VID/PID nebo VEN/PROD z PNPDeviceID řetězce
+    // Podporuje dva formáty Windows:
+    //   USB\VID_0951&PID_1666\...                           → klasický USB (hex ID)
+    //   USBSTOR\DISK&VEN_KINGSTON&PROD_DATATRAVELER_2.0\... → storage (textový název)
     // --------------------------------------------------------
     private void ExtractVidPid(string pnpId, DeviceInfo device)
     {
-        // Příklad: USB\VID_0951&PID_1666\...
         var parts = pnpId.Split('\\', '&');
 
         foreach (var part in parts)
         {
+            // Klasický USB formát (hex)
             if (part.StartsWith("VID_", StringComparison.OrdinalIgnoreCase))
                 device.VendorId = part.Substring(4);
 
             if (part.StartsWith("PID_", StringComparison.OrdinalIgnoreCase))
                 device.ProductId = part.Substring(4);
+
+            // USBSTOR formát (textový název výrobce/produktu)
+            if (part.StartsWith("VEN_", StringComparison.OrdinalIgnoreCase))
+                device.VendorId = part.Substring(4);
+
+            if (part.StartsWith("PROD_", StringComparison.OrdinalIgnoreCase))
+                device.ProductId = part.Substring(5);
+
+            // REV = firmware revision záloha (pokud WMI nevrátí FirmwareRevision)
+            if (part.StartsWith("REV_", StringComparison.OrdinalIgnoreCase)
+                && string.IsNullOrEmpty(device.FirmwareRevision))
+                device.FirmwareRevision = part.Substring(4);
         }
     }
 

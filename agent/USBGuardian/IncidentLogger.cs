@@ -38,10 +38,12 @@ public class IncidentLogger
                 INSERT INTO Incidents
                     (Timestamp, Hostname, Username,
                      VendorId, ProductId, SerialNumber, FriendlyName, DeviceType,
+                     SizeBytes, FirmwareRevision,
                      Action, WhitelistVersion, SentToServer)
                 VALUES
                     ($ts, $host, $user,
                      $vid, $pid, $serial, $name, $dtype,
+                     $size, $fw,
                      $action, $wlver, 0)";
 
             cmd.Parameters.AddWithValue("$ts",     incident.Timestamp.ToString("O"));
@@ -52,6 +54,8 @@ public class IncidentLogger
             cmd.Parameters.AddWithValue("$serial", incident.Device.SerialNumber);
             cmd.Parameters.AddWithValue("$name",   incident.Device.FriendlyName);
             cmd.Parameters.AddWithValue("$dtype",  incident.Device.Type.ToString());
+            cmd.Parameters.AddWithValue("$size",   incident.Device.SizeBytes);
+            cmd.Parameters.AddWithValue("$fw",     incident.Device.FirmwareRevision);
             cmd.Parameters.AddWithValue("$action", incident.Action.ToString());
             cmd.Parameters.AddWithValue("$wlver",  incident.WhitelistVersion);
 
@@ -126,6 +130,8 @@ public class IncidentLogger
                     SerialNumber    TEXT    NOT NULL,
                     FriendlyName    TEXT    NOT NULL,
                     DeviceType      TEXT    NOT NULL,
+                    SizeBytes       INTEGER NOT NULL DEFAULT 0,
+                    FirmwareRevision TEXT   NOT NULL DEFAULT '',
                     Action          TEXT    NOT NULL,
                     WhitelistVersion TEXT   NOT NULL,
                     SentToServer    INTEGER NOT NULL DEFAULT 0
