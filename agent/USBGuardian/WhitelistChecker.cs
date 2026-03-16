@@ -107,6 +107,17 @@ public class WhitelistChecker
                 return false;
         }
 
+        // Kontrola expirace záznamu (ISO 27001 A.7.10 – řízení životního cyklu médií)
+        // ValidUntil = null → trvalé schválení (bez expirace)
+        // ValidUntil = datum → dočasné schválení (dodavatel, návštěva, zkušební provoz)
+        if (entry.ValidUntil.HasValue && entry.ValidUntil.Value < DateTime.UtcNow)
+        {
+            _logger.LogWarning(
+                "Zařízení {Device} bylo na whitelistu ale platnost vypršela: {Expired}",
+                device.FriendlyName, entry.ValidUntil.Value);
+            return false;
+        }
+
         return true;
     }
 

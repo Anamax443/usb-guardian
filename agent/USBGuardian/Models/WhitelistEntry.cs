@@ -32,6 +32,15 @@ public class WhitelistEntry
     public string ApprovedBy { get; set; } = string.Empty;
 
     /// <summary>
+    /// Datum expirace záznamu.
+    /// NULL = trvalé schválení.
+    /// Datum = dočasné schválení (dodavatel, návštěva, zkušební provoz).
+    /// Po expiraci médium přestane fungovat bez nutnosti ručního odebrání.
+    /// ISO 27001 A.7.10 – řízení životního cyklu médií.
+    /// </summary>
+    public DateTime? ValidUntil { get; set; } = null;
+
+    /// <summary>
     /// Vypočítaný klíč pro rychlé porovnání s DeviceInfo.UniqueKey
     /// </summary>
     public string UniqueKey =>

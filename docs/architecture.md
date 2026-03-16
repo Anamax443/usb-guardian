@@ -200,16 +200,47 @@ což je nezbytné pro terénní pracovníky na hotspotu nebo mimo doménu.
       "vendorId": "KINGSTON",
       "productId": "DATATRAVELER_2.0",
       "serialNumber": "4B018CD154C9",
-      "description": "Popis – kdo, co, proč",
+      "description": "Trvalé schválení – IT oddělení",
       "approvedAt": "2026-03-16T00:00:00Z",
-      "approvedBy": "it-admin"
+      "approvedBy": "it-admin",
+      "validUntil": null
+    },
+    {
+      "vendorId": "SANDISK",
+      "productId": "CRUZER_FORCE",
+      "serialNumber": "4C530000030923112121",
+      "description": "Dočasné schválení – dodavatel XYZ do 31.3.2026",
+      "approvedAt": "2026-03-16T00:00:00Z",
+      "approvedBy": "it-admin",
+      "validUntil": "2026-03-31T23:59:59Z"
     }
   ]
 }
 ```
 
-- `signature` – zatím prázdné, Fáze 3 přidá RSA podpis (nelze podvrhnout offline)
-- `validUntil` – expirace whitelistu, doporučeno 30 dní
+- `signature` – zatím prázdné, budoucí verze přidá RSA podpis (nelze podvrhnout offline)
+- `validUntil` (whitelist) – expirace celého whitelistu, doporučeno 30 dní
+
+### Expirace záznamů (ISO 27001 A.7.10 – řízení životního cyklu médií)
+
+Každý záznam v whitelistu může mít vlastní datum platnosti (`validUntil`):
+
+| validUntil | Význam | Použití |
+|------------|--------|---------|
+| `null` | Trvalé schválení | Firemní média IT oddělení |
+| datum | Dočasné schválení | Dodavatel, návštěva, zkušební provoz |
+
+Po expiraci médium přestane fungovat bez nutnosti ručního odebrání. Záznam zůstane v databázi jako audit trail. IT musí aktivně prodloužit platnost – **pravidelná recertifikace médií**.
+
+SQL pro dočasné schválení:
+```sql
+INSERT INTO dbo.WhitelistDevices
+    (VendorId, ProductId, SerialNumber, Description, ApprovedBy, ValidUntil)
+VALUES
+    ('SANDISK', 'CRUZER_FORCE', '4C530000030923112121',
+     'Dodavatel XYZ – dočasný přístup', 'it-admin',
+     DATEADD(DAY, 7, GETUTCDATE()));
+```
 
 ---
 
