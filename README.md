@@ -3,6 +3,18 @@
 Bezpečnostní nástroj pro monitoring paměťových médií na firemních počítačích.
 Každé USB médium, SD karta nebo USB disk musí být schváleno IT oddělením a zapsáno do whitelistu.
 
+## Regulatorní soulad
+
+USB Guardian byl navržen jako technické opatření splňující požadavky:
+
+- **NIS2** (Směrnice EU 2022/2555) – čl. 21 odst. 2: bezpečnost dodavatelského řetězce, základní kybernetická hygiena, hlášení incidentů
+- **Zákon č. 181/2014 Sb.** o kybernetické bezpečnosti + Vyhláška č. 82/2018 Sb. – § 14 řízení přístupů, § 16 ochrana před škodlivým kódem
+- **ISO/IEC 27001:2022** – kontroly A.8.12 (prevence úniku dat), A.7.10 (paměťová média), A.8.15 (logování), A.5.26 (reakce na incidenty)
+
+Podrobný popis compliance viz [`docs/architecture.md`](docs/architecture.md) – sekce *Regulatorní kontext*.
+
+---
+
 ## Stav projektu
 
 | Fáze | Popis | Stav |

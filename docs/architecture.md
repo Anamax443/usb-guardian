@@ -1,5 +1,69 @@
 # USB Guardian – Technická dokumentace architektury
 
+## Regulatorní kontext a compliance
+
+USB Guardian byl navržen jako technické opatření splňující požadavky níže uvedených předpisů.
+Tato sekce slouží jako podklad pro bezpečnostní audity a dokumentaci ISMS.
+
+### NIS2 – Směrnice EU 2022/2555
+
+Směrnice NIS2 (Network and Information Security) ukládá povinným subjektům zavést technická
+a organizační opatření pro řízení kybernetických rizik. USB Guardian adresuje konkrétně:
+
+| Požadavek NIS2 | Jak USB Guardian plní |
+|---|---|
+| Čl. 21 odst. 2 písm. e) – bezpečnost dodavatelského řetězce | Kontrola médií přinášených do firmy (flash disky, SD karty) |
+| Čl. 21 odst. 2 písm. h) – základní hygiena v oblasti kyb. bezpečnosti | Whitelist povolených zařízení, automatické blokování neznámých |
+| Čl. 23 – hlášení incidentů | Strukturovaný log incidentů (kdo, kdy, co, jaká akce) připravený pro hlášení |
+
+### Zákon č. 181/2014 Sb. o kybernetické bezpečnosti
+
+Zákon a jeho prováděcí předpisy ukládají povinnost chránit systémy před neoprávněným přístupem.
+
+**Vyhláška č. 82/2018 Sb.** (o bezpečnostních opatřeních) – USB Guardian implementuje:
+- § 14 – Řízení přístupů: pouze schválená média mohou být použita na firemních stanicích
+- § 16 – Ochrana před škodlivým kódem: zamezení zavlečení malware přes neznámá USB média
+- § 22 – Fyzická bezpečnost: kontrola fyzických nosičů dat
+
+> **Poznámka:** V souvislosti s transpozicí NIS2 do českého práva (zákon č. 240/2022 Sb.)
+> jsou připravovány nové prováděcí vyhlášky. Čísla vyhlášek ověřte na aktuálním znění
+> ve Sbírce zákonů (epravo.cz / zakonyprolidi.cz) – čísla se mohla změnit.
+
+### ISO/IEC 27001:2022 – ISMS
+
+USB Guardian podporuje implementaci následujících kontrol dle Přílohy A normy ISO 27001:
+
+| Kontrola ISO 27001 | Popis | Jak USB Guardian plní |
+|---|---|---|
+| A.8.12 – Prevence úniku dat | Zabránění neoprávněnému přenosu dat | Blokování neschválených médií |
+| A.8.20 – Bezpečnost sítí | Ochrana před zanesením hrozeb | Whitelist zabraňuje použití neznámých médií |
+| A.7.10 – Paměťová média | Řízení životního cyklu médií | Evidence schválených médií s metadaty (kdo, kdy schválil) |
+| A.8.15 – Logování | Audit trail bezpečnostních událostí | SQLite log: uživatel, PC, zařízení, čas, akce |
+| A.5.26 – Reakce na incidenty | Evidence a hlášení incidentů | Strukturovaný log připravený pro SIEM/export |
+
+### Praktický dopad na audit
+
+Při bezpečnostním auditu (ISO 27001, NIS2, SOC2) USB Guardian poskytuje:
+
+```
+Důkaz 1: Existence whitelistu
+  → whitelist.json s metadaty (kdo schválil, kdy, popis zařízení)
+
+Důkaz 2: Log incidentů
+  → incidents.db – každý pokus o připojení neznámého média
+  → obsahuje: timestamp, hostname, username, VID/PID/serial, akce
+
+Důkaz 3: Technické opatření
+  → warn mode = detekce + upozornění + log
+  → block mode = aktivní blokování přístupu k médiu
+
+Důkaz 4: Pokrytí offline stanic
+  → agent funguje bez síťového připojení
+  → whitelist má datum expirace (max. stáří konfigurovatelné)
+```
+
+---
+
 ## Přehled systému
 
 USB Guardian je Windows agent (Background Service) který monitoruje připojení paměťových médií
