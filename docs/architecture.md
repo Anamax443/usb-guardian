@@ -16,19 +16,34 @@ což je nezbytné pro terénní pracovníky na hotspotu nebo mimo doménu.
 ┌──────────────────────────────────────────────────────────────────┐
 │                        Windows Service                           │
 │                                                                  │
-│  ┌──────────────┐    ┌────────────────┐    ┌──────────────────┐  │
-│  │DeviceMonitor │───▶│WhitelistChecker│───▶│ PolicyEnforcer   │  │
-│  │  (WMI)       │    │  (JSON cache)  │    │ (warn / block)   │  │
-│  └──────────────┘    └────────────────┘    └────────┬─────────┘  │
-│                                                     │            │
-│                          ┌──────────────────────────┼────────┐   │
-│                          ▼                ▼          ▼        │   │
-│                 ┌──────────────┐  ┌────────────┐  ┌────────┐ │   │
-│                 │Notification  │  │Incident    │  │Device  │ │   │
-│                 │Service       │  │Logger      │  │Blocker │ │   │
-│                 │(Toast/Email) │  │(SQLite)    │  │(IOCTL) │ │   │
-│                 └──────────────┘  └────────────┘  └────────┘ │   │
-└──────────────────────────────────────────────────────────────┘   │
+│  ┌─────────────────────────────────┐                            │
+│  │         DeviceMonitor           │                            │
+│  │                                 │                            │
+│  │  [WMI: Win32_DiskDrive]        │                            │
+│  │    ↓ fyzický disk               │                            │
+│  │  [pendingDevices dict]          │                            │
+│  │    ↓ korelace DiskIndex         │                            │
+│  │  [WMI: Win32_LogicalDisk]      │                            │
+│  │    ↓ drive letter (F:)          │                            │
+│  └──────────────┬──────────────────┘                            │
+│                 ↓                                                │
+│  ┌──────────────────┐   ┌──────────────────┐                   │
+│  │ WhitelistChecker  │   │                  │                   │
+│  │  (JSON cache)     │   │                  │                   │
+│  └────────┬─────────┘   │                  │                   │
+│           ↓             │                  │                   │
+│  ┌──────────────────┐   │                  │                   │
+│  │  PolicyEnforcer  │   │                  │                   │
+│  │  (warn / block)  │   │                  │                   │
+│  └───┬──────────────┘   │                  │                   │
+│      │                  │                  │                   │
+│      ↓          ↓               ↓          │                   │
+│  ┌────────┐  ┌──────────────┐  ┌────────┐  │                   │
+│  │Device  │  │Notification  │  │Incident│  │                   │
+│  │Blocker │  │Service       │  │Logger  │  │                   │
+│  │(IOCTL) │  │(Toast/Email) │  │(SQLite)│  │                   │
+│  └────────┘  └──────────────┘  └────────┘  │                   │
+└──────────────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -36,14 +51,17 @@ což je nezbytné pro terénní pracovníky na hotspotu nebo mimo doménu.
 ## Komponenty
 
 ### DeviceMonitor
-- **Technologie:** WMI (Windows Management Instrumentation) – `Win32_DiskDrive`
-- **Funkce:** Naslouchá `__InstanceCreationEvent` – každé nové zařízení
+- **Technologie:** Dva WMI watchers běžící paralelně
+  - `Win32_DiskDrive` – fyzický disk (VID, PID, Serial, kapacita, firmware)
+  - `Win32_LogicalDisk` – drive letter (F:, G: atd.)
+- **Korelace:** `DiskIndex` spojuje fyzický disk s logickým diskem
+- **Pending mechanismus:** Fyzický disk se uloží do `ConcurrentDictionary`, čeká na drive letter event
+- **Fallback:** Pokud drive letter nepřijde do 10 sekund, zpracuje se médium bez něj
 - **Parser:** Podporuje dva formáty PNPDeviceID:
   - `USB\VID_xxxx&PID_xxxx` – klasický USB (hex identifikátory)
   - `USBSTOR\DISK&VEN_xxx&PROD_xxx` – storage zařízení (textové názvy)
 - **Filtr:** Přeskakuje interní disky (SATA, NVMe, SCSI)
-- **Data ze zařízení:** VendorId, ProductId, SerialNumber, FriendlyName, kapacita, firmware
-- **Drive letters:** WMI asociace `Win32_DiskDrive → Win32_DiskPartition → Win32_LogicalDisk`
+- **Data ze zařízení:** VendorId, ProductId, SerialNumber, FriendlyName, kapacita, firmware, drive letters
 
 ### WhitelistChecker
 - **Zdroj:** JSON soubor `C:\ProgramData\USBGuardian\whitelist\whitelist.json`
