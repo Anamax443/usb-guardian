@@ -4,6 +4,17 @@
 //   1. Win32_DiskDrive  – fyzický disk (VID, PID, Serial, kapacita)
 //   2. Win32_LogicalDisk – drive letter (F:, G: atd.)
 // Korelace: diskIndex z DiskDrive → DiskIndex v LogicalDisk
+//
+// v1.1 – přidán WMI Watchdog:
+//   - Každých 5 minut ověří živost WMI subscriptions testovacím dotazem
+//   - Při selhání automaticky re-registruje oba watchers
+//
+// v1.2 – fix obousměrného timingu:
+//   - WMI eventy přicházejí v nepředvídatelném pořadí
+//   - DiskDrive může přijít před i po LogicalDisk eventu
+//   - _pendingDevices     – DiskDrive přišel první, čeká na LogicalDisk
+//   - _pendingDriveLetters – LogicalDisk přišel první, čeká na DiskDrive
+//   - Timeout prodloužen z 10s na 30s
 // ============================================================
 
 using System.Collections.Concurrent;
@@ -24,10 +35,23 @@ public class DeviceMonitor : BackgroundService
     private ManagementEventWatcher? _diskWatcher;
     private ManagementEventWatcher? _logicalWatcher;
 
-    // Čekající zařízení – fyzický disk přišel, čekáme na drive letter
+    // Scénář A: DiskDrive přišel první → čeká na drive letter
     // Key = diskIndex, Value = (DeviceInfo, čas detekce)
     private readonly ConcurrentDictionary<int, (DeviceInfo Device, DateTime DetectedAt)>
         _pendingDevices = new();
+
+    // Scénář B: LogicalDisk přišel první → čeká na DiskDrive
+    // Key = diskIndex, Value = (driveLetter, čas detekce)
+    private readonly ConcurrentDictionary<int, (string DriveLetter, DateTime DetectedAt)>
+        _pendingDriveLetters = new();
+
+    // Jak dlouho čekat na spárování (WMI eventy mohou mít velký rozestup)
+    private const int PairingTimeoutSeconds = 30;
+
+    // Watchdog – hlídá živost WMI subscriptions
+    private Timer? _watchdogTimer;
+    private DateTime _lastWmiEventAt = DateTime.UtcNow;
+    private const int WatchdogIntervalSeconds = 300; // kontrola každých 5 minut
 
     public DeviceMonitor(
         ILogger<DeviceMonitor> logger,
@@ -48,6 +72,7 @@ public class DeviceMonitor : BackgroundService
 
         StartDiskWatcher();
         StartLogicalDiskWatcher();
+        StartWatchdog();
 
         try
         {
@@ -109,17 +134,78 @@ public class DeviceMonitor : BackgroundService
         }
     }
 
+    // --------------------------------------------------------
+    // Watchdog – periodicky ověřuje živost WMI subscriptions
+    // --------------------------------------------------------
+    private void StartWatchdog()
+    {
+        _watchdogTimer = new Timer(
+            callback: _ => CheckWatchdog(),
+            state: null,
+            dueTime:  TimeSpan.FromSeconds(WatchdogIntervalSeconds),
+            period:   TimeSpan.FromSeconds(WatchdogIntervalSeconds));
+
+        _logger.LogInformation("WMI watchdog spuštěn (interval {Sec}s)", WatchdogIntervalSeconds);
+    }
+
+    private void CheckWatchdog()
+    {
+        try
+        {
+            // Testovací WMI dotaz – pokud WMI pipe žije, projde rychle (~ms)
+            using var searcher = new ManagementObjectSearcher(
+                "root\\cimv2",
+                "SELECT DeviceID FROM Win32_DiskDrive WHERE Size > 0");
+            searcher.Get().Dispose();
+
+            _logger.LogDebug("WMI watchdog OK (poslední událost: {Age:F1} min zpět)",
+                (DateTime.UtcNow - _lastWmiEventAt).TotalMinutes);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "WMI watchdog detekoval selhání – re-registruji watchers");
+            ReRegisterWatchers();
+        }
+    }
+
+    private void ReRegisterWatchers()
+    {
+        try { _diskWatcher?.Stop();    _diskWatcher?.Dispose();    } catch { }
+        try { _logicalWatcher?.Stop(); _logicalWatcher?.Dispose(); } catch { }
+
+        try
+        {
+            StartDiskWatcher();
+            StartLogicalDiskWatcher();
+            _logger.LogInformation("WMI watchers úspěšně re-registrovány");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Re-registrace WMI watcherů selhala – agent bez ochrany!");
+        }
+    }
+
+    // --------------------------------------------------------
+    // Zastavení všech watcherů + watchdog timeru
+    // --------------------------------------------------------
     private void StopWatchers()
     {
-        try { _diskWatcher?.Stop(); _diskWatcher?.Dispose(); } catch { }
+        try { _watchdogTimer?.Dispose(); } catch { }
+        try { _diskWatcher?.Stop();    _diskWatcher?.Dispose();    } catch { }
         try { _logicalWatcher?.Stop(); _logicalWatcher?.Dispose(); } catch { }
     }
 
     // --------------------------------------------------------
-    // Callback 1: fyzický disk připojen → uložíme do pending
+    // Callback 1: fyzický disk připojen
+    //
+    // Možné scénáře:
+    //   A) DiskDrive přišel první → uložit do _pendingDevices, čekat na LogicalDisk
+    //   B) LogicalDisk přišel první → najdeme v _pendingDriveLetters, zpracovat rovnou
     // --------------------------------------------------------
     private void OnDiskConnected(object sender, EventArrivedEventArgs e)
     {
+        _lastWmiEventAt = DateTime.UtcNow;
+
         try
         {
             var wmi = e.NewEvent["TargetInstance"] as ManagementBaseObject;
@@ -127,35 +213,44 @@ public class DeviceMonitor : BackgroundService
 
             if (!IsRemovableMedia(wmi)) return;
 
-            var device = ParseDeviceFromWmi(wmi);
+            var device    = ParseDeviceFromWmi(wmi);
             var diskIndex = ExtractDiskIndex(wmi["DeviceID"]?.ToString() ?? string.Empty);
 
             _logger.LogInformation("Detekováno médium: {Device} (DiskIndex={Index})",
                 device, diskIndex);
 
-            if (diskIndex >= 0)
-            {
-                // Uložíme do pending – drive letter přijde za chvíli přes LogicalDisk watcher
-                _pendingDevices[diskIndex] = (device, DateTime.UtcNow);
-
-                // Záloha: pokud drive letter nepřijde do 10 sec, zpracujeme bez něj
-                _ = Task.Run(async () =>
-                {
-                    await Task.Delay(10_000);
-                    if (_pendingDevices.TryRemove(diskIndex, out var pending))
-                    {
-                        _logger.LogWarning(
-                            "Drive letter nepřišel do 10s pro {Device} – zpracovávám bez něj",
-                            pending.Device.FriendlyName);
-                        ProcessDevice(pending.Device);
-                    }
-                });
-            }
-            else
+            if (diskIndex < 0)
             {
                 // Nelze zjistit index → zpracujeme rovnou bez drive letter
                 ProcessDevice(device);
+                return;
             }
+
+            // Scénář B: LogicalDisk přišel dřív → drive letter už čeká
+            if (_pendingDriveLetters.TryRemove(diskIndex, out var pending))
+            {
+                device.DriveLetters.Add(pending.DriveLetter);
+                _logger.LogInformation(
+                    "Spárováno (LogicalDisk čekal): drive letter {Letter}: → {Device}",
+                    pending.DriveLetter, device.FriendlyName);
+                ProcessDevice(device);
+                return;
+            }
+
+            // Scénář A: DiskDrive přišel první → čekáme na LogicalDisk
+            _pendingDevices[diskIndex] = (device, DateTime.UtcNow);
+
+            _ = Task.Run(async () =>
+            {
+                await Task.Delay(PairingTimeoutSeconds * 1000);
+                if (_pendingDevices.TryRemove(diskIndex, out var timedOut))
+                {
+                    _logger.LogWarning(
+                        "Drive letter nepřišel do {Sec}s pro {Device} – zpracovávám bez něj",
+                        PairingTimeoutSeconds, timedOut.Device.FriendlyName);
+                    ProcessDevice(timedOut.Device);
+                }
+            });
         }
         catch (Exception ex)
         {
@@ -164,10 +259,16 @@ public class DeviceMonitor : BackgroundService
     }
 
     // --------------------------------------------------------
-    // Callback 2: logický disk připojen → spárujeme s pending
+    // Callback 2: logický disk připojen
+    //
+    // Možné scénáře:
+    //   A) DiskDrive přišel první → najdeme v _pendingDevices, zpracovat rovnou
+    //   B) LogicalDisk přišel první → uložit do _pendingDriveLetters, čekat na DiskDrive
     // --------------------------------------------------------
     private void OnLogicalDiskConnected(object sender, EventArrivedEventArgs e)
     {
+        _lastWmiEventAt = DateTime.UtcNow;
+
         try
         {
             var wmi = e.NewEvent["TargetInstance"] as ManagementBaseObject;
@@ -178,20 +279,43 @@ public class DeviceMonitor : BackgroundService
             if (driveType != 2 && driveType != 3) return;
 
             var driveLetter = wmi["DeviceID"]?.ToString()?.Replace(":", "").Trim() ?? string.Empty;
-            var diskIndex   = GetDiskIndexForLogicalDisk(
-                wmi["DeviceID"]?.ToString() ?? string.Empty);
+            var diskIndex   = GetDiskIndexForLogicalDisk(wmi["DeviceID"]?.ToString() ?? string.Empty);
 
             _logger.LogInformation("Nový logický disk: {Letter}: (DiskIndex={Index})",
                 driveLetter, diskIndex);
 
-            if (diskIndex >= 0 && _pendingDevices.TryRemove(diskIndex, out var pending))
+            if (diskIndex < 0) return; // Nelze spárovat – ignorujeme
+
+            // Scénář A: DiskDrive přišel první → drive letter přiřadíme a zpracujeme
+            if (_pendingDevices.TryRemove(diskIndex, out var pending))
             {
-                // Spárování nalezeno!
                 pending.Device.DriveLetters.Add(driveLetter);
-                _logger.LogInformation("Drive letter {Letter}: přiřazen k {Device}",
+                _logger.LogInformation(
+                    "Spárováno (DiskDrive čekal): drive letter {Letter}: → {Device}",
                     driveLetter, pending.Device.FriendlyName);
                 ProcessDevice(pending.Device);
+                return;
             }
+
+            // Scénář B: LogicalDisk přišel první → uložíme a čekáme na DiskDrive
+            _logger.LogDebug(
+                "LogicalDisk {Letter}: přišel před DiskDrive (DiskIndex={Index}) – čekám na DiskDrive",
+                driveLetter, diskIndex);
+
+            _pendingDriveLetters[diskIndex] = (driveLetter, DateTime.UtcNow);
+
+            _ = Task.Run(async () =>
+            {
+                await Task.Delay(PairingTimeoutSeconds * 1000);
+                if (_pendingDriveLetters.TryRemove(diskIndex, out _))
+                {
+                    // DiskDrive nepřišel – drive letter osiřel, nic nelogujeme
+                    // (může jít o interní disk nebo nepodporované zařízení)
+                    _logger.LogDebug(
+                        "DiskDrive nepřišel do {Sec}s pro drive letter {Letter}: – ignoruji",
+                        PairingTimeoutSeconds, driveLetter);
+                }
+            });
         }
         catch (Exception ex)
         {
@@ -220,13 +344,11 @@ public class DeviceMonitor : BackgroundService
 
     // --------------------------------------------------------
     // Zjistí DiskIndex pro logický disk (F:) přes Win32_LogicalDiskToPartition
-    // Tato metoda běží v STA WMI event threadu – funguje správně
     // --------------------------------------------------------
     private int GetDiskIndexForLogicalDisk(string deviceId)
     {
         try
         {
-            // Logický disk → partition
             using var searcher = new ManagementObjectSearcher(
                 "root\\cimv2",
                 $"ASSOCIATORS OF {{Win32_LogicalDisk.DeviceID='{deviceId}'}} " +
@@ -234,7 +356,6 @@ public class DeviceMonitor : BackgroundService
 
             foreach (ManagementBaseObject partition in searcher.Get())
             {
-                // Partition → disk index
                 var diskIndexVal = partition["DiskIndex"];
                 if (diskIndexVal != null)
                     return Convert.ToInt32(diskIndexVal);

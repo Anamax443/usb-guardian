@@ -26,9 +26,10 @@ Podrobný popis compliance viz [`docs/architecture.md`](docs/architecture.md).
 | 1 | Windows agent – WMI detekce, warn mode, Toast notifikace | ✅ Hotovo |
 | 2 | Block mode – IOCTL lock, PnpDevice fallback | ✅ Hotovo |
 | 3 | REST API server, SQL Server, file-based logging, sync | ✅ Hotovo |
-| 4 | Service recovery, WMI watchdog, instalační skript | 🔜 Plánováno |
-| 5 | Email notifikace (Microsoft Graph API) | 🔜 Plánováno |
-| 6 | Admin UI – dashboard, správa whitelistu, reporty | 📋 Plánováno |
+| 4 | ACL queue\, service recovery, WMI watchdog, timing fix | ✅ Hotovo |
+| 5 | Toast z SYSTEM kontextu (Privilege Separation) | 🔜 Plánováno |
+| 6 | Email notifikace (Microsoft Graph API) | 🔜 Plánováno |
+| 7 | Admin UI – dashboard, správa whitelistu, reporty | 📋 Plánováno |
 
 ---
 
@@ -337,14 +338,20 @@ Start-Process "http://B-S-W-SQL-04:5050/swagger"
 - `AllowWildcards: false` – bez sériového čísla = zamítnuto (NIS2)
 - SMB záměrně vypnuto na SQL serveru – deploy výhradně přes SCP
 - Windows Auth (Kerberos) – agent jako `HOSTNAME$`, API pod gMSA
-- Service recovery: auto-restart při pádu (3× s rostoucí prodlevou)
+- Service recovery: auto-restart při pádu (3× s rostoucí prodlevou: 5s/30s/60s)
+- ACL `queue\`: pouze SYSTEM + Administrators – uživatelé nemají přístup k datům incidentů
+- WMI watchdog: automatická re-registrace subscriptions při selhání WMI
 
 ---
 
 ## Pending (plánované funkce)
 
-- [ ] Service recovery akce pro agenta (instalační skript)
-- [ ] WMI watchdog – detekce zaseknutí watcheru
+- [x] ACL `queue\` – pouze SYSTEM + Administrators (Users bez přístupu)
+- [x] Service recovery – automatický restart při selhání (3× s rostoucí prodlevou)
+- [x] WMI watchdog – detekce zaseknutí watcheru, automatická re-registrace
+- [x] Timing fix – obousměrné párování DiskDrive/LogicalDisk (timeout 30s)
+- [ ] Toast z SYSTEM kontextu (Privilege Separation – helper process v user session)
+- [ ] RSA podpis whitelistu (Fáze 4 – bezpečný rollout na terénní stroje)
 - [ ] WM_DEVICECHANGE jako záloha za WMI
 - [ ] HTTPS pro API
 - [ ] API verzování `/api/v1/`
@@ -356,4 +363,4 @@ Start-Process "http://B-S-W-SQL-04:5050/swagger"
 
 ---
 
-*USB Guardian – Fáze 3 dokončena | IT Security Tool | NIS2 + ISO 27001 compliant*
+*USB Guardian – Fáze 4 dokončena | IT Security Tool | NIS2 + ISO 27001 compliant*

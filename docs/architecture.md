@@ -119,8 +119,14 @@ což je nezbytné pro terénní pracovníky na hotspotu nebo mimo doménu.
   - `Win32_DiskDrive` – fyzický disk (VID, PID, Serial, kapacita, firmware)
   - `Win32_LogicalDisk` – drive letter (F:, G: atd.)
 - **Korelace:** `DiskIndex` spojuje fyzický disk s logickým diskem
-- **Pending mechanismus:** Fyzický disk se uloží do `ConcurrentDictionary`, čeká na drive letter event
-- **Fallback:** Pokud drive letter nepřijde do 10 sekund, zpracuje se médium bez něj
+- **Obousměrné párování (v1.2):** WMI eventy přicházejí v nepředvídatelném pořadí:
+  - `_pendingDevices` – DiskDrive přišel první, čeká na LogicalDisk
+  - `_pendingDriveLetters` – LogicalDisk přišel první, čeká na DiskDrive
+  - Timeout pro párování: 30 sekund (prodlouženo z původních 10s)
+- **WMI Watchdog (v1.1):** Každých 5 minut testovací WMI dotaz
+  - Při selhání automatická re-registrace obou watcherů
+  - `_lastWmiEventAt` timestamp pro diagnostiku stáří poslední události
+- **Fallback:** Pokud drive letter nepřijde do 30 sekund, zpracuje se médium bez něj
 - **Parser:** Podporuje dva formáty PNPDeviceID:
   - `USB\VID_xxxx&PID_xxxx` – klasický USB (hex identifikátory)
   - `USBSTOR\DISK&VEN_xxx&PROD_xxx` – storage zařízení (textové názvy)
@@ -1009,9 +1015,11 @@ SELECT TOP 10 * FROM USBGuardian.dbo.Incidents ORDER BY ReceivedAt DESC;
 | Problém | Příčina | Řešení |
 |---------|---------|--------|
 | `Cannot find path C:\ProgramData\USBGuardian\queue` | Složka neexistuje | Spustit setup script (krok 4) |
+| `Access to path queue\.tmp is denied` | Uživatel nemá práva na queue\ | V produkci agent běží jako SYSTEM – OK. Ve vývoji: přidat uživatele do ACL přes elevated PS |
 | `Login failed for user AXINETWORK\trnkam` | Uživatel nemá přístup k DB | Přidat uživatele do db_datareader/db_datawriter |
 | `isAuthenticated: false` | Chybí SPN registrace pro gMSA | Spustit setspn příkazy (krok 1) |
 | `SMB Síťový název nelze nalézt` | SMB záměrně vypnuto na SQL serveru | Používat SCP místo UNC cest |
-| `Access to path is denied` při přesunu do sent\ | Uživatel nemá práva na složku | Přidat `Users:(OI)(CI)M` práva |
 | `YOUR_SQL_SERVER` ve startup logu | appsettings.local.json nenačten | Zkontrolovat cestu a obsah souboru |
 | `no such column: PnpDeviceId` | Stará SQLite DB | Smazat incidents.db (přepnuto na file-based logging) |
+| WMI watcher nereaguje na USB | WMI subscription tiše zanikla | Watchdog to automaticky detekuje a re-registruje (log: "WMI watchdog detekoval selhání") |
+| Médium detekováno 2× nebo bez drive letter | Race condition DiskDrive/LogicalDisk | Opraveno v v1.2 – obousměrné párování s timeoutem 30s |
