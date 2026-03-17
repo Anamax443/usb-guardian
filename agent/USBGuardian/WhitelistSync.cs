@@ -1,9 +1,11 @@
 // ============================================================
 // WhitelistSync.cs
 // Background service – synchronizace whitelistu ze serveru.
-// Běží každých 15 minut (konfigurovatelné).
-// Online: stáhne nový whitelist → přepíše lokální soubor.
-// Offline: nic, agent pokračuje s cached verzí.
+//
+// v1.1 – RSA podpis sync:
+//   Stahuje whitelist.json i whitelist.json.sig atomicky.
+//   Pokud stažení .sig selže → stažený .json se neuloží
+//   (agent pokračuje se starou verzí, která je platná).
 // ============================================================
 
 using System.Text.Json;
@@ -20,6 +22,9 @@ public class WhitelistSync : BackgroundService
     private readonly int _syncIntervalMinutes;
     private readonly HttpClient _httpClient;
 
+    // Cesta k .sig souboru (vedle whitelistu)
+    private string SignaturePath => _localWhitelistPath + ".sig";
+
     public WhitelistSync(
         ILogger<WhitelistSync> logger,
         string syncUrl,
@@ -31,15 +36,8 @@ public class WhitelistSync : BackgroundService
         _localWhitelistPath  = localWhitelistPath;
         _syncIntervalMinutes = syncIntervalMinutes;
 
-        // Windows Authentication – agent jako HOSTNAME$ účet
-        var handler = new HttpClientHandler
-        {
-            UseDefaultCredentials = true
-        };
-        _httpClient = new HttpClient(handler)
-        {
-            Timeout = TimeSpan.FromSeconds(30)
-        };
+        var handler = new HttpClientHandler { UseDefaultCredentials = true };
+        _httpClient = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(30) };
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -48,29 +46,21 @@ public class WhitelistSync : BackgroundService
             "WhitelistSync spuštěn – interval: {Min} min, URL: {Url}",
             _syncIntervalMinutes, _syncUrl);
 
-        // 30 sekund po startu – dáme čas ostatním službám
         await Task.Delay(TimeSpan.FromSeconds(30), stoppingToken);
 
         while (!stoppingToken.IsCancellationRequested)
         {
             await TrySyncWhitelist();
-            await Task.Delay(
-                TimeSpan.FromMinutes(_syncIntervalMinutes),
-                stoppingToken);
+            await Task.Delay(TimeSpan.FromMinutes(_syncIntervalMinutes), stoppingToken);
         }
     }
 
-    // --------------------------------------------------------
-    // Hlavní sync logika
-    // --------------------------------------------------------
     private async Task TrySyncWhitelist()
     {
         try
         {
-            // Krok 1: Zjistíme lokální verzi
             var localVersion = GetLocalVersion();
 
-            // Krok 2: Heartbeat – je nová verze?
             var heartbeatUrl =
                 $"{_syncUrl}/api/heartbeat" +
                 $"?hostname={Uri.EscapeDataString(Environment.MachineName)}" +
@@ -86,7 +76,7 @@ public class WhitelistSync : BackgroundService
             }
 
             var heartbeatJson = await heartbeatResp.Content.ReadAsStringAsync();
-            var heartbeat = JsonSerializer.Deserialize<HeartbeatDto>(heartbeatJson,
+            var heartbeat     = JsonSerializer.Deserialize<HeartbeatDto>(heartbeatJson,
                 new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
 
             if (heartbeat == null) return;
@@ -95,7 +85,6 @@ public class WhitelistSync : BackgroundService
                 "WhitelistSync: heartbeat OK – server: {Server}, lokální: {Local}",
                 heartbeat.CurrentWhitelistVersion, localVersion);
 
-            // Krok 3: Pokud není nová verze, nic neděláme
             if (!heartbeat.WhitelistUpdateAvailable)
             {
                 _logger.LogInformation(
@@ -107,7 +96,6 @@ public class WhitelistSync : BackgroundService
                 "Nová verze whitelistu: {New} (máme: {Old})",
                 heartbeat.CurrentWhitelistVersion, localVersion);
 
-            // Krok 4: Stáhneme a uložíme nový whitelist
             await DownloadAndSaveWhitelist();
         }
         catch (HttpRequestException ex)
@@ -125,60 +113,67 @@ public class WhitelistSync : BackgroundService
     }
 
     // --------------------------------------------------------
-    // Stažení a atomický zápis whitelistu
+    // Stáhne whitelist.json a whitelist.json.sig atomicky.
+    // Pokud .sig endpoint selže → nový whitelist se NEULOŽÍ.
+    // Agent pokračuje se starou (platnou) verzí.
     // --------------------------------------------------------
     private async Task DownloadAndSaveWhitelist()
     {
-        var response = await _httpClient.GetAsync($"{_syncUrl}/api/whitelist");
-
-        if (!response.IsSuccessStatusCode)
+        // Krok 1: Stáhni whitelist JSON
+        var jsonResponse = await _httpClient.GetAsync($"{_syncUrl}/api/whitelist");
+        if (!jsonResponse.IsSuccessStatusCode)
         {
-            _logger.LogWarning("Stažení whitelistu selhalo: {Status}",
-                response.StatusCode);
+            _logger.LogWarning("Stažení whitelistu selhalo: {Status}", jsonResponse.StatusCode);
             return;
         }
+        var json = await jsonResponse.Content.ReadAsStringAsync();
 
-        var json = await response.Content.ReadAsStringAsync();
-
-        // Validace – je to platný JSON?
+        // Validace JSON formátu
         JsonSerializer.Deserialize<object>(json);
 
-        // Atomický zápis přes temp soubor
-        // Zabraňuje poškození při výpadku uprostřed zápisu
-        var tempPath = _localWhitelistPath + ".tmp";
-        var dir      = Path.GetDirectoryName(_localWhitelistPath);
+        // Krok 2: Stáhni podpis (.sig)
+        var sigResponse = await _httpClient.GetAsync($"{_syncUrl}/api/whitelist/signature");
+        if (!sigResponse.IsSuccessStatusCode)
+        {
+            _logger.LogError(
+                "Stažení podpisu whitelistu selhalo: {Status} – " +
+                "whitelist NEULOŽEN, pokračuji se starou verzí",
+                sigResponse.StatusCode);
+            return;
+        }
+        var signature = await sigResponse.Content.ReadAsStringAsync();
 
-        if (!string.IsNullOrEmpty(dir))
-            Directory.CreateDirectory(dir);
+        // Krok 3: Atomický zápis OBOU souborů (JSON + SIG)
+        // Nejdříve temp soubory, pak přejmenování → nelze přerušit
+        var dir      = Path.GetDirectoryName(_localWhitelistPath)!;
+        Directory.CreateDirectory(dir);
 
-        await File.WriteAllTextAsync(tempPath, json);
-        File.Move(tempPath, _localWhitelistPath, overwrite: true);
+        var tempJson = _localWhitelistPath + ".tmp";
+        var tempSig  = SignaturePath + ".tmp";
+
+        await File.WriteAllTextAsync(tempJson, json);
+        await File.WriteAllTextAsync(tempSig, signature.Trim());
+
+        // Přejmenovat oba najednou (nejdříve .sig, pak .json)
+        // Pořadí záměrné: pokud selže přejmenování .json, .sig je aktuální
+        // → WhitelistChecker odmítne neplatnou kombinaci
+        File.Move(tempSig,  SignaturePath,          overwrite: true);
+        File.Move(tempJson, _localWhitelistPath,    overwrite: true);
 
         _logger.LogInformation(
-            "Whitelist synchronizován a uložen: {Path}", _localWhitelistPath);
+            "Whitelist + podpis synchronizovány: {Path}", _localWhitelistPath);
     }
 
-    // --------------------------------------------------------
-    // Přečtení verze z lokálního whitelist.json
-    // --------------------------------------------------------
     private string GetLocalVersion()
     {
         try
         {
-            if (!File.Exists(_localWhitelistPath))
-                return string.Empty;
-
+            if (!File.Exists(_localWhitelistPath)) return string.Empty;
             var json = File.ReadAllText(_localWhitelistPath);
             using var doc = JsonDocument.Parse(json);
-
-            return doc.RootElement
-                .GetProperty("version")
-                .GetString() ?? string.Empty;
+            return doc.RootElement.GetProperty("version").GetString() ?? string.Empty;
         }
-        catch
-        {
-            return string.Empty;
-        }
+        catch { return string.Empty; }
     }
 
     public override void Dispose()
@@ -188,7 +183,6 @@ public class WhitelistSync : BackgroundService
     }
 }
 
-// DTO pro heartbeat odpověď
 internal class HeartbeatDto
 {
     public string   CurrentWhitelistVersion  { get; set; } = string.Empty;

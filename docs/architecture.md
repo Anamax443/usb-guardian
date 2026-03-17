@@ -142,8 +142,19 @@ což je nezbytné pro terénní pracovníky na hotspotu nebo mimo doménu.
 - **Zdroj:** JSON soubor `C:\ProgramData\USBGuardian\whitelist\whitelist.json`
 - **Cache:** In-memory cache platná 5 minut (snižuje I/O)
 - **Porovnání:** VendorId + ProductId + SerialNumber (case-insensitive)
-- **Wildcard:** Prázdný SerialNumber = platí pro celou řadu (bezpečnostní riziko)
+- **Wildcard:** Prázdný SerialNumber = platí pro celou řadu (výchozí zakázáno – NIS2)
 - **Expirace:** Whitelist má `validUntil` datum – po expiraci degraded mód
+- **RSA verifikace (v1.1):** Před načtením ověří RSA-SHA256 podpis (`whitelist.json.sig`)
+  - Pokud podpis chybí nebo nesouhlasí → whitelist ODMÍTNUT (fail-secure)
+  - Konfigurace: `signing:enabled` (výchozí `true`), `signing:publicKeyPath`
+
+### SignatureVerifier
+- **Algoritmus:** RSA 4096-bit, SHA-256, PKCS1v15 padding
+- **Veřejný klíč:** `Config/whitelist_public.pem` – distribuován s agentem
+- **Soukromý klíč:** pouze na IT admin stanici, nikdy na agentu
+- **Fail-secure:** při jakékoliv chybě (chybí klíč, chybí .sig, neplatný podpis) → odmítnutí
+- **Cache klíče:** veřejný klíč se načte jednou a cachuje v paměti
+- **Nástroj:** `tools/WhitelistSigner` – generování klíčů, podepisování, ověření
 
 ### PolicyEnforcer
 - **Řídí se:** `policy.mode` v `agent.config.json`

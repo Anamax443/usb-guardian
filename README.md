@@ -29,7 +29,8 @@ Podrobný popis compliance viz [`docs/architecture.md`](docs/architecture.md).
 | 4 | ACL queue\, service recovery, WMI watchdog, timing fix | ✅ Hotovo |
 | 4b | Disconnect tracking, fix duplikátů (offset persist), N+1 fix | ✅ Hotovo |
 | 4c | Incident queue (bounded Channel), jitter, retry 503 | ✅ Hotovo |
-| 5 | Toast z SYSTEM kontextu (Privilege Separation) | 🔜 Plánováno |
+| 5 | RSA podpis whitelistu – SignatureVerifier, WhitelistSigner nástroj | ✅ Hotovo |
+| 6 | Toast z SYSTEM kontextu (Privilege Separation) | 🔜 Plánováno |
 | 6 | Email notifikace (Microsoft Graph API) | 🔜 Plánováno |
 | 7 | Admin UI – dashboard, správa whitelistu, reporty | 📋 Plánováno |
 
@@ -227,7 +228,8 @@ Soubor `agent\USBGuardian\Config\agent.config.json`:
 | `sync.whitelistSyncIntervalMinutes` | `15` | Interval sync whitelistu (min) |
 | `logging.queuePath` | `C:\ProgramData\USBGuardian\queue` | Složka fronty |
 | `logging.sentPath` | `C:\ProgramData\USBGuardian\sent` | Archivní složka |
-| `logging.sentRetentionDays` | `90` | Retence archivních souborů (dny) |
+| `signing.enabled` | `true` | RSA ověření podpisu whitelistu (vypnout pouze pro vývoj) |
+| `signing.publicKeyPath` | `Config/whitelist_public.pem` | Cesta k veřejnému klíči |
 
 ---
 
@@ -257,6 +259,39 @@ UPDATE dbo.WhitelistVersions SET Version = '2026-03-16-v2' WHERE IsActive = 1;
 
 Záznamy bez sériového čísla jsou ve výchozím stavu **zakázány** (NIS2 compliance).
 Bez sériového čísla by útočník mohl použít stejný model média.
+
+---
+
+## RSA podpis whitelistu
+
+Whitelist je chráněn RSA-SHA256 podpisem. Agent odmítne jakýkoliv whitelist bez platného podpisu.
+
+### Inicializace (jednorázově)
+
+```powershell
+cd tools\WhitelistSigner
+dotnet run -- generate
+# → vygeneruje private_key.pem + public_key.pem
+
+# Zkopírovat veřejný klíč k agentovi
+Copy-Item public_key.pem ..\agent\USBGuardian\Config\whitelist_public.pem
+# Soukromý klíč bezpečně uložit (trezor, HSM) – NIKDY necommitovat!
+```
+
+### Podpis whitelistu (po každé změně)
+
+```powershell
+cd tools\WhitelistSigner
+dotnet run -- sign "C:\ProgramData\USBGuardian\whitelist\whitelist.json"
+# → vytvoří whitelist.json.sig
+```
+
+### Ověření podpisu
+
+```powershell
+dotnet run -- verify "C:\ProgramData\USBGuardian\whitelist\whitelist.json"
+# → ✓ Podpis PLATNÝ nebo ✗ Podpis NEPLATNÝ
+```
 
 ---
 
@@ -294,17 +329,23 @@ USBGuardian
 ```
 usb-guardian/
 ├── agent/USBGuardian/
-│   ├── DeviceMonitor.cs        ← WMI dual-watcher, parsování PNPDeviceID
-│   ├── WhitelistChecker.cs     ← porovnání, cache, AllowWildcards, expirace
+│   ├── DeviceMonitor.cs        ← WMI triple-watcher, parsování PNPDeviceID
+│   ├── WhitelistChecker.cs     ← porovnání, cache, AllowWildcards, RSA verifikace
 │   ├── PolicyEnforcer.cs       ← warn/block logika
 │   ├── DeviceBlocker.cs        ← FSCTL_LOCK_VOLUME + PnpDevice fallback
 │   ├── NotificationService.cs  ← Windows Toast
-│   ├── IncidentLogger.cs       ← denní JSON, queue/sent, retence
-│   ├── IncidentSync.cs         ← delta sync, přesun do sent\
-│   ├── WhitelistSync.cs        ← heartbeat, stažení nové verze
+│   ├── IncidentLogger.cs       ← denní JSON, queue/sent, retence, DisconnectedAt
+│   ├── IncidentSync.cs         ← delta sync, jitter, retry 503
+│   ├── WhitelistSync.cs        ← heartbeat, stažení whitelist + .sig
+│   ├── Security/
+│   │   └── SignatureVerifier.cs ← RSA-SHA256 ověření podpisu whitelistu
 │   ├── Program.cs              ← DI, Windows Service, konfigurace
 │   ├── Models/                 ← DeviceInfo, Incident, WhitelistEntry
-│   └── Config/                 ← agent.config.json + local.json.example
+│   └── Config/
+│       ├── agent.config.json
+│       └── whitelist_public.pem ← veřejný klíč pro ověření podpisu
+├── tools/
+│   └── WhitelistSigner/        ← IT admin nástroj: generate / sign / verify
 ├── server/USBGuardian.Api/
 │   ├── Controllers/            ← Incidents, Whitelist, Heartbeat
 │   ├── Queue/                  ← IncidentQueue (Channel), IncidentQueueWorker
@@ -363,8 +404,8 @@ Start-Process "http://B-S-W-SQL-04:5050/swagger"
 - [x] Incident queue – bounded Channel (max 1000 batchů), 202 Accepted, sekvenční zpracování
 - [x] Jitter při startu – náhodné zpoždění 0–60s (thundering herd ochrana pro 500+ PC)
 - [x] Retry při 503 – agent opakuje při plné frontě serveru (3× po 30s)
+- [x] RSA podpis whitelistu – SignatureVerifier (RSA-4096 SHA-256), WhitelistSigner nástroj
 - [ ] Toast z SYSTEM kontextu (Privilege Separation – helper process v user session)
-- [ ] RSA podpis whitelistu (Fáze 4 – bezpečný rollout na terénní stroje)
 - [ ] WM_DEVICECHANGE jako záloha za WMI
 - [ ] HTTPS pro API
 - [ ] API verzování `/api/v1/`
@@ -376,4 +417,4 @@ Start-Process "http://B-S-W-SQL-04:5050/swagger"
 
 ---
 
-*USB Guardian – Fáze 4c dokončena | IT Security Tool | NIS2 + ISO 27001 compliant*
+*USB Guardian – Fáze 5 dokončena | IT Security Tool | NIS2 + ISO 27001 compliant*

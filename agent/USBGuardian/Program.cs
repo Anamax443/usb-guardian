@@ -10,6 +10,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using USBGuardian;
+using USBGuardian.Security;
 
 var builder = Host.CreateApplicationBuilder(args);
 
@@ -37,13 +38,30 @@ builder.Logging
 // ── Závislosti (DI) ──────────────────────────────────────────
 builder.Services.AddSingleton(sp =>
 {
+    var config  = builder.Configuration;
+    var logger  = sp.GetRequiredService<ILogger<SignatureVerifier>>();
+    var exeDir  = AppContext.BaseDirectory;
+    // Veřejný klíč distribuován spolu s agentem
+    var keyPath = config["signing:publicKeyPath"]
+                  ?? Path.Combine(exeDir, "Config", "whitelist_public.pem");
+    return new SignatureVerifier(logger, keyPath);
+});
+
+builder.Services.AddSingleton(sp =>
+{
     var config         = builder.Configuration;
     var logger         = sp.GetRequiredService<ILogger<WhitelistChecker>>();
     var wlPath         = config["whitelist:localPath"]
                          ?? @"C:\ProgramData\USBGuardian\whitelist\whitelist.json";
     var allowWildcards = bool.Parse(
                          config["whitelist:allowWildcards"] ?? "false");
-    return new WhitelistChecker(logger, wlPath, allowWildcards);
+    // RSA verifikace – výchozí true v produkci, lze vypnout pro vývoj/testování
+    var sigEnabled     = bool.Parse(
+                         config["signing:enabled"] ?? "true");
+    var sigVerifier    = sigEnabled
+                         ? sp.GetRequiredService<SignatureVerifier>()
+                         : null;
+    return new WhitelistChecker(logger, wlPath, allowWildcards, sigEnabled, sigVerifier);
 });
 
 builder.Services.AddSingleton(sp =>
