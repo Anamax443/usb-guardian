@@ -18,17 +18,22 @@ public class IncidentSync : BackgroundService
     private readonly string _syncUrl;
     private readonly IncidentLogger _incidentLogger;
     private readonly HttpClient _httpClient;
+    private readonly int _syncIntervalMinutes;
 
-    private const int SyncIntervalMinutes = 15;
+    // Sledujeme kolik záznamů z dnešního souboru bylo odesláno
+    // Klíč: název souboru, hodnota: počet odeslaných záznamů
+    private readonly Dictionary<string, int> _sentRecordCount = new();
 
     public IncidentSync(
         ILogger<IncidentSync> logger,
         string syncUrl,
-        IncidentLogger incidentLogger)
+        IncidentLogger incidentLogger,
+        int syncIntervalMinutes = 1)
     {
-        _logger         = logger;
-        _syncUrl        = syncUrl;
-        _incidentLogger = incidentLogger;
+        _logger              = logger;
+        _syncUrl             = syncUrl;
+        _incidentLogger      = incidentLogger;
+        _syncIntervalMinutes = syncIntervalMinutes;
 
         // Windows Authentication – agent jako HOSTNAME$ účet
         var handler = new HttpClientHandler
@@ -46,8 +51,8 @@ public class IncidentSync : BackgroundService
         // Statistika fronty při startu
         var (files, records) = _incidentLogger.GetQueueStats();
         _logger.LogInformation(
-            "IncidentSync spuštěn – ve frontě: {Files} souborů, {Records} záznamů",
-            files, records);
+            "IncidentSync spuštěn – interval: {Min} min, ve frontě: {Files} souborů, {Records} záznamů",
+            _syncIntervalMinutes, files, records);
 
         // Počkáme minutu po startu
         await Task.Delay(TimeSpan.FromMinutes(1), stoppingToken);
@@ -56,7 +61,7 @@ public class IncidentSync : BackgroundService
         {
             await TrySyncFiles();
             await Task.Delay(
-                TimeSpan.FromMinutes(SyncIntervalMinutes),
+                TimeSpan.FromMinutes(_syncIntervalMinutes),
                 stoppingToken);
         }
     }
@@ -72,12 +77,12 @@ public class IncidentSync : BackgroundService
 
             if (files.Count == 0)
             {
-                _logger.LogDebug("Žádné soubory k odeslání");
+                _logger.LogInformation("IncidentSync: fronta prázdná – žádné soubory k odeslání");
                 return;
             }
 
             _logger.LogInformation(
-                "Odesílám {Count} souborů na server", files.Count);
+                "IncidentSync: odesílám {Count} souborů na server", files.Count);
 
             foreach (var filePath in files)
             {
@@ -86,20 +91,21 @@ public class IncidentSync : BackgroundService
         }
         catch (HttpRequestException ex)
         {
-            _logger.LogDebug("API nedostupné – soubory čekají: {Msg}", ex.Message);
+            _logger.LogWarning("IncidentSync: API nedostupné – soubory čekají v queue: {Msg}", ex.Message);
         }
         catch (TaskCanceledException)
         {
-            _logger.LogDebug("IncidentSync timeout – zkusím příště");
+            _logger.LogWarning("IncidentSync: timeout při spojení s API – zkusím příště");
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Chyba při sync souborů");
+            _logger.LogError(ex, "IncidentSync: neočekávaná chyba");
         }
     }
 
     // --------------------------------------------------------
     // Odeslání jednoho denního souboru
+    // Pro dnešní soubor odesílá pouze nové záznamy od posledního sync
     // --------------------------------------------------------
     private async Task SendFile(string filePath)
     {
@@ -107,24 +113,39 @@ public class IncidentSync : BackgroundService
 
         try
         {
-            var json    = await File.ReadAllTextAsync(filePath);
-            var daily   = JsonSerializer.Deserialize<DailyLog>(json,
+            var json  = await File.ReadAllTextAsync(filePath);
+            var daily = JsonSerializer.Deserialize<DailyLog>(json,
                 new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
 
             if (daily == null || daily.Records.Count == 0)
             {
-                // Prázdný soubor – přesuneme do sent
-                _incidentLogger.MoveTeSent(filePath);
+                if (!_incidentLogger.IsTodaysFile(filePath))
+                    _incidentLogger.MoveTeSent(filePath);
                 return;
             }
 
-            // Sestavíme batch request – včetně názvu zdrojového souboru
+            // Delta sync – pro dnešní soubor odeslat jen nové záznamy
+            var alreadySent = _sentRecordCount.GetValueOrDefault(fileName, 0);
+            var newRecords  = daily.Records.Skip(alreadySent).ToList();
+
+            if (newRecords.Count == 0)
+            {
+                _logger.LogInformation(
+                    "IncidentSync: {File} – žádné nové záznamy ({Sent}/{Total} již odesláno)",
+                    fileName, alreadySent, daily.Records.Count);
+                return;
+            }
+
+            _logger.LogInformation(
+                "IncidentSync: {File} – odesílám {New} nových záznamů (celkem {Total})",
+                fileName, newRecords.Count, daily.Records.Count);
+
             var request = new
             {
                 hostname     = Environment.MachineName,
                 agentVersion = "1.0.0",
-                sourceFile   = fileName,   // ← pro audit trail v SQL
-                incidents    = daily.Records.Select(r => new
+                sourceFile   = fileName,
+                incidents    = newRecords.Select(r => new
                 {
                     timestamp        = r.Timestamp,
                     username         = r.Username,
@@ -138,7 +159,7 @@ public class IncidentSync : BackgroundService
                     pnpDeviceId      = r.PnpDeviceId,
                     action           = r.Action,
                     whitelistVersion = r.WhitelistVersion,
-                    sourceFile       = fileName  // ← na úrovni každého záznamu
+                    sourceFile       = fileName
                 }).ToList()
             };
 
@@ -152,24 +173,32 @@ public class IncidentSync : BackgroundService
 
             if (response.IsSuccessStatusCode)
             {
-                _logger.LogInformation(
-                    "Soubor {File} odeslán ({Count} záznamů) – přesouvám do sent",
-                    fileName, daily.Records.Count);
+                // Zapamatujeme si kolik záznamů bylo odesláno
+                _sentRecordCount[fileName] = daily.Records.Count;
 
-                // Úspěch → přesuneme do sent\ (ne smažeme)
-                _incidentLogger.MoveTeSent(filePath);
+                _logger.LogInformation(
+                    "IncidentSync: {File} – {New} nových záznamů odesláno, celkem {Total}",
+                    fileName, newRecords.Count, daily.Records.Count);
+
+                // Uzavřený den → přesunout do sent\
+                // Dnešní den → zůstane v queue, čítač se resetuje po půlnoci
+                if (!_incidentLogger.IsTodaysFile(filePath))
+                {
+                    _sentRecordCount.Remove(fileName);
+                    _incidentLogger.MoveTeSent(filePath);
+                }
             }
             else
             {
                 _logger.LogWarning(
-                    "Odeslání {File} selhalo: {Status} – zkusím příště",
+                    "IncidentSync: odeslání {File} selhalo: {Status} – zkusím příště",
                     fileName, response.StatusCode);
             }
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex,
-                "Chyba při odesílání {File} – zkusím příště", fileName);
+                "IncidentSync: chyba při odesílání {File} – zkusím příště", fileName);
         }
     }
 

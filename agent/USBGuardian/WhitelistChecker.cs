@@ -22,10 +22,20 @@ public class WhitelistChecker
     // Jak dlouho platí cache v paměti (znovu načte ze souboru po X minutách)
     private const int CacheMinutes = 5;
 
-    public WhitelistChecker(ILogger<WhitelistChecker> logger, string whitelistPath)
+    private readonly bool _allowWildcards;
+
+    public WhitelistChecker(ILogger<WhitelistChecker> logger, string whitelistPath, bool allowWildcards = false)
     {
-        _logger = logger;
-        _whitelistPath = whitelistPath;
+        _logger         = logger;
+        _whitelistPath  = whitelistPath;
+        _allowWildcards = allowWildcards;
+
+        // Upozornění při startu pokud jsou wildcards povoleny
+        if (_allowWildcards)
+            _logger.LogWarning(
+                "BEZPEČNOSTNÍ VAROVÁNÍ: AllowWildcards=true – " +
+                "záznamy bez sériového čísla jsou povoleny. " +
+                "Útočník může použít stejný model média.");
     }
 
     // --------------------------------------------------------
@@ -99,11 +109,31 @@ public class WhitelistChecker
         if (!string.Equals(device.ProductId, entry.ProductId, StringComparison.OrdinalIgnoreCase))
             return false;
 
-        // Serial: pokud je v whitelistu prázdný → platí pro celou řadu (wildcard)
-        // POZOR: wildcard je bezpečnostní riziko – používat jen pro sdílená zařízení
-        if (!string.IsNullOrEmpty(entry.SerialNumber))
+        // Serial: wildcard kontrola
+        if (string.IsNullOrEmpty(entry.SerialNumber))
         {
-            if (!string.Equals(device.SerialNumber, entry.SerialNumber, StringComparison.OrdinalIgnoreCase))
+            // Záznam nemá sériové číslo
+            if (!_allowWildcards)
+            {
+                // AllowWildcards=false (výchozí) → zamítnout
+                // NIS2 / ISO 27001: VID+PID bez serial nestačí
+                _logger.LogWarning(
+                    "Whitelist záznam {VID}/{PID} nemá sériové číslo " +
+                    "a AllowWildcards=false – médium ZAMÍTNUTO. " +
+                    "Přidejte sériové číslo nebo povolte wildcards v konfiguraci.",
+                    entry.VendorId, entry.ProductId);
+                return false;
+            }
+            // AllowWildcards=true → platí pro celou řadu (IT admin to vědomě povolil)
+            _logger.LogDebug(
+                "Wildcard shoda: {VID}/{PID} (AllowWildcards=true)",
+                entry.VendorId, entry.ProductId);
+        }
+        else
+        {
+            // Záznam má sériové číslo – musí přesně souhlasit
+            if (!string.Equals(device.SerialNumber, entry.SerialNumber,
+                StringComparison.OrdinalIgnoreCase))
                 return false;
         }
 

@@ -59,38 +59,58 @@ public class IncidentsController : ControllerBase
 
         await _db.SaveChangesAsync();
 
-        // Uložení incidentů
-        var incidents = request.Incidents.Select(dto => new Incident
-        {
-            Timestamp        = dto.Timestamp,
-            Hostname         = request.Hostname,
-            Username         = dto.Username,
-            ComputerId       = computer.Id,
-            VendorId         = dto.VendorId,
-            ProductId        = dto.ProductId,
-            SerialNumber     = dto.SerialNumber,
-            FriendlyName     = dto.FriendlyName,
-            DeviceType       = dto.DeviceType,
-            SizeBytes        = dto.SizeBytes,
-            FirmwareRevision = dto.FirmwareRevision,
-            PnpDeviceId      = dto.PnpDeviceId,
-            Action           = dto.Action,
-            WhitelistVersion = dto.WhitelistVersion,
-            SourceFile       = !string.IsNullOrEmpty(dto.SourceFile)
-                               ? dto.SourceFile
-                               : request.SourceFile,  // fallback na batch úroveň
-            ReceivedAt       = DateTime.UtcNow,
-            SourceIp         = sourceIp
-        }).ToList();
+        // Uložení incidentů – s deduplikací
+        // Dnešní soubor se odesílá opakovaně → kontrolujeme duplicity
+        // Klíč: Hostname + Timestamp + SerialNumber
+        var newIncidents = new List<Incident>();
 
-        _db.Incidents.AddRange(incidents);
-        await _db.SaveChangesAsync();
+        foreach (var dto in request.Incidents)
+        {
+            // Kontrola duplicity
+            var exists = await _db.Incidents.AnyAsync(i =>
+                i.Hostname    == request.Hostname &&
+                i.Timestamp   == dto.Timestamp &&
+                i.SerialNumber == dto.SerialNumber &&
+                i.VendorId    == dto.VendorId);
+
+            if (exists) continue;
+
+            newIncidents.Add(new Incident
+            {
+                Timestamp        = dto.Timestamp,
+                Hostname         = request.Hostname,
+                Username         = dto.Username,
+                ComputerId       = computer.Id,
+                VendorId         = dto.VendorId,
+                ProductId        = dto.ProductId,
+                SerialNumber     = dto.SerialNumber,
+                FriendlyName     = dto.FriendlyName,
+                DeviceType       = dto.DeviceType,
+                SizeBytes        = dto.SizeBytes,
+                FirmwareRevision = dto.FirmwareRevision,
+                PnpDeviceId      = dto.PnpDeviceId,
+                Action           = dto.Action,
+                WhitelistVersion = dto.WhitelistVersion,
+                SourceFile       = !string.IsNullOrEmpty(dto.SourceFile)
+                                   ? dto.SourceFile
+                                   : request.SourceFile,
+                ReceivedAt       = DateTime.UtcNow,
+                SourceIp         = sourceIp
+            });
+        }
+
+        if (newIncidents.Count > 0)
+        {
+            _db.Incidents.AddRange(newIncidents);
+            await _db.SaveChangesAsync();
+        }
 
         _logger.LogInformation(
-            "Přijato {Count} incidentů od {Hostname} ({Ip})",
-            incidents.Count, request.Hostname, sourceIp);
+            "Přijato {New} nových incidentů od {Hostname} ({Ip}), {Skip} duplicit přeskočeno",
+            newIncidents.Count, request.Hostname, sourceIp,
+            request.Incidents.Count - newIncidents.Count);
 
-        return Ok(new { accepted = incidents.Count });
+        return Ok(new { accepted = newIncidents.Count, duplicates = request.Incidents.Count - newIncidents.Count });
     }
 
     // --------------------------------------------------------

@@ -27,17 +27,23 @@ builder.Configuration
 // ── Logování ─────────────────────────────────────────────────
 builder.Logging
     .ClearProviders()
-    .AddConsole()
+    .AddSimpleConsole(options =>
+    {
+        options.TimestampFormat = "HH:mm:ss ";  // timestamp v konzoli
+        options.SingleLine      = false;
+    })
     .SetMinimumLevel(LogLevel.Information);
 
 // ── Závislosti (DI) ──────────────────────────────────────────
 builder.Services.AddSingleton(sp =>
 {
-    var config = builder.Configuration;
-    var logger = sp.GetRequiredService<ILogger<WhitelistChecker>>();
-    var wlPath = Path.Combine(exeDir,
-        config["whitelist:localPath"] ?? @"whitelist\whitelist.json");
-    return new WhitelistChecker(logger, wlPath);
+    var config         = builder.Configuration;
+    var logger         = sp.GetRequiredService<ILogger<WhitelistChecker>>();
+    var wlPath         = config["whitelist:localPath"]
+                         ?? @"C:\ProgramData\USBGuardian\whitelist\whitelist.json";
+    var allowWildcards = bool.Parse(
+                         config["whitelist:allowWildcards"] ?? "false");
+    return new WhitelistChecker(logger, wlPath, allowWildcards);
 });
 
 builder.Services.AddSingleton(sp =>
@@ -97,16 +103,19 @@ if (!string.IsNullOrEmpty(syncUrl))
         var wlPath   = config["whitelist:localPath"]
                        ?? @"C:\ProgramData\USBGuardian\whitelist\whitelist.json";
         var interval = int.Parse(
-            config["whitelist:syncIntervalMinutes"] ?? "15");
+                       config["sync:whitelistSyncIntervalMinutes"] ?? "15");
         return new WhitelistSync(logger, syncUrl, wlPath, interval);
     });
 
     // Odesílání incidentů na server
     builder.Services.AddHostedService(sp =>
     {
+        var config        = builder.Configuration;
         var logger        = sp.GetRequiredService<ILogger<IncidentSync>>();
         var iLogger       = sp.GetRequiredService<IncidentLogger>();
-        return new IncidentSync(logger, syncUrl, iLogger);
+        var interval      = int.Parse(
+                            config["sync:incidentSyncIntervalMinutes"] ?? "1");
+        return new IncidentSync(logger, syncUrl, iLogger, interval);
     });
 
     Console.WriteLine($"Sync aktivní → {syncUrl}");

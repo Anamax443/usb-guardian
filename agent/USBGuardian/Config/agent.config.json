@@ -8,7 +8,12 @@
     "localPath": "C:\\ProgramData\\USBGuardian\\whitelist\\whitelist.json",
     "syncUrl": "http://YOUR_API_SERVER:5050",
     "syncIntervalMinutes": 15,
+    "allowWildcards": false,
     "signatureVerification": false
+  },
+  "sync": {
+    "incidentSyncIntervalMinutes": 1,
+    "whitelistSyncIntervalMinutes": 15
   },
   "notifications": {
     "toast": {

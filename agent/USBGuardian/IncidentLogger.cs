@@ -122,26 +122,32 @@ public class IncidentLogger
 
     // --------------------------------------------------------
     // Vrátí seznam souborů připravených k odeslání
-    // = všechny soubory KROMĚ dnešního
+    // Varianta A: odesílá i aktuální den (real-time monitoring)
+    // Uzavřené dny → přesun do sent\ po odeslání
+    // Aktuální den → zůstane v queue (přepisuje se), odešle se znovu při příštím sync
     // --------------------------------------------------------
     public List<string> GetFilesReadyToSync()
     {
-        var today    = DateTime.UtcNow.Date;
         var hostname = Environment.MachineName;
 
         return Directory
             .GetFiles(_queuePath, $"log_{hostname}_*.json")
-            .Where(f =>
-            {
-                var name  = Path.GetFileNameWithoutExtension(f);
-                var parts = name.Split('_');
-                if (parts.Length >= 3 &&
-                    DateTime.TryParse(parts[^1], out var fileDate))
-                    return fileDate.Date < today;
-                return false;
-            })
             .OrderBy(f => f)
             .ToList();
+    }
+
+    // --------------------------------------------------------
+    // Vrátí true pokud je soubor aktuální den (nesmí se přesunout do sent)
+    // --------------------------------------------------------
+    public bool IsTodaysFile(string filePath)
+    {
+        var today = DateTime.UtcNow.Date;
+        var name  = Path.GetFileNameWithoutExtension(filePath);
+        var parts = name.Split('_');
+        if (parts.Length >= 3 &&
+            DateTime.TryParse(parts[^1], out var fileDate))
+            return fileDate.Date == today;
+        return false;
     }
 
     // --------------------------------------------------------

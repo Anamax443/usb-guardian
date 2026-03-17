@@ -1,17 +1,21 @@
 # USB Guardian
 
-Bezpečnostní nástroj pro monitoring paměťových médií na firemních počítačích.
-Každé USB médium, SD karta nebo USB disk musí být schváleno IT oddělením a zapsáno do whitelistu.
+Bezpečnostní nástroj pro monitoring paměťových médií (USB flash disky, SD karty, USB HDD)
+na firemních počítačích. Každé médium musí být schváleno IT oddělením a zapsáno do
+centrálního whitelistu. Nepovolená média jsou varována nebo zablokována.
 
 ## Regulatorní soulad
 
 USB Guardian byl navržen jako technické opatření splňující požadavky:
 
-- **NIS2** (Směrnice EU 2022/2555) – čl. 21 odst. 2: bezpečnost dodavatelského řetězce, základní kybernetická hygiena, hlášení incidentů
-- **Zákon č. 181/2014 Sb.** o kybernetické bezpečnosti + Vyhláška č. 82/2018 Sb. – § 14 řízení přístupů, § 16 ochrana před škodlivým kódem
-- **ISO/IEC 27001:2022** – kontroly A.8.12 (prevence úniku dat), A.7.10 (paměťová média), A.8.15 (logování), A.5.26 (reakce na incidenty)
+- **NIS2** (Směrnice EU 2022/2555) – čl. 21 odst. 2: bezpečnost dodavatelského řetězce,
+  základní kybernetická hygiena, hlášení incidentů
+- **Zákon č. 181/2014 Sb.** o kybernetické bezpečnosti + Vyhláška č. 82/2018 Sb.
+  (§ 14 řízení přístupů, § 16 ochrana před škodlivým kódem)
+- **ISO/IEC 27001:2022** – kontroly A.8.12 (prevence úniku dat), A.7.10 (paměťová média),
+  A.8.15 (logování), A.5.26 (reakce na incidenty)
 
-Podrobný popis compliance viz [`docs/architecture.md`](docs/architecture.md) – sekce *Regulatorní kontext*.
+Podrobný popis compliance viz [`docs/architecture.md`](docs/architecture.md).
 
 ---
 
@@ -19,11 +23,46 @@ Podrobný popis compliance viz [`docs/architecture.md`](docs/architecture.md) �
 
 | Fáze | Popis | Stav |
 |------|-------|------|
-| 1 | Windows agent – detekce + warn + Toast + SQLite log | ✅ Hotovo |
-| 2 | Block mode – IOCTL lock, drive letter detection, admin práva | ✅ Hotovo |
-| 3 | Email notifikace (Microsoft Graph API) + instalační skript | 🔜 Plánováno |
-| 4 | Centrální server + whitelist sync + SQL Server | 📋 Plánováno |
-| 5 | Admin UI – dashboard + statistiky + reporty | 📋 Plánováno |
+| 1 | Windows agent – WMI detekce, warn mode, Toast notifikace | ✅ Hotovo |
+| 2 | Block mode – IOCTL lock, PnpDevice fallback | ✅ Hotovo |
+| 3 | REST API server, SQL Server, file-based logging, sync | ✅ Hotovo |
+| 4 | Service recovery, WMI watchdog, instalační skript | 🔜 Plánováno |
+| 5 | Email notifikace (Microsoft Graph API) | 🔜 Plánováno |
+| 6 | Admin UI – dashboard, správa whitelistu, reporty | 📋 Plánováno |
+
+---
+
+## Architektura
+
+```
+[Klientský PC]                          [Server B-S-W-SQL-04]
+┌─────────────────────────────┐         ┌──────────────────────────┐
+│  USB Guardian Agent         │         │  USB Guardian API        │
+│                             │         │  (Windows Service :5050) │
+│  DeviceMonitor (WMI)        │         │                          │
+│    ↓                        │  HTTP   │  IncidentsController     │
+│  WhitelistChecker ◄─────────┼─────────┤  WhitelistController     │
+│    ↓                        │         │  HeartbeatController     │
+│  PolicyEnforcer             │         └──────────┬───────────────┘
+│    ↓              ↓         │    Windows Auth (Kerberos / AD skupina)
+│  IncidentLogger  Blocker    │         ┌──────────▼───────────────┐
+│    ↓                        │         │  SQL Server              │
+│  queue\log_HOST_DATE.json   │         │  databáze USBGuardian    │
+│    ↓                        │         │  Incidents               │
+│  IncidentSync ──────────────┼────────►│  WhitelistDevices        │
+│  WhitelistSync ◄────────────┼─────────│  WhitelistVersions       │
+└─────────────────────────────┘         │  Computers               │
+                                        └──────────────────────────┘
+```
+
+### Offline-first design
+Agent funguje plně bez připojení k serveru:
+- Whitelist je uložen lokálně (synchronizován každých N minut)
+- Incidenty se ukládají do denních JSON souborů (`queue\`)
+- Po obnovení spojení se soubory automaticky odešlou (delta sync – jen nové záznamy)
+- Uzavřené dny se přesouvají do `sent\` (audit trail, 90 dní retence)
+
+---
 
 ## Jak to funguje
 
@@ -32,70 +71,166 @@ Podrobný popis compliance viz [`docs/architecture.md`](docs/architecture.md) �
          ↓
 [WMI event – Windows detekuje zařízení]
          ↓
-[Agent přečte VendorId, ProductId, SerialNumber, kapacitu]
+[Agent přečte VendorId, ProductId, SerialNumber, kapacitu, firmware]
          ↓
-[Porovnání s whitelistem v C:\ProgramData\USBGuardian\whitelist\whitelist.json]
-         ↓                          ↓
-[Médium na whitelistu]     [Médium NENÍ na whitelistu]
-[Logováno jako povoleno]   [Windows Toast notifikace]
-                           [Incident uložen do SQLite]
-                           [Email alert – Fáze 2]
+[Porovnání s lokálním whitelistem]
+         ↓                              ↓
+[Médium NA whitelistu]         [Médium NENÍ na whitelistu]
+[Záznam: Allowed]              [Toast notifikace uživateli]
+                               [Záznam: Warned / Blocked]
+                               [Block mode: FSCTL_LOCK_VOLUME]
+         ↓
+[Záznam do queue\log_HOSTNAME_YYYY-MM-DD.json]
+         ↓
+[IncidentSync → POST /api/incidents (delta – jen nové záznamy)]
+         ↓
+[Uzavřený den → přesun do sent\ (archiv)]
 ```
+
+---
 
 ## Požadavky
 
-- Windows 10/11 (64-bit)
-- .NET 8.0 SDK
-- Visual Studio Code
-- Admin práva pro instalaci složek v C:\ProgramData
+### Klientský PC (agent)
+- Windows 10/11 64-bit
+- .NET 8.0 SDK (vývoj) nebo Runtime (produkce)
+- Přístup na síť k API serveru (port 5050)
+- Počítačový účet v AD skupině `USB-Guardian-Clients`
+
+### API Server
+- Windows Server
+- .NET 8.0 Runtime
+- SQL Server (doporučeno 2019+)
+- gMSA účet s SPN registrací pro Kerberos autentizaci
+
+---
 
 ## Instalace
 
-### 1. Vytvoření složek a nastavení práv (jako Administrator)
+### 1. Active Directory (Domain Controller)
 
 ```powershell
-New-Item -ItemType Directory -Force -Path "C:\ProgramData\USBGuardian\whitelist"
-New-Item -ItemType Directory -Force -Path "C:\ProgramData\USBGuardian\logs"
+# Vytvořit skupinu
+New-ADGroup -Name "USB-Guardian-Clients" -GroupCategory Security `
+    -GroupScope Global -Description "Pristup na USB Guardian API"
 
-icacls "C:\ProgramData\USBGuardian" /inheritance:r
-icacls "C:\ProgramData\USBGuardian" /grant "SYSTEM:(OI)(CI)F"
-icacls "C:\ProgramData\USBGuardian" /grant "Administrators:(OI)(CI)F"
-icacls "C:\ProgramData\USBGuardian" /grant "Users:(OI)(CI)R"
-icacls "C:\ProgramData\USBGuardian\logs" /grant "Users:(OI)(CI)M"
+# Přidat Domain Computers (všechny firemní PC)
+Add-ADGroupMember -Identity "USB-Guardian-Clients" `
+    -Members (Get-ADGroup "Domain Computers")
+
+# Přidat IT adminy pro testování přes Swagger
+Add-ADGroupMember -Identity "USB-Guardian-Clients" -Members "jmeno.admina"
+
+# Registrovat SPN pro gMSA účet (POVINNÉ pro Kerberos)
+setspn -S HTTP/NAZEV-SERVERU "DOMENA\gmsa-ucet$"
+setspn -S HTTP/NAZEV-SERVERU.domena.local "DOMENA\gmsa-ucet$"
 ```
 
-### 2. Zkopírovat whitelist
+### 2. SQL Server
+
+```sql
+-- Spustit skripty v pořadí:
+-- database/01_create_database.sql
+-- database/02_create_tables.sql
+-- database/03_add_sourcefile.sql
+
+-- Přidat gMSA účet
+USE USBGuardian;
+CREATE USER [DOMENA\gmsa-ucet$] FOR LOGIN [DOMENA\gmsa-ucet$];
+ALTER ROLE db_datareader ADD MEMBER [DOMENA\gmsa-ucet$];
+ALTER ROLE db_datawriter ADD MEMBER [DOMENA\gmsa-ucet$];
+```
+
+### 3. API Server
 
 ```powershell
-Copy-Item whitelist\whitelist.json "C:\ProgramData\USBGuardian\whitelist\"
+# Build na dev stroji
+cd server\USBGuardian.Api
+dotnet publish -c Release -r win-x64 --self-contained -o "D:\deploy\USBGuardian.Api"
+
+# Kopírovat na server přes SCP (SMB záměrně vypnuto – security hardening)
+scp -r "D:\deploy\USBGuardian.Api" admin@SERVER:/C:/USBGuardian.Api
+
+# Konfigurace na serveru: C:\USBGuardian.Api\appsettings.local.json
+# (viz server\USBGuardian.Api\appsettings.local.json.example)
+
+# Instalace jako Windows Service
+sc.exe create "USB Guardian API" binPath="C:\USBGuardian.Api\USBGuardian.Api.exe" `
+    obj="DOMENA\gmsa-ucet$" start=auto
+
+# Service recovery – auto-restart při pádu
+sc.exe failure "USB Guardian API" reset=86400 `
+    actions=restart/5000/restart/10000/restart/30000
+
+# Firewall
+New-NetFirewallRule -DisplayName "USB Guardian API" -Direction Inbound `
+    -Protocol TCP -LocalPort 5050 -Action Allow
+
+Start-Service "USB Guardian API"
 ```
 
-### 3. Spuštění (vývojový režim)
+### 4. Klientský PC – příprava složek
+
+```powershell
+# Spustit jako Administrator
+$folders = @(
+    "C:\ProgramData\USBGuardian\whitelist",
+    "C:\ProgramData\USBGuardian\queue",
+    "C:\ProgramData\USBGuardian\sent"
+)
+foreach ($folder in $folders) {
+    New-Item -ItemType Directory -Force -Path $folder
+    icacls $folder /grant "SYSTEM:(OI)(CI)F"
+    icacls $folder /grant "Administrators:(OI)(CI)F"
+}
+icacls "C:\ProgramData\USBGuardian\queue" /grant "Users:(OI)(CI)M"
+icacls "C:\ProgramData\USBGuardian\sent"  /grant "Users:(OI)(CI)M"
+icacls "C:\ProgramData\USBGuardian\whitelist" /grant "Users:(OI)(CI)R"
+
+# Lokální konfigurace
+@'
+{
+  "whitelist": {
+    "syncUrl": "http://NAZEV-SERVERU:5050"
+  }
+}
+'@ | Set-Content "agent\USBGuardian\Config\agent.config.local.json" -Encoding UTF8
+```
+
+### 5. Spuštění agenta (vývojový režim)
 
 ```powershell
 cd agent\USBGuardian
 dotnet run -- --console
 ```
 
-> **Block mode vyžaduje admin práva.** Pro testování blokování spusťte v elevated PowerShell:
-> ```powershell
-> Start-Process powershell -Verb RunAs -ArgumentList "-NoExit -Command `"cd 'D:\git\usb-guardian\agent\USBGuardian'; dotnet run -- --console`""
-> ```
-> V produkci (Windows Service) agent běží jako SYSTEM – admin práva jsou automatická.
+> **Block mode vyžaduje admin práva.** V produkci agent běží jako SYSTEM.
 
-### 4. Instalace jako Windows Service (produkce)
+---
 
-```powershell
-dotnet publish -c Release -r win-x64 --self-contained
-sc create "USB Guardian" binPath="C:\USBGuardian\USBGuardian.exe"
-sc start "USB Guardian"
-```
+## Konfigurace agenta
+
+Soubor `agent\USBGuardian\Config\agent.config.json`:
+
+| Klíč | Výchozí | Popis |
+|------|---------|-------|
+| `policy.mode` | `warn` | `warn` = varovat, `block` = zablokovat |
+| `policy.maxOfflineAgeDays` | `30` | Max stáří whitelistu v offline režimu |
+| `policy.onExpiredWhitelist` | `warn` | Chování při expiraci whitelistu |
+| `whitelist.localPath` | `C:\ProgramData\...\whitelist.json` | Lokální cesta k whitelistu |
+| `whitelist.syncUrl` | `http://YOUR_API_SERVER:5050` | URL API serveru |
+| `whitelist.allowWildcards` | `false` | Záznamy bez sér. čísla – výchozí zakázáno (NIS2) |
+| `sync.incidentSyncIntervalMinutes` | `1` | Interval odesílání incidentů (min) |
+| `sync.whitelistSyncIntervalMinutes` | `15` | Interval sync whitelistu (min) |
+| `logging.queuePath` | `C:\ProgramData\USBGuardian\queue` | Složka fronty |
+| `logging.sentPath` | `C:\ProgramData\USBGuardian\sent` | Archivní složka |
+| `logging.sentRetentionDays` | `90` | Retence archivních souborů (dny) |
+
+---
 
 ## Správa whitelistu
 
-### Přidání nového média
-
-1. Zjistit identifikátory zařízení:
+### Zjistit identifikátory zařízení
 
 ```powershell
 Get-WmiObject Win32_DiskDrive |
@@ -104,145 +239,121 @@ Get-WmiObject Win32_DiskDrive |
   Format-List
 ```
 
-2. Editovat `C:\ProgramData\USBGuardian\whitelist\whitelist.json` (vyžaduje admin práva):
+### Přidat zařízení
 
-```json
-{
-  "version": "2026-03-16-v2",
-  "issuedAt": "2026-03-16T00:00:00Z",
-  "validUntil": "2026-04-16T00:00:00Z",
-  "signature": "",
-  "devices": [
-    {
-      "vendorId": "KINGSTON",
-      "productId": "DATATRAVELER_2.0",
-      "serialNumber": "4B018CD154C9",
-      "description": "Kingston DataTraveler 14GB – IT oddělení",
-      "approvedAt": "2026-03-16T00:00:00Z",
-      "approvedBy": "it-admin"
-    }
-  ]
-}
+```sql
+USE USBGuardian;
+INSERT INTO dbo.WhitelistDevices (VendorId, ProductId, SerialNumber, Description, ApprovedBy, IsActive)
+VALUES ('KINGSTON', 'DATATRAVELER_2.0', '4B018CD154C9', 'Kingston DT 14GB – IT', 'it-admin', 1);
+
+-- Zvýšit verzi (agent stáhne aktualizaci do 15 minut)
+UPDATE dbo.WhitelistVersions SET Version = '2026-03-16-v2' WHERE IsActive = 1;
 ```
 
-### Identifikace zařízení
+### AllowWildcards (výchozí: false)
 
-Agent podporuje dva formáty Windows PNPDeviceID:
+Záznamy bez sériového čísla jsou ve výchozím stavu **zakázány** (NIS2 compliance).
+Bez sériového čísla by útočník mohl použít stejný model média.
 
-| Formát | Příklad | Použití |
-|--------|---------|---------|
-| USB (hex) | `VID_0951 / PID_1666` | Některé USB huby a adaptéry |
-| USBSTOR (text) | `VEN_KINGSTON / PROD_DATATRAVELER_2.0` | Standardní USB flash disky a HDD |
-
-Klíč pro whitelist: `VendorId:ProductId:SerialNumber` (case-insensitive)
-
-### Wildcard záznam (celá řada bez sériového čísla)
-
-```json
-{
-  "vendorId": "KINGSTON",
-  "productId": "DATATRAVELER_2.0",
-  "serialNumber": "",
-  "description": "POZOR: Wildcard – platí pro VŠECHNY kusy tohoto modelu"
-}
-```
-
-⚠️ Wildcard je bezpečnostní riziko – používat pouze výjimečně.
-
-## Konfigurace
-
-### Přístup bez hardcoded hodnot
-
-Projekt neobsahuje žádné hardcoded názvy domén, serverů ani skupin. Vše je konfigurovatelné – projekt lze bezpečně publikovat jako open source.
-
-**Agent** – `agent\USBGuardian\Config\agent.config.json`:
-
-| Klíč | Výchozí | Popis |
-|------|---------|-------|
-| `policy.mode` | `warn` | `warn` = varovat, `block` = zablokovat |
-| `policy.maxOfflineAgeDays` | `30` | Max stáří whitelistu offline |
-| `policy.onExpiredWhitelist` | `warn` | `warn` / `block_new` / `strict_block` |
-| `whitelist.syncUrl` | `http://YOUR_API_SERVER:5050` | URL API serveru |
-| `whitelist.syncIntervalMinutes` | `15` | Interval synchronizace |
-| `notifications.toast.enabled` | `true` | Windows Toast notifikace |
-| `notifications.toast.contactMessage` | text | Zpráva uživateli |
-| `logging.queuePath` | `C:\ProgramData\USBGuardian\queue` | Složka pro denní log soubory |
-
-**API Server** – `server\USBGuardian.Api\appsettings.json`:
-
-| Klíč | Popis |
-|------|-------|
-| `ConnectionStrings.DefaultConnection` | SQL Server connection string (Integrated Security) |
-| `Authorization.AllowedGroups` | AD skupiny s přístupem k API |
-| `Urls` | Port API serveru |
-
-### Lokální přepisy (necommitují se)
-
-```
-agent/USBGuardian/Config/agent.config.local.json      ← přepis pro agenta
-server/USBGuardian.Api/appsettings.local.json          ← přepis pro API server
-```
-
-Viz `*.example` soubory jako šablonu.
+---
 
 ## Datové úložiště
 
-### Whitelist
-```
-C:\ProgramData\USBGuardian\whitelist\whitelist.json
-```
-- Pouze IT admin má write přístup (Administrators + SYSTEM)
-- Automaticky synchronizován ze serveru každých 15 minut
+### Lokální (agent)
 
-### Log fronty (denní soubory)
 ```
-C:\ProgramData\USBGuardian\queue\log_HOSTNAME_2026-03-16.json
+C:\ProgramData\USBGuardian\
+├── whitelist\whitelist.json              ← sync ze serveru, read-only pro Users
+├── queue\log_HOSTNAME_2026-03-17.json    ← aktuální den, průběžně odesílán
+└── sent\log_HOSTNAME_2026-03-15.json     ← archiv uzavřených dní (90 dní)
 ```
-- Denní JSON soubory – jedno připojení = jeden záznam
-- Loguje VŠE: povolená i nepovolená média
-- Po úspěšném odeslání na server soubor smazán
-- Při výpadku sítě soubor zůstane a sync zkusí příště
-- Soubory starší 3 měsíce automaticky smazány
 
-### Centrální databáze
+**Delta sync**: Odesílají se jen nové záznamy od posledního odeslaní. Po půlnoci
+se soubor přesune do `sent\`.
+
+### Centrální databáze (SQL Server)
+
 ```
-SQL Server → databáze USBGuardian
-  → tabulka Incidents  (všechna připojení)
-  → tabulka WhitelistDevices (schválená média)
-  → tabulka Computers  (evidence stanic)
+USBGuardian
+├── dbo.Incidents         ← všechna připojení (Allowed / Warned / Blocked)
+├── dbo.WhitelistDevices  ← schválená média
+├── dbo.WhitelistVersions ← verze whitelistu
+└── dbo.Computers         ← evidence stanic (hostname, IP, LastSeen)
 ```
+
+---
 
 ## Struktura projektu
 
 ```
 usb-guardian/
-├── agent/
-│   ├── USBGuardian.sln
-│   └── USBGuardian/
-│       ├── DeviceMonitor.cs        ← WMI listener, parsování zařízení
-│       ├── WhitelistChecker.cs     ← porovnání s whitelistem, cache, expirace
-│       ├── PolicyEnforcer.cs       ← rozhodovací logika warn/block
-│       ├── NotificationService.cs  ← Windows Toast notifikace
-│       ├── IncidentLogger.cs       ← SQLite log incidentů
-│       ├── Program.cs              ← vstupní bod, DI konfigurace
-│       ├── Models/
-│       │   ├── DeviceInfo.cs       ← model zařízení (VID, PID, serial, kapacita)
-│       │   ├── Incident.cs         ← model incidentu
-│       │   └── WhitelistEntry.cs   ← model záznamu whitelistu
-│       └── Config/
-│           └── agent.config.json   ← hlavní konfigurace
-├── whitelist/
-│   └── whitelist.json              ← ukázkový whitelist (kopírovat do ProgramData)
-└── docs/
-    └── architecture.md             ← technická dokumentace
+├── agent/USBGuardian/
+│   ├── DeviceMonitor.cs        ← WMI dual-watcher, parsování PNPDeviceID
+│   ├── WhitelistChecker.cs     ← porovnání, cache, AllowWildcards, expirace
+│   ├── PolicyEnforcer.cs       ← warn/block logika
+│   ├── DeviceBlocker.cs        ← FSCTL_LOCK_VOLUME + PnpDevice fallback
+│   ├── NotificationService.cs  ← Windows Toast
+│   ├── IncidentLogger.cs       ← denní JSON, queue/sent, retence
+│   ├── IncidentSync.cs         ← delta sync, přesun do sent\
+│   ├── WhitelistSync.cs        ← heartbeat, stažení nové verze
+│   ├── Program.cs              ← DI, Windows Service, konfigurace
+│   ├── Models/                 ← DeviceInfo, Incident, WhitelistEntry
+│   └── Config/                 ← agent.config.json + local.json.example
+├── server/USBGuardian.Api/
+│   ├── Controllers/            ← Incidents, Whitelist, Heartbeat
+│   ├── Data/AppDbContext.cs
+│   ├── Models/                 ← DbModels, ApiModels
+│   ├── Program.cs
+│   └── appsettings*.json
+├── database/
+│   ├── 01_create_database.sql
+│   ├── 02_create_tables.sql
+│   └── 03_add_sourcefile.sql
+└── docs/architecture.md        ← technická dokumentace + deployment guide
 ```
+
+---
+
+## Ověření funkčnosti
+
+```powershell
+# Test konektivity
+Test-NetConnection -ComputerName B-S-W-SQL-04 -Port 5050
+
+# Test API
+Invoke-WebRequest -Uri "http://B-S-W-SQL-04:5050/api/whitelist/version" `
+    -UseDefaultCredentials -AllowUnencryptedAuthentication |
+    Select-Object -ExpandProperty Content
+
+# Swagger UI
+Start-Process "http://B-S-W-SQL-04:5050/swagger"
+```
+
+---
 
 ## Bezpečnostní doporučení
 
-- `agent.config.local.json` se **nikdy necommituje** – obsahuje secrets (email, API klíče)
-- Whitelist v `C:\ProgramData` je chráněn ACL – uživatelé nemohou editovat
-- Ve Fázi 3 bude whitelist kryptograficky podepsán (RSA) – nelze podvrhnout na offline stroji
-- Doporučeno spouštět Windows Service pod účtem `NETWORK SERVICE` nebo dedikovaným service accountem
+- `*.local.json` soubory se nikdy necommitují (jsou v `.gitignore`)
+- `AllowWildcards: false` – bez sériového čísla = zamítnuto (NIS2)
+- SMB záměrně vypnuto na SQL serveru – deploy výhradně přes SCP
+- Windows Auth (Kerberos) – agent jako `HOSTNAME$`, API pod gMSA
+- Service recovery: auto-restart při pádu (3× s rostoucí prodlevou)
 
 ---
-*USB Guardian – Fáze 1 dokončena | IT Security Tool*
+
+## Pending (plánované funkce)
+
+- [ ] Service recovery akce pro agenta (instalační skript)
+- [ ] WMI watchdog – detekce zaseknutí watcheru
+- [ ] WM_DEVICECHANGE jako záloha za WMI
+- [ ] HTTPS pro API
+- [ ] API verzování `/api/v1/`
+- [ ] Email notifikace (Microsoft Graph API)
+- [ ] Admin UI – dashboard, správa whitelistu, reporty
+- [ ] Enrollment tool pro L1 support
+- [ ] GPO šablona pro `agent.config.local.json`
+- [ ] TenantId (multi-tenant příprava)
+
+---
+
+*USB Guardian – Fáze 3 dokončena | IT Security Tool | NIS2 + ISO 27001 compliant*

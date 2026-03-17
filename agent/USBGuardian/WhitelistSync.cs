@@ -91,14 +91,15 @@ public class WhitelistSync : BackgroundService
 
             if (heartbeat == null) return;
 
-            _logger.LogDebug(
-                "Heartbeat OK – server: {Server}, lokální: {Local}",
+            _logger.LogInformation(
+                "WhitelistSync: heartbeat OK – server: {Server}, lokální: {Local}",
                 heartbeat.CurrentWhitelistVersion, localVersion);
 
             // Krok 3: Pokud není nová verze, nic neděláme
             if (!heartbeat.WhitelistUpdateAvailable)
             {
-                _logger.LogDebug("Whitelist je aktuální ({Ver})", localVersion);
+                _logger.LogInformation(
+                    "WhitelistSync: whitelist je aktuální ({Ver})", localVersion);
                 return;
             }
 
@@ -111,12 +112,11 @@ public class WhitelistSync : BackgroundService
         }
         catch (HttpRequestException ex)
         {
-            // Síť nedostupná – normální offline stav
-            _logger.LogDebug("API nedostupné (offline): {Msg}", ex.Message);
+            _logger.LogWarning("WhitelistSync: API nedostupné (offline provoz): {Msg}", ex.Message);
         }
         catch (TaskCanceledException)
         {
-            _logger.LogDebug("Heartbeat timeout – API nedostupné");
+            _logger.LogWarning("WhitelistSync: heartbeat timeout – API nedostupné");
         }
         catch (Exception ex)
         {
