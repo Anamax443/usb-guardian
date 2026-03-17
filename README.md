@@ -27,6 +27,7 @@ Podrobný popis compliance viz [`docs/architecture.md`](docs/architecture.md).
 | 2 | Block mode – IOCTL lock, PnpDevice fallback | ✅ Hotovo |
 | 3 | REST API server, SQL Server, file-based logging, sync | ✅ Hotovo |
 | 4 | ACL queue\, service recovery, WMI watchdog, timing fix | ✅ Hotovo |
+| 4b | Disconnect tracking, fix duplikátů (offset persist), N+1 fix | ✅ Hotovo |
 | 5 | Toast z SYSTEM kontextu (Privilege Separation) | 🔜 Plánováno |
 | 6 | Email notifikace (Microsoft Graph API) | 🔜 Plánováno |
 | 7 | Admin UI – dashboard, správa whitelistu, reporty | 📋 Plánováno |
@@ -277,6 +278,9 @@ se soubor přesune do `sent\`.
 ```
 USBGuardian
 ├── dbo.Incidents         ← všechna připojení (Allowed / Warned / Blocked)
+│   ├── Timestamp         ← čas připojení média
+│   ├── DisconnectedAt    ← čas odpojení (NULL = neznámo / stále připojeno)
+│   └── ...
 ├── dbo.WhitelistDevices  ← schválená média
 ├── dbo.WhitelistVersions ← verze whitelistu
 └── dbo.Computers         ← evidence stanic (hostname, IP, LastSeen)
@@ -350,6 +354,10 @@ Start-Process "http://B-S-W-SQL-04:5050/swagger"
 - [x] Service recovery – automatický restart při selhání (3× s rostoucí prodlevou)
 - [x] WMI watchdog – detekce zaseknutí watcheru, automatická re-registrace
 - [x] Timing fix – obousměrné párování DiskDrive/LogicalDisk (timeout 30s)
+- [x] Disconnect tracking – čas připojení a odpojení média, doba připojení
+- [x] Fix duplikátů – offset persistuje na disk (.offset soubor, přežije restart)
+- [x] Fix N+1 – deduplikace jedním bulk SQL dotazem místo N dotazů
+- [x] UNIQUE constraint v DB – pojistka proti duplikátům na úrovni databáze
 - [ ] Toast z SYSTEM kontextu (Privilege Separation – helper process v user session)
 - [ ] RSA podpis whitelistu (Fáze 4 – bezpečný rollout na terénní stroje)
 - [ ] WM_DEVICECHANGE jako záloha za WMI
@@ -363,4 +371,4 @@ Start-Process "http://B-S-W-SQL-04:5050/swagger"
 
 ---
 
-*USB Guardian – Fáze 4 dokončena | IT Security Tool | NIS2 + ISO 27001 compliant*
+*USB Guardian – Fáze 4b dokončena | IT Security Tool | NIS2 + ISO 27001 compliant*

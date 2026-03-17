@@ -50,7 +50,9 @@ public class WhitelistVersion
 public class Incident
 {
     [Key] public int Id { get; set; }
-    public DateTime Timestamp { get; set; }
+    public DateTime  Timestamp      { get; set; }
+    /// <summary>Čas odpojení média. NULL = stále připojeno nebo neznámo.</summary>
+    public DateTime? DisconnectedAt { get; set; }
     public string Hostname { get; set; } = string.Empty;
     public string Username { get; set; } = string.Empty;
     public int? ComputerId { get; set; }

@@ -1,8 +1,15 @@
 // ============================================================
 // IncidentSync.cs
-// Odesílá uzavřené denní log soubory na REST API server.
-// Aktuální denní soubor se neodesílá (ještě se zapisuje).
-// Úspěch → soubor smazán. Chyba → soubor zůstane, zkusí příště.
+// Odesílá denní log soubory na REST API server.
+// Delta sync – odesílá jen nové záznamy od posledního odeslání.
+//
+// v1.1 – fix duplikátů: offset persistuje na disk (.offset soubor)
+//   Restart agenta už nezpůsobí opakované odesílání celého souboru.
+//   Offset soubor se smaže spolu s log souborem při přesunu do sent\.
+//
+// v1.2 – DisconnectedAt v payloadu:
+//   Záznamy s vyplněným DisconnectedAt se odesílají i opakovaně,
+//   pokud se DisconnectedAt změnil od posledního odeslání.
 // ============================================================
 
 using System.Text;
@@ -20,10 +27,6 @@ public class IncidentSync : BackgroundService
     private readonly HttpClient _httpClient;
     private readonly int _syncIntervalMinutes;
 
-    // Sledujeme kolik záznamů z dnešního souboru bylo odesláno
-    // Klíč: název souboru, hodnota: počet odeslaných záznamů
-    private readonly Dictionary<string, int> _sentRecordCount = new();
-
     public IncidentSync(
         ILogger<IncidentSync> logger,
         string syncUrl,
@@ -35,40 +38,26 @@ public class IncidentSync : BackgroundService
         _incidentLogger      = incidentLogger;
         _syncIntervalMinutes = syncIntervalMinutes;
 
-        // Windows Authentication – agent jako HOSTNAME$ účet
-        var handler = new HttpClientHandler
-        {
-            UseDefaultCredentials = true
-        };
-        _httpClient = new HttpClient(handler)
-        {
-            Timeout = TimeSpan.FromSeconds(60)
-        };
+        var handler = new HttpClientHandler { UseDefaultCredentials = true };
+        _httpClient = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(60) };
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        // Statistika fronty při startu
         var (files, records) = _incidentLogger.GetQueueStats();
         _logger.LogInformation(
             "IncidentSync spuštěn – interval: {Min} min, ve frontě: {Files} souborů, {Records} záznamů",
             _syncIntervalMinutes, files, records);
 
-        // Počkáme minutu po startu
         await Task.Delay(TimeSpan.FromMinutes(1), stoppingToken);
 
         while (!stoppingToken.IsCancellationRequested)
         {
             await TrySyncFiles();
-            await Task.Delay(
-                TimeSpan.FromMinutes(_syncIntervalMinutes),
-                stoppingToken);
+            await Task.Delay(TimeSpan.FromMinutes(_syncIntervalMinutes), stoppingToken);
         }
     }
 
-    // --------------------------------------------------------
-    // Projde frontu a odešle uzavřené soubory
-    // --------------------------------------------------------
     private async Task TrySyncFiles()
     {
         try
@@ -81,21 +70,16 @@ public class IncidentSync : BackgroundService
                 return;
             }
 
-            _logger.LogInformation(
-                "IncidentSync: odesílám {Count} souborů na server", files.Count);
-
             foreach (var filePath in files)
-            {
                 await SendFile(filePath);
-            }
         }
         catch (HttpRequestException ex)
         {
-            _logger.LogWarning("IncidentSync: API nedostupné – soubory čekají v queue: {Msg}", ex.Message);
+            _logger.LogWarning("IncidentSync: API nedostupné – soubory čekají: {Msg}", ex.Message);
         }
         catch (TaskCanceledException)
         {
-            _logger.LogWarning("IncidentSync: timeout při spojení s API – zkusím příště");
+            _logger.LogWarning("IncidentSync: timeout – zkusím příště");
         }
         catch (Exception ex)
         {
@@ -104,12 +88,12 @@ public class IncidentSync : BackgroundService
     }
 
     // --------------------------------------------------------
-    // Odeslání jednoho denního souboru
-    // Pro dnešní soubor odesílá pouze nové záznamy od posledního sync
+    // Odeslání jednoho denního souboru s persistovaným offsetem
     // --------------------------------------------------------
     private async Task SendFile(string filePath)
     {
-        var fileName = Path.GetFileName(filePath);
+        var fileName   = Path.GetFileName(filePath);
+        var offsetPath = filePath + ".offset"; // soubor s číslem posledního odeslaného záznamu
 
         try
         {
@@ -124,30 +108,43 @@ public class IncidentSync : BackgroundService
                 return;
             }
 
-            // Delta sync – pro dnešní soubor odeslat jen nové záznamy
-            var alreadySent = _sentRecordCount.GetValueOrDefault(fileName, 0);
-            var newRecords  = daily.Records.Skip(alreadySent).ToList();
+            // Načíst offset z disku (přežije restart agenta)
+            var alreadySent = ReadOffset(offsetPath);
 
-            if (newRecords.Count == 0)
+            // Nové záznamy od posledního odeslání
+            var newRecords = daily.Records.Skip(alreadySent).ToList();
+
+            // Záznamy kde se změnil DisconnectedAt (byl null, teď má hodnotu)
+            // Tyto záznamy potřebujeme aktualizovat na serveru i když jsou "staré"
+            var updatedDisconnects = daily.Records
+                .Take(alreadySent)
+                .Where(r => r.DisconnectedAt.HasValue)
+                .ToList();
+
+            if (newRecords.Count == 0 && updatedDisconnects.Count == 0)
             {
                 _logger.LogInformation(
-                    "IncidentSync: {File} – žádné nové záznamy ({Sent}/{Total} již odesláno)",
+                    "IncidentSync: {File} – žádné nové záznamy ({Sent}/{Total} odesláno)",
                     fileName, alreadySent, daily.Records.Count);
                 return;
             }
 
             _logger.LogInformation(
-                "IncidentSync: {File} – odesílám {New} nových záznamů (celkem {Total})",
-                fileName, newRecords.Count, daily.Records.Count);
+                "IncidentSync: {File} – {New} nových, {Upd} disconnect aktualizací",
+                fileName, newRecords.Count, updatedDisconnects.Count);
+
+            // Kombinujeme nové záznamy + disconnect aktualizace
+            var toSend = newRecords.Concat(updatedDisconnects).ToList();
 
             var request = new
             {
                 hostname     = Environment.MachineName,
                 agentVersion = "1.0.0",
                 sourceFile   = fileName,
-                incidents    = newRecords.Select(r => new
+                incidents    = toSend.Select(r => new
                 {
                     timestamp        = r.Timestamp,
+                    disconnectedAt   = r.DisconnectedAt,
                     username         = r.Username,
                     vendorId         = r.VendorId,
                     productId        = r.ProductId,
@@ -164,42 +161,59 @@ public class IncidentSync : BackgroundService
             };
 
             var content  = new StringContent(
-                JsonSerializer.Serialize(request),
-                Encoding.UTF8,
-                "application/json");
-
-            var response = await _httpClient.PostAsync(
-                $"{_syncUrl}/api/incidents", content);
+                JsonSerializer.Serialize(request), Encoding.UTF8, "application/json");
+            var response = await _httpClient.PostAsync($"{_syncUrl}/api/incidents", content);
 
             if (response.IsSuccessStatusCode)
             {
-                // Zapamatujeme si kolik záznamů bylo odesláno
-                _sentRecordCount[fileName] = daily.Records.Count;
+                // Persistovat nový offset na disk
+                var newOffset = alreadySent + newRecords.Count;
+                WriteOffset(offsetPath, newOffset);
 
                 _logger.LogInformation(
-                    "IncidentSync: {File} – {New} nových záznamů odesláno, celkem {Total}",
-                    fileName, newRecords.Count, daily.Records.Count);
+                    "IncidentSync: {File} – odesláno OK, offset: {Offset}/{Total}",
+                    fileName, newOffset, daily.Records.Count);
 
-                // Uzavřený den → přesunout do sent\
-                // Dnešní den → zůstane v queue, čítač se resetuje po půlnoci
                 if (!_incidentLogger.IsTodaysFile(filePath))
                 {
-                    _sentRecordCount.Remove(fileName);
+                    // MoveTeSent smaže i .offset soubor
                     _incidentLogger.MoveTeSent(filePath);
                 }
             }
             else
             {
                 _logger.LogWarning(
-                    "IncidentSync: odeslání {File} selhalo: {Status} – zkusím příště",
-                    fileName, response.StatusCode);
+                    "IncidentSync: {File} – selhalo: {Status}", fileName, response.StatusCode);
             }
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex,
-                "IncidentSync: chyba při odesílání {File} – zkusím příště", fileName);
+            _logger.LogWarning(ex, "IncidentSync: chyba při odesílání {File}", fileName);
         }
+    }
+
+    // --------------------------------------------------------
+    // Offset persistance – čtení a zápis .offset souboru
+    // Formát: jediné číslo (int) jako text
+    // --------------------------------------------------------
+    private static int ReadOffset(string offsetPath)
+    {
+        try
+        {
+            if (File.Exists(offsetPath))
+                return int.TryParse(File.ReadAllText(offsetPath).Trim(), out var n) ? n : 0;
+        }
+        catch { }
+        return 0;
+    }
+
+    private static void WriteOffset(string offsetPath, int offset)
+    {
+        try
+        {
+            File.WriteAllText(offsetPath, offset.ToString());
+        }
+        catch { }
     }
 
     public override void Dispose()

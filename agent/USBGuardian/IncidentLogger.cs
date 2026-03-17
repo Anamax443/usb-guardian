@@ -5,6 +5,11 @@
 // Formát: log_HOSTNAME_2026-03-16.json
 // Po odeslání přesune do sent\ složky (ne smaže) – audit trail.
 // Sent soubory starší sentRetentionDays se automaticky mažou.
+//
+// v1.1 – přidán DisconnectedAt tracking:
+//   - DeviceRecord má nullable DisconnectedAt
+//   - UpdateDisconnectedAt() doplní čas odpojení do existujícího záznamu
+//   - Korelace přes PnpDeviceId + ConnectedAt timestamp
 // ============================================================
 
 using System.Text.Json;
@@ -37,7 +42,6 @@ public class IncidentLogger
         Directory.CreateDirectory(_queuePath);
         Directory.CreateDirectory(_sentPath);
 
-        // Při startu uklidíme staré sent soubory
         CleanupSentFiles();
     }
 
@@ -62,7 +66,8 @@ public class IncidentLogger
                 FirmwareRevision = incident.Device.FirmwareRevision,
                 PnpDeviceId      = incident.Device.PnpDeviceId,
                 Action           = incident.Action.ToString(),
-                WhitelistVersion = incident.WhitelistVersion
+                WhitelistVersion = incident.WhitelistVersion,
+                DisconnectedAt   = null   // doplní se při odpojení
             };
 
             AppendToDaily(record);
@@ -75,6 +80,70 @@ public class IncidentLogger
         catch (Exception ex)
         {
             _logger.LogError(ex, "Chyba při ukládání záznamu do fronty");
+        }
+    }
+
+    // --------------------------------------------------------
+    // Doplní čas odpojení do existujícího záznamu v dnešním souboru.
+    // Korelace: PnpDeviceId + ConnectedAt timestamp (sekundy – bez ms).
+    // Pokud záznam nenajde (restart agenta apod.), pouze loguje warning.
+    // --------------------------------------------------------
+    public void UpdateDisconnectedAt(string pnpDeviceId, DateTime connectedAt, DateTime disconnectedAt)
+    {
+        var today    = DateTime.UtcNow.Date;
+        var hostname = Environment.MachineName;
+        var fileName = $"log_{hostname}_{today:yyyy-MM-dd}.json";
+        var filePath = Path.Combine(_queuePath, fileName);
+
+        lock (_writeLock)
+        {
+            if (!File.Exists(filePath))
+            {
+                _logger.LogWarning(
+                    "UpdateDisconnectedAt: soubor nenalezen pro {PnpId}", pnpDeviceId);
+                return;
+            }
+
+            var existing = File.ReadAllText(filePath);
+            var daily    = JsonSerializer.Deserialize<DailyLog>(existing,
+                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+
+            if (daily == null) return;
+
+            // Hledáme záznam podle PnpDeviceId + timestamp (přesnost na sekundy)
+            var record = daily.Records.LastOrDefault(r =>
+                r.PnpDeviceId == pnpDeviceId &&
+                Math.Abs((r.Timestamp - connectedAt).TotalSeconds) < 5);
+
+            if (record == null)
+            {
+                // Záloha: hledáme jen podle PnpDeviceId (nejnovější bez DisconnectedAt)
+                record = daily.Records.LastOrDefault(r =>
+                    r.PnpDeviceId == pnpDeviceId &&
+                    r.DisconnectedAt == null);
+            }
+
+            if (record == null)
+            {
+                _logger.LogWarning(
+                    "UpdateDisconnectedAt: záznam nenalezen pro {PnpId} @ {Time}",
+                    pnpDeviceId, connectedAt);
+                return;
+            }
+
+            record.DisconnectedAt = disconnectedAt;
+
+            var duration = disconnectedAt - record.Timestamp;
+            _logger.LogInformation(
+                "Odpojení zaznamenáno: {Device} – doba připojení: {Duration:mm\\:ss}",
+                record.FriendlyName, duration);
+
+            // Atomický zápis
+            var json     = JsonSerializer.Serialize(daily,
+                new JsonSerializerOptions { WriteIndented = true });
+            var tempPath = filePath + ".tmp";
+            File.WriteAllText(tempPath, json);
+            File.Move(tempPath, filePath, overwrite: true);
         }
     }
 
@@ -122,9 +191,6 @@ public class IncidentLogger
 
     // --------------------------------------------------------
     // Vrátí seznam souborů připravených k odeslání
-    // Varianta A: odesílá i aktuální den (real-time monitoring)
-    // Uzavřené dny → přesun do sent\ po odeslání
-    // Aktuální den → zůstane v queue (přepisuje se), odešle se znovu při příštím sync
     // --------------------------------------------------------
     public List<string> GetFilesReadyToSync()
     {
@@ -137,7 +203,7 @@ public class IncidentLogger
     }
 
     // --------------------------------------------------------
-    // Vrátí true pokud je soubor aktuální den (nesmí se přesunout do sent)
+    // Vrátí true pokud je soubor aktuální den
     // --------------------------------------------------------
     public bool IsTodaysFile(string filePath)
     {
@@ -157,15 +223,19 @@ public class IncidentLogger
     {
         try
         {
-            var fileName = Path.GetFileName(filePath);
-            var sentPath = Path.Combine(_sentPath, fileName);
+            var fileName    = Path.GetFileName(filePath);
+            var sentPath    = Path.Combine(_sentPath, fileName);
+            var offsetPath  = filePath + ".offset"; // smazat i offset soubor
 
-            // Pokud soubor se stejným názvem v sent\ existuje, přidáme timestamp
             if (File.Exists(sentPath))
                 sentPath = Path.Combine(_sentPath,
                     $"{Path.GetFileNameWithoutExtension(fileName)}_{DateTime.UtcNow:HHmmss}.json");
 
             File.Move(filePath, sentPath);
+
+            // Smazat offset soubor spolu s log souborem
+            if (File.Exists(offsetPath))
+                File.Delete(offsetPath);
 
             _logger.LogDebug("Soubor přesunut do sent: {File}", fileName);
         }
@@ -191,7 +261,6 @@ public class IncidentLogger
             {
                 var name  = Path.GetFileNameWithoutExtension(file);
                 var parts = name.Split('_');
-                // Datum je třetí část: log_HOSTNAME_2026-03-15
                 if (parts.Length >= 3 &&
                     DateTime.TryParse(parts[^1], out var fileDate))
                 {
@@ -249,25 +318,26 @@ public class IncidentLogger
 
 public class DailyLog
 {
-    public string            Date        { get; set; } = string.Empty;
-    public string            Hostname    { get; set; } = string.Empty;
-    public int               RecordCount { get; set; }
-    public List<DeviceRecord> Records   { get; set; } = new();
+    public string             Date        { get; set; } = string.Empty;
+    public string             Hostname    { get; set; } = string.Empty;
+    public int                RecordCount { get; set; }
+    public List<DeviceRecord> Records     { get; set; } = new();
 }
 
 public class DeviceRecord
 {
-    public DateTime Timestamp        { get; set; }
-    public string   Username         { get; set; } = string.Empty;
-    public string   VendorId         { get; set; } = string.Empty;
-    public string   ProductId        { get; set; } = string.Empty;
-    public string   SerialNumber     { get; set; } = string.Empty;
-    public string   FriendlyName     { get; set; } = string.Empty;
-    public string   DeviceType       { get; set; } = string.Empty;
-    public long     SizeBytes        { get; set; }
-    public string   SizeFormatted    { get; set; } = string.Empty;
-    public string   FirmwareRevision { get; set; } = string.Empty;
-    public string   PnpDeviceId      { get; set; } = string.Empty;
-    public string   Action           { get; set; } = string.Empty;
-    public string   WhitelistVersion { get; set; } = string.Empty;
+    public DateTime  Timestamp        { get; set; }
+    public DateTime? DisconnectedAt   { get; set; }   // null = stále připojeno / neznámo
+    public string    Username         { get; set; } = string.Empty;
+    public string    VendorId         { get; set; } = string.Empty;
+    public string    ProductId        { get; set; } = string.Empty;
+    public string    SerialNumber     { get; set; } = string.Empty;
+    public string    FriendlyName     { get; set; } = string.Empty;
+    public string    DeviceType       { get; set; } = string.Empty;
+    public long      SizeBytes        { get; set; }
+    public string    SizeFormatted    { get; set; } = string.Empty;
+    public string    FirmwareRevision { get; set; } = string.Empty;
+    public string    PnpDeviceId      { get; set; } = string.Empty;
+    public string    Action           { get; set; } = string.Empty;
+    public string    WhitelistVersion { get; set; } = string.Empty;
 }

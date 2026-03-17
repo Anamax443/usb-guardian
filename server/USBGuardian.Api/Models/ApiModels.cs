@@ -23,7 +23,9 @@ public class IncidentBatchRequest
 
 public class IncidentDto
 {
-    public DateTime Timestamp        { get; set; }
+    public DateTime  Timestamp        { get; set; }
+    /// <summary>Čas odpojení média. NULL = stále připojeno nebo neznámo.</summary>
+    public DateTime? DisconnectedAt   { get; set; }
     public string   Username         { get; set; } = string.Empty;
     public string   VendorId         { get; set; } = string.Empty;
     public string   ProductId        { get; set; } = string.Empty;

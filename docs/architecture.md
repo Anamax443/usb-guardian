@@ -115,17 +115,22 @@ což je nezbytné pro terénní pracovníky na hotspotu nebo mimo doménu.
 ## Komponenty
 
 ### DeviceMonitor
-- **Technologie:** Dva WMI watchers běžící paralelně
-  - `Win32_DiskDrive` – fyzický disk (VID, PID, Serial, kapacita, firmware)
-  - `Win32_LogicalDisk` – drive letter (F:, G: atd.)
+- **Technologie:** Tři WMI watchers běžící paralelně
+  - `Win32_DiskDrive` (creation) – fyzický disk připojen (VID, PID, Serial, kapacita, firmware)
+  - `Win32_LogicalDisk` (creation) – drive letter přiřazen (F:, G: atd.)
+  - `Win32_DiskDrive` (deletion) – fyzický disk odpojen → záznam DisconnectedAt
 - **Korelace:** `DiskIndex` spojuje fyzický disk s logickým diskem
 - **Obousměrné párování (v1.2):** WMI eventy přicházejí v nepředvídatelném pořadí:
   - `_pendingDevices` – DiskDrive přišel první, čeká na LogicalDisk
   - `_pendingDriveLetters` – LogicalDisk přišel první, čeká na DiskDrive
-  - Timeout pro párování: 30 sekund (prodlouženo z původních 10s)
+  - Timeout pro párování: 30 sekund
+- **Disconnect tracking (v1.3):**
+  - `_activeConnections` – mapa PnpDeviceId → (FriendlyName, ConnectedAt)
+  - Při odpojení vypočítá dobu připojení a volá `IncidentLogger.UpdateDisconnectedAt()`
+  - Médium připojené před startem agenta → odpojení se zaloguje bez doby trvání
 - **WMI Watchdog (v1.1):** Každých 5 minut testovací WMI dotaz
-  - Při selhání automatická re-registrace obou watcherů
-  - `_lastWmiEventAt` timestamp pro diagnostiku stáří poslední události
+  - Při selhání automatická re-registrace všech tří watcherů
+  - `_lastWmiEventAt` timestamp pro diagnostiku
 - **Fallback:** Pokud drive letter nepřijde do 30 sekund, zpracuje se médium bez něj
 - **Parser:** Podporuje dva formáty PNPDeviceID:
   - `USB\VID_xxxx&PID_xxxx` – klasický USB (hex identifikátory)
@@ -167,14 +172,21 @@ což je nezbytné pro terénní pracovníky na hotspotu nebo mimo doménu.
 - **Queue:** `C:\ProgramData\USBGuardian\queue\log_HOSTNAME_2026-03-16.json`
 - **Design:** Offline-first – aktuální den se neodesílá (zapisuje se), uzavřené dny se odesílají
 - **Loguje vše:** Povolená i nepovolená média (kompletní audit trail)
+- **DisconnectedAt (v1.1):** Nullable pole v `DeviceRecord` – doplní se při odpojení média
+  - `UpdateDisconnectedAt()` – najde záznam podle PnpDeviceId + timestamp, doplní čas odpojení
+  - Korelace na sekundy (bez ms) pro robustnost
 - **Retence archívu:** Konfigurovatelná, výchozí 90 dní (`sentRetentionDays`)
 
 ### IncidentSync
-- **Delta sync:** Odesílají se pouze nové záznamy od posledního odeslaní (agent sleduje offset)
-- **Dnešní soubor:** Zůstává v `queue\`, odesílá se každých N minut (jen nové záznamy)
+- **Delta sync:** Odesílají se pouze nové záznamy od posledního odeslaní
+- **Offset persist (v1.1):** Offset uložen na disk jako `.offset` soubor vedle log souboru
+  - Přežije restart agenta → žádné duplicitní odesílání po restartu
+  - Smaže se automaticky spolu s log souborem při přesunu do `sent\`
+- **Disconnect aktualizace:** Záznamy s nově vyplněným `DisconnectedAt` se odešlou jako UPSERT
+- **Dnešní soubor:** Zůstává v `queue\`, odesílá se každých N minut
 - **Uzavřený den:** Po půlnoci přesun do `sent\` (audit trail)
 - **Offline:** Soubory čekají v `queue\` – při obnovení spojení se odešlou
-- **Deduplikace na API:** Server odmítne záznamy se stejným Hostname+Timestamp+SerialNumber
+- **Deduplikace na API:** UNIQUE constraint v DB + bulk lookup (fix N+1)
 
 ### WhitelistSync
 - **Heartbeat:** Každých N minut dotaz na `/api/heartbeat` (verze whitelistu)
