@@ -4,30 +4,39 @@
 // Windows Authentication – agents se autentizují strojem
 // Databáze je vytvořena SQL skripty (database/ složka)
 // Žádné hardcoded hodnoty – vše v appsettings.json
+//
+// v1.1 – přidána IncidentQueue + IncidentQueueWorker:
+//   Příchozí batche se zařadí do bounded Channel fronty.
+//   Worker zpracovává sekvenčně → SQL Server bez spike zátěže.
 // ============================================================
 
 using Microsoft.EntityFrameworkCore;
 using USBGuardian.Api.Data;
+using USBGuardian.Api.Queue;
 
 var builder = WebApplication.CreateBuilder(args);
 
 // ── Načtení lokálního přepisu (NECOMMITUJE SE) ───────────────
-// Explicitní cesta – funguje i jako Windows Service kde working dir je jiný
 var exeDir = AppContext.BaseDirectory;
 builder.Configuration
     .SetBasePath(exeDir)
-    .AddJsonFile(Path.Combine(exeDir, "appsettings.json"), optional: false, reloadOnChange: true)
-    .AddJsonFile(Path.Combine(exeDir, "appsettings.local.json"), optional: true, reloadOnChange: true);
+    .AddJsonFile(Path.Combine(exeDir, "appsettings.json"),       optional: false, reloadOnChange: true)
+    .AddJsonFile(Path.Combine(exeDir, "appsettings.local.json"), optional: true,  reloadOnChange: true);
 
 // ── Windows Service hosting ───────────────────────────────────
 builder.Services.AddWindowsService(o => o.ServiceName = "USB Guardian API");
 
 // ── SQL Server – Windows Authentication ──────────────────────
-// Heslo není součástí connection stringu – Integrated Security
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseSqlServer(
         builder.Configuration.GetConnectionString("DefaultConnection"),
         sql => sql.CommandTimeout(30)));
+
+// ── Incident Queue + Worker ───────────────────────────────────
+// Singleton fronta sdílená mezi controllery a workerem
+builder.Services.AddSingleton<IncidentQueue>();
+// Background worker čte z fronty a zapisuje do DB
+builder.Services.AddHostedService<IncidentQueueWorker>();
 
 // ── Controllers + Swagger ─────────────────────────────────────
 builder.Services.AddControllers();
@@ -48,8 +57,6 @@ builder.Services.AddAuthentication(
     .AddNegotiate();
 
 // ── Authorization – AD skupiny z konfigurace ─────────────────
-// Skupiny jsou definovány v appsettings.json → Authorization:AllowedGroups
-// Žádné hardcoded názvy domén ani skupin
 var allowedGroups = builder.Configuration
     .GetSection("Authorization:AllowedGroups")
     .Get<string[]>() ?? Array.Empty<string>();
@@ -65,15 +72,6 @@ builder.Services.AddAuthorization(options =>
     options.AddPolicy("USBGuardianClients", policy =>
         policy.RequireAssertion(ctx =>
         {
-            // Získáme všechny skupiny z claims
-            var userGroups = ctx.User.Claims
-                .Where(c => c.Type == System.Security.Claims.ClaimTypes.GroupSid
-                         || c.Type == "http://schemas.microsoft.com/ws/2008/06/identity/claims/groupsid"
-                         || c.Type == System.Security.Claims.ClaimTypes.Role)
-                .Select(c => c.Value)
-                .ToList();
-
-            // Zkusíme i IsInRole pro každou skupinu
             return allowedGroups.Any(group =>
                 ctx.User.IsInRole(group) ||
                 ctx.User.HasClaim(System.Security.Claims.ClaimTypes.Role, group));
@@ -96,8 +94,7 @@ app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
 
-// ── Debug endpoint – zobrazí skupiny přihlášeného uživatele ──
-// Použít pro diagnostiku autorizace, v produkci odstranit
+// ── Debug endpoint ────────────────────────────────────────────
 app.MapGet("/api/debug/whoami", (System.Security.Claims.ClaimsPrincipal user) =>
 {
     var identity = user.Identity;
@@ -118,7 +115,8 @@ var server  = connStr.Split(';')
     ?.Split('=').LastOrDefault() ?? "neznámý";
 
 Console.WriteLine($"USB Guardian API startuje");
-Console.WriteLine($"  SQL Server:      {server}");
+Console.WriteLine($"  SQL Server:       {server}");
 Console.WriteLine($"  Povolené skupiny: {string.Join(", ", allowedGroups)}");
+Console.WriteLine($"  Incident queue:   bounded Channel (max 1000 batchů)");
 
 await app.RunAsync();

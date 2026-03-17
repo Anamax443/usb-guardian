@@ -183,10 +183,20 @@ což je nezbytné pro terénní pracovníky na hotspotu nebo mimo doménu.
   - Přežije restart agenta → žádné duplicitní odesílání po restartu
   - Smaže se automaticky spolu s log souborem při přesunu do `sent\`
 - **Disconnect aktualizace:** Záznamy s nově vyplněným `DisconnectedAt` se odešlou jako UPSERT
+- **Jitter při startu (v1.3):** Náhodné zpoždění 0–60s před prvním sync
+  - Ochrana proti thundering herd při hromadném deployi/restartu 500+ PC
+- **Retry při 503 (v1.4):** Pokud server vrátí 503 (fronta plná), agent čeká 30s a zkusí znovu (max 3×)
 - **Dnešní soubor:** Zůstává v `queue\`, odesílá se každých N minut
 - **Uzavřený den:** Po půlnoci přesun do `sent\` (audit trail)
 - **Offline:** Soubory čekají v `queue\` – při obnovení spojení se odešlou
-- **Deduplikace na API:** UNIQUE constraint v DB + bulk lookup (fix N+1)
+
+### IncidentQueue (server)
+- **Technologie:** .NET `System.Threading.Channels` – bounded Channel (zdarma, bez externích závislostí)
+- **Kapacita:** Max 1000 čekajících batchů – při překročení vrátí API 503
+- **HTTP response:** Controller přijme batch a okamžitě vrátí `202 Accepted` (< 1ms)
+- **Worker:** `IncidentQueueWorker` zpracovává batche sekvenčně → SQL Server bez spike zátěže
+- **Monitoring:** `GET /api/incidents/queue/status` vrátí počet čekajících batchů
+- **Škálovatelnost:** Navrženo pro 500+ PC s jitter ochranou na straně agenta
 
 ### WhitelistSync
 - **Heartbeat:** Každých N minut dotaz na `/api/heartbeat` (verze whitelistu)

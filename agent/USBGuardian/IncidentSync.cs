@@ -3,13 +3,19 @@
 // Odesílá denní log soubory na REST API server.
 // Delta sync – odesílá jen nové záznamy od posledního odeslání.
 //
-// v1.1 – fix duplikátů: offset persistuje na disk (.offset soubor)
-//   Restart agenta už nezpůsobí opakované odesílání celého souboru.
-//   Offset soubor se smaže spolu s log souborem při přesunu do sent\.
+// v1.1 – offset persist na disk (.offset soubor)
+//   Restart agenta nezpůsobí opakované odesílání celého souboru.
 //
-// v1.2 – DisconnectedAt v payloadu:
-//   Záznamy s vyplněným DisconnectedAt se odesílají i opakovaně,
-//   pokud se DisconnectedAt změnil od posledního odeslání.
+// v1.2 – DisconnectedAt v payloadu
+//
+// v1.3 – Jitter při startu (thundering herd ochrana)
+//   Náhodné zpoždění 0–60s před prvním sync.
+//   Při hromadném deployi nebo restartu 500 PC najednou
+//   nedostanou API server spike, ale rozložené requesty.
+//
+// v1.4 – Retry při 503 (fronta serveru plná)
+//   Pokud server vrátí 503 (fronta plná), agent počká
+//   a zkusí znovu místo zahození dat.
 // ============================================================
 
 using System.Text;
@@ -26,6 +32,14 @@ public class IncidentSync : BackgroundService
     private readonly IncidentLogger _incidentLogger;
     private readonly HttpClient _httpClient;
     private readonly int _syncIntervalMinutes;
+
+    // Jitter – náhodné zpoždění při startu (0–60 sekund)
+    private static readonly Random _rng = new();
+    private const int JitterMaxSeconds = 60;
+
+    // Retry při 503 – počet pokusů a prodleva
+    private const int MaxRetries       = 3;
+    private const int RetryDelaySeconds = 30;
 
     public IncidentSync(
         ILogger<IncidentSync> logger,
@@ -49,6 +63,13 @@ public class IncidentSync : BackgroundService
             "IncidentSync spuštěn – interval: {Min} min, ve frontě: {Files} souborů, {Records} záznamů",
             _syncIntervalMinutes, files, records);
 
+        // Jitter – rozloží nápor při hromadném deployi/restartu
+        var jitter = _rng.Next(0, JitterMaxSeconds);
+        _logger.LogInformation(
+            "IncidentSync: jitter {Sec}s před prvním sync (thundering herd ochrana)", jitter);
+        await Task.Delay(TimeSpan.FromSeconds(jitter), stoppingToken);
+
+        // Počkáme ještě minutu (standardní prodleva při startu)
         await Task.Delay(TimeSpan.FromMinutes(1), stoppingToken);
 
         while (!stoppingToken.IsCancellationRequested)
@@ -66,7 +87,7 @@ public class IncidentSync : BackgroundService
 
             if (files.Count == 0)
             {
-                _logger.LogInformation("IncidentSync: fronta prázdná – žádné soubory k odeslání");
+                _logger.LogInformation("IncidentSync: fronta prázdná");
                 return;
             }
 
@@ -88,12 +109,12 @@ public class IncidentSync : BackgroundService
     }
 
     // --------------------------------------------------------
-    // Odeslání jednoho denního souboru s persistovaným offsetem
+    // Odeslání jednoho souboru s retry při 503
     // --------------------------------------------------------
     private async Task SendFile(string filePath)
     {
         var fileName   = Path.GetFileName(filePath);
-        var offsetPath = filePath + ".offset"; // soubor s číslem posledního odeslaného záznamu
+        var offsetPath = filePath + ".offset";
 
         try
         {
@@ -108,14 +129,9 @@ public class IncidentSync : BackgroundService
                 return;
             }
 
-            // Načíst offset z disku (přežije restart agenta)
             var alreadySent = ReadOffset(offsetPath);
+            var newRecords  = daily.Records.Skip(alreadySent).ToList();
 
-            // Nové záznamy od posledního odeslání
-            var newRecords = daily.Records.Skip(alreadySent).ToList();
-
-            // Záznamy kde se změnil DisconnectedAt (byl null, teď má hodnotu)
-            // Tyto záznamy potřebujeme aktualizovat na serveru i když jsou "staré"
             var updatedDisconnects = daily.Records
                 .Take(alreadySent)
                 .Where(r => r.DisconnectedAt.HasValue)
@@ -124,16 +140,11 @@ public class IncidentSync : BackgroundService
             if (newRecords.Count == 0 && updatedDisconnects.Count == 0)
             {
                 _logger.LogInformation(
-                    "IncidentSync: {File} – žádné nové záznamy ({Sent}/{Total} odesláno)",
+                    "IncidentSync: {File} – žádné nové záznamy ({Sent}/{Total})",
                     fileName, alreadySent, daily.Records.Count);
                 return;
             }
 
-            _logger.LogInformation(
-                "IncidentSync: {File} – {New} nových, {Upd} disconnect aktualizací",
-                fileName, newRecords.Count, updatedDisconnects.Count);
-
-            // Kombinujeme nové záznamy + disconnect aktualizace
             var toSend = newRecords.Concat(updatedDisconnects).ToList();
 
             var request = new
@@ -160,30 +171,44 @@ public class IncidentSync : BackgroundService
                 }).ToList()
             };
 
-            var content  = new StringContent(
-                JsonSerializer.Serialize(request), Encoding.UTF8, "application/json");
-            var response = await _httpClient.PostAsync($"{_syncUrl}/api/incidents", content);
+            var body = JsonSerializer.Serialize(request);
 
-            if (response.IsSuccessStatusCode)
+            // Retry smyčka pro případ 503 (fronta serveru plná)
+            for (int attempt = 1; attempt <= MaxRetries; attempt++)
             {
-                // Persistovat nový offset na disk
-                var newOffset = alreadySent + newRecords.Count;
-                WriteOffset(offsetPath, newOffset);
+                var content  = new StringContent(body, Encoding.UTF8, "application/json");
+                var response = await _httpClient.PostAsync($"{_syncUrl}/api/incidents", content);
 
-                _logger.LogInformation(
-                    "IncidentSync: {File} – odesláno OK, offset: {Offset}/{Total}",
-                    fileName, newOffset, daily.Records.Count);
-
-                if (!_incidentLogger.IsTodaysFile(filePath))
+                if (response.IsSuccessStatusCode)
                 {
-                    // MoveTeSent smaže i .offset soubor
-                    _incidentLogger.MoveTeSent(filePath);
+                    var newOffset = alreadySent + newRecords.Count;
+                    WriteOffset(offsetPath, newOffset);
+
+                    _logger.LogInformation(
+                        "IncidentSync: {File} – OK, offset: {Offset}/{Total}",
+                        fileName, newOffset, daily.Records.Count);
+
+                    if (!_incidentLogger.IsTodaysFile(filePath))
+                        _incidentLogger.MoveTeSent(filePath);
+
+                    return; // Úspěch – konec retry smyčky
                 }
-            }
-            else
-            {
-                _logger.LogWarning(
-                    "IncidentSync: {File} – selhalo: {Status}", fileName, response.StatusCode);
+
+                if ((int)response.StatusCode == 503 && attempt < MaxRetries)
+                {
+                    // Fronta serveru plná – počkáme a zkusíme znovu
+                    _logger.LogWarning(
+                        "IncidentSync: server fronta plná (503), pokus {Attempt}/{Max}, čekám {Delay}s",
+                        attempt, MaxRetries, RetryDelaySeconds);
+                    await Task.Delay(TimeSpan.FromSeconds(RetryDelaySeconds));
+                }
+                else
+                {
+                    _logger.LogWarning(
+                        "IncidentSync: {File} – selhalo: {Status} (pokus {Attempt}/{Max})",
+                        fileName, response.StatusCode, attempt, MaxRetries);
+                    break;
+                }
             }
         }
         catch (Exception ex)
@@ -192,10 +217,6 @@ public class IncidentSync : BackgroundService
         }
     }
 
-    // --------------------------------------------------------
-    // Offset persistance – čtení a zápis .offset souboru
-    // Formát: jediné číslo (int) jako text
-    // --------------------------------------------------------
     private static int ReadOffset(string offsetPath)
     {
         try
@@ -209,10 +230,7 @@ public class IncidentSync : BackgroundService
 
     private static void WriteOffset(string offsetPath, int offset)
     {
-        try
-        {
-            File.WriteAllText(offsetPath, offset.ToString());
-        }
+        try { File.WriteAllText(offsetPath, offset.ToString()); }
         catch { }
     }
 

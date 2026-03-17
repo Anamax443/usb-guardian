@@ -1,22 +1,18 @@
 // ============================================================
 // IncidentsController.cs
 // Příjem incidentů z agentů (batch upload)
-// POST /api/incidents
+// POST /api/incidents → 202 Accepted (zařadí do fronty)
 //
-// v1.1 – DisconnectedAt podpora:
-//   - IncidentDto má nullable DisconnectedAt
-//   - Pokud záznam existuje a přišel DisconnectedAt → UPSERT (aktualizace)
-//   - Nový záznam → INSERT
-//
-// v1.2 – fix N+1 deduplikace:
-//   - Načteme existující klíče jedním bulk dotazem
-//   - In-memory lookup místo N SQL dotazů
+// Logika zpracování přesunuta do IncidentQueueWorker.
+// Controller jen validuje a zařadí do Channel fronty.
+// Díky tomu HTTP response time < 1ms bez ohledu na SQL zátěž.
 // ============================================================
 
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using USBGuardian.Api.Data;
 using USBGuardian.Api.Models;
+using USBGuardian.Api.Queue;
 
 namespace USBGuardian.Api.Controllers;
 
@@ -25,141 +21,64 @@ namespace USBGuardian.Api.Controllers;
 [Microsoft.AspNetCore.Authorization.Authorize(Policy = "USBGuardianClients")]
 public class IncidentsController : ControllerBase
 {
+    private readonly IncidentQueue _queue;
     private readonly AppDbContext _db;
     private readonly ILogger<IncidentsController> _logger;
 
-    public IncidentsController(AppDbContext db, ILogger<IncidentsController> logger)
+    public IncidentsController(
+        IncidentQueue queue,
+        AppDbContext db,
+        ILogger<IncidentsController> logger)
     {
+        _queue  = queue;
         _db     = db;
         _logger = logger;
     }
 
     // --------------------------------------------------------
     // POST /api/incidents
-    // Batch upload incidentů z agenta.
-    // Nové záznamy → INSERT
-    // Existující záznamy s DisconnectedAt → UPDATE DisconnectedAt
+    // Zařadí batch do fronty a vrátí 202 Accepted okamžitě.
+    // Worker zpracuje batch asynchronně vlastním tempem.
     // --------------------------------------------------------
     [HttpPost]
-    public async Task<IActionResult> SubmitBatch([FromBody] IncidentBatchRequest request)
+    public IActionResult SubmitBatch([FromBody] IncidentBatchRequest request)
     {
         if (request.Incidents.Count == 0)
-            return Ok(new { accepted = 0, updated = 0, duplicates = 0 });
+            return Ok(new { queued = 0 });
 
         var sourceIp = HttpContext.Connection.RemoteIpAddress?.ToString();
 
-        // Upsert počítače
-        var computer = await _db.Computers
-            .FirstOrDefaultAsync(c => c.Hostname == request.Hostname);
+        var item = new IncidentBatchItem(
+            Request:    request,
+            SourceIp:   sourceIp,
+            ReceivedAt: DateTime.UtcNow);
 
-        if (computer == null)
+        // TryWrite je non-blocking – okamžitě vrátí true/false
+        if (!_queue.TryEnqueue(item))
         {
-            computer = new Computer
+            // Fronta plná (> 1000 čekajících batchů) – agent zkusí příště
+            _logger.LogWarning(
+                "Fronta plná – batch od {Hostname} odmítnut (pending: {Count})",
+                request.Hostname, _queue.PendingCount);
+
+            return StatusCode(503, new
             {
-                Hostname     = request.Hostname,
-                AgentVersion = request.AgentVersion,
-                LastSeen     = DateTime.UtcNow
-            };
-            _db.Computers.Add(computer);
-        }
-        else
-        {
-            computer.LastSeen     = DateTime.UtcNow;
-            computer.AgentVersion = request.AgentVersion;
-        }
-        await _db.SaveChangesAsync();
-
-        // ── Fix N+1: načíst existující záznamy pro tuto stanici jedním dotazem ──
-        // Rozsah: záznamy z posledních 24h (disconnect update přijde vždy v den připojení)
-        var since      = DateTime.UtcNow.AddHours(-24);
-        var timestamps = request.Incidents.Select(i => i.Timestamp).Distinct().ToList();
-
-        // Načteme existující záznamy matchující hostname + timestamp (bulk)
-        var existingMap = await _db.Incidents
-            .Where(i => i.Hostname == request.Hostname && i.Timestamp >= since)
-            .Select(i => new { i.Id, i.Timestamp, i.SerialNumber, i.VendorId, i.DisconnectedAt })
-            .ToListAsync();
-
-        // Rychlý lookup: klíč = "timestamp|serial|vendor"
-        var existingLookup = existingMap
-            .GroupBy(i => MakeKey(i.Timestamp, i.SerialNumber, i.VendorId))
-            .ToDictionary(g => g.Key, g => g.First());
-
-        var newIncidents     = new List<Incident>();
-        var updatedCount     = 0;
-        var duplicatesCount  = 0;
-
-        foreach (var dto in request.Incidents)
-        {
-            var key = MakeKey(dto.Timestamp, dto.SerialNumber, dto.VendorId);
-
-            if (existingLookup.TryGetValue(key, out var existing))
-            {
-                // Záznam existuje
-                if (dto.DisconnectedAt.HasValue && existing.DisconnectedAt == null)
-                {
-                    // Aktualizovat DisconnectedAt – médium bylo odpojeno
-                    await _db.Incidents
-                        .Where(i => i.Id == existing.Id)
-                        .ExecuteUpdateAsync(s =>
-                            s.SetProperty(i => i.DisconnectedAt, dto.DisconnectedAt));
-                    updatedCount++;
-                }
-                else
-                {
-                    duplicatesCount++;
-                }
-            }
-            else
-            {
-                // Nový záznam
-                newIncidents.Add(new Incident
-                {
-                    Timestamp        = dto.Timestamp,
-                    DisconnectedAt   = dto.DisconnectedAt,
-                    Hostname         = request.Hostname,
-                    Username         = dto.Username,
-                    ComputerId       = computer.Id,
-                    VendorId         = dto.VendorId,
-                    ProductId        = dto.ProductId,
-                    SerialNumber     = dto.SerialNumber,
-                    FriendlyName     = dto.FriendlyName,
-                    DeviceType       = dto.DeviceType,
-                    SizeBytes        = dto.SizeBytes,
-                    FirmwareRevision = dto.FirmwareRevision,
-                    PnpDeviceId      = dto.PnpDeviceId,
-                    Action           = dto.Action,
-                    WhitelistVersion = dto.WhitelistVersion,
-                    SourceFile       = !string.IsNullOrEmpty(dto.SourceFile)
-                                       ? dto.SourceFile
-                                       : request.SourceFile,
-                    ReceivedAt       = DateTime.UtcNow,
-                    SourceIp         = sourceIp
-                });
-            }
+                error   = "Queue full – retry later",
+                pending = _queue.PendingCount
+            });
         }
 
-        if (newIncidents.Count > 0)
-        {
-            _db.Incidents.AddRange(newIncidents);
-            await _db.SaveChangesAsync();
-        }
+        _logger.LogDebug(
+            "Batch od {Hostname} zařazen do fronty ({Count} incidentů, pending: {Pending})",
+            request.Hostname, request.Incidents.Count, _queue.PendingCount);
 
-        _logger.LogInformation(
-            "Přijato od {Hostname} ({Ip}): {New} nových, {Upd} disconnect aktualizací, {Dup} duplikátů",
-            request.Hostname, sourceIp, newIncidents.Count, updatedCount, duplicatesCount);
-
-        return Ok(new
+        // 202 Accepted = přijato, bude zpracováno
+        return Accepted(new
         {
-            accepted   = newIncidents.Count,
-            updated    = updatedCount,
-            duplicates = duplicatesCount
+            queued  = request.Incidents.Count,
+            pending = _queue.PendingCount
         });
     }
-
-    // Klíč pro deduplikaci – timestamp na sekundy (bez ms) + serial + vendor
-    private static string MakeKey(DateTime ts, string serial, string vendor) =>
-        $"{ts:yyyy-MM-ddTHH:mm:ss}|{serial}|{vendor}";
 
     // --------------------------------------------------------
     // GET /api/incidents
@@ -168,10 +87,10 @@ public class IncidentsController : ControllerBase
     public async Task<IActionResult> GetIncidents(
         [FromQuery] DateTime? from,
         [FromQuery] DateTime? to,
-        [FromQuery] string? hostname,
-        [FromQuery] string? username,
-        [FromQuery] int page     = 1,
-        [FromQuery] int pageSize = 50)
+        [FromQuery] string?   hostname,
+        [FromQuery] string?   username,
+        [FromQuery] int       page     = 1,
+        [FromQuery] int       pageSize = 50)
     {
         var query = _db.Incidents.AsQueryable();
 
@@ -189,4 +108,12 @@ public class IncidentsController : ControllerBase
 
         return Ok(new { total, page, pageSize, items });
     }
+
+    // --------------------------------------------------------
+    // GET /api/incidents/queue/status
+    // Monitoring – počet čekajících batchů ve frontě
+    // --------------------------------------------------------
+    [HttpGet("queue/status")]
+    public IActionResult QueueStatus()
+        => Ok(new { pending = _queue.PendingCount });
 }
