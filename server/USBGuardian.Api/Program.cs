@@ -5,11 +5,11 @@
 // Databáze je vytvořena SQL skripty (database/ složka)
 // Žádné hardcoded hodnoty – vše v appsettings.json
 //
-// v1.1 – přidána IncidentQueue + IncidentQueueWorker:
-//   Příchozí batche se zařadí do bounded Channel fronty.
-//   Worker zpracovává sekvenčně → SQL Server bez spike zátěže.
+// v1.1 – přidána IncidentQueue + IncidentQueueWorker
+// v1.2 – HTTPS podpora přes Kestrel + self-signed certifikát
 // ============================================================
 
+using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.EntityFrameworkCore;
 using USBGuardian.Api.Data;
 using USBGuardian.Api.Queue;
@@ -22,6 +22,27 @@ builder.Configuration
     .SetBasePath(exeDir)
     .AddJsonFile(Path.Combine(exeDir, "appsettings.json"),       optional: false, reloadOnChange: true)
     .AddJsonFile(Path.Combine(exeDir, "appsettings.local.json"), optional: true,  reloadOnChange: true);
+
+// ── Kestrel HTTPS konfigurace ─────────────────────────────────
+// Certifikát se načte z Windows Certificate Store (LocalMachine\My)
+// podle Subject z konfigurace. Generování: scripts/New-Certificate.ps1
+builder.WebHost.ConfigureKestrel((context, options) =>
+{
+    var kestrelSection = context.Configuration.GetSection("Kestrel");
+    if (kestrelSection.Exists())
+    {
+        // Načíst z appsettings – podporuje Certificate Store i PFX soubor
+        options.Configure(kestrelSection);
+    }
+    else
+    {
+        // Fallback: HTTP pouze (vývoj bez certifikátu)
+        options.ListenAnyIP(5050, listenOptions =>
+        {
+            listenOptions.Protocols = HttpProtocols.Http1AndHttp2;
+        });
+    }
+});
 
 // ── Windows Service hosting ───────────────────────────────────
 builder.Services.AddWindowsService(o => o.ServiceName = "USB Guardian API");
@@ -118,5 +139,6 @@ Console.WriteLine($"USB Guardian API startuje");
 Console.WriteLine($"  SQL Server:       {server}");
 Console.WriteLine($"  Povolené skupiny: {string.Join(", ", allowedGroups)}");
 Console.WriteLine($"  Incident queue:   bounded Channel (max 1000 batchů)");
+Console.WriteLine($"  HTTPS:            port 5443 (HTTP fallback: 5050)");
 
 await app.RunAsync();

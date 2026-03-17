@@ -209,6 +209,11 @@ což je nezbytné pro terénní pracovníky na hotspotu nebo mimo doménu.
 - **Monitoring:** `GET /api/incidents/queue/status` vrátí počet čekajících batchů
 - **Škálovatelnost:** Navrženo pro 500+ PC s jitter ochranou na straně agenta
 
+### WhitelistSync (v1.1 – HTTPS podpora)
+- **TLS validace:** `validateServerCertificate` konfigurovatelné (výchozí `true`)
+- **Dev mód:** `false` = přijme jakýkoliv certifikát (pouze pro vývoj)
+- **Certifikát:** distribuován přes `scripts/Install-Certificate.ps1` → Trusted Root
+
 ### WhitelistSync
 - **Heartbeat:** Každých N minut dotaz na `/api/heartbeat` (verze whitelistu)
 - **Stažení:** Jen při změně verze – úspora bandwidth

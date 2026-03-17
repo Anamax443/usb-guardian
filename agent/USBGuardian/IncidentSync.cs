@@ -45,14 +45,23 @@ public class IncidentSync : BackgroundService
         ILogger<IncidentSync> logger,
         string syncUrl,
         IncidentLogger incidentLogger,
-        int syncIntervalMinutes = 1)
+        int syncIntervalMinutes = 1,
+        bool validateServerCertificate = true)
     {
         _logger              = logger;
         _syncUrl             = syncUrl;
         _incidentLogger      = incidentLogger;
         _syncIntervalMinutes = syncIntervalMinutes;
 
-        var handler = new HttpClientHandler { UseDefaultCredentials = true };
+        // TLS: v produkci vždy validovat certifikát serveru
+        var handler = new HttpClientHandler
+        {
+            UseDefaultCredentials        = true,
+            ServerCertificateCustomValidationCallback =
+                validateServerCertificate
+                    ? null
+                    : HttpClientHandler.DangerousAcceptAnyServerCertificateValidator
+        };
         _httpClient = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(60) };
     }
 

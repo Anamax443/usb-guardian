@@ -29,14 +29,24 @@ public class WhitelistSync : BackgroundService
         ILogger<WhitelistSync> logger,
         string syncUrl,
         string localWhitelistPath,
-        int syncIntervalMinutes)
+        int syncIntervalMinutes,
+        bool validateServerCertificate = true)
     {
         _logger              = logger;
         _syncUrl             = syncUrl;
         _localWhitelistPath  = localWhitelistPath;
         _syncIntervalMinutes = syncIntervalMinutes;
 
-        var handler = new HttpClientHandler { UseDefaultCredentials = true };
+        // TLS: v produkci vždy validovat certifikát serveru
+        // Vypnout pouze pro vývoj (validateServerCertificate=false v agent.config.local.json)
+        var handler = new HttpClientHandler
+        {
+            UseDefaultCredentials        = true,
+            ServerCertificateCustomValidationCallback =
+                validateServerCertificate
+                    ? null  // výchozí validace OS
+                    : HttpClientHandler.DangerousAcceptAnyServerCertificateValidator
+        };
         _httpClient = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(30) };
     }
 

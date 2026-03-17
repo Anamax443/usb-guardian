@@ -113,6 +113,13 @@ var syncUrl = builder.Configuration["whitelist:syncUrl"] ?? string.Empty;
 
 if (!string.IsNullOrEmpty(syncUrl))
 {
+    // TLS validace – výchozí true (produkce), false pro vývoj bez certifikátu
+    var validateTls = bool.Parse(
+        builder.Configuration["tls:validateServerCertificate"] ?? "true");
+
+    if (!validateTls)
+        Console.WriteLine("VAROVÁNÍ: TLS validace certifikátu je VYPNUTA (pouze pro vývoj!)");
+
     // Synchronizace whitelistu ze serveru
     builder.Services.AddHostedService(sp =>
     {
@@ -122,7 +129,7 @@ if (!string.IsNullOrEmpty(syncUrl))
                        ?? @"C:\ProgramData\USBGuardian\whitelist\whitelist.json";
         var interval = int.Parse(
                        config["sync:whitelistSyncIntervalMinutes"] ?? "15");
-        return new WhitelistSync(logger, syncUrl, wlPath, interval);
+        return new WhitelistSync(logger, syncUrl, wlPath, interval, validateTls);
     });
 
     // Odesílání incidentů na server
@@ -133,7 +140,7 @@ if (!string.IsNullOrEmpty(syncUrl))
         var iLogger       = sp.GetRequiredService<IncidentLogger>();
         var interval      = int.Parse(
                             config["sync:incidentSyncIntervalMinutes"] ?? "1");
-        return new IncidentSync(logger, syncUrl, iLogger, interval);
+        return new IncidentSync(logger, syncUrl, iLogger, interval, validateTls);
     });
 
     Console.WriteLine($"Sync aktivní → {syncUrl}");

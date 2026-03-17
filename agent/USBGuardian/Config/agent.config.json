@@ -1,47 +1,52 @@
 {
+  // ============================================================
+  // agent.config.json – výchozí konfigurace agenta
+  // Pro lokální přepisy vytvořte agent.config.local.json
+  // (local soubor se NECOMMITUJE)
+  // ============================================================
+
   "policy": {
     "mode": "warn",
     "maxOfflineAgeDays": 30,
     "onExpiredWhitelist": "warn"
   },
+
   "whitelist": {
     "localPath": "C:\\ProgramData\\USBGuardian\\whitelist\\whitelist.json",
-    "syncUrl": "http://YOUR_API_SERVER:5050",
-    "syncIntervalMinutes": 15,
-    "allowWildcards": false,
-    "signatureVerification": false
+    "syncUrl": "https://YOUR_API_SERVER:5443",
+    "allowWildcards": false
   },
+
+  // ── TLS konfigurace ─────────────────────────────────────────
+  // validateServerCertificate: true  = agent ověří TLS certifikát (produkce)
+  // validateServerCertificate: false = agent přijme jakýkoliv certifikát (vývoj)
+  // Certifikát serveru musí být nainstalován v Trusted Root (Install-Certificate.ps1)
+  "tls": {
+    "validateServerCertificate": true
+  },
+
+  // ── RSA podpis whitelistu ───────────────────────────────────
+  "signing": {
+    "enabled": true,
+    "publicKeyPath": "Config\\whitelist_public.pem"
+  },
+
   "sync": {
-    "incidentSyncIntervalMinutes": 1,
-    "whitelistSyncIntervalMinutes": 15
+    "whitelistSyncIntervalMinutes": 15,
+    "incidentSyncIntervalMinutes": 1
   },
+
+  "logging": {
+    "queuePath": "C:\\ProgramData\\USBGuardian\\queue",
+    "sentPath": "C:\\ProgramData\\USBGuardian\\sent",
+    "sentRetentionDays": 90,
+    "logLevel": "Information"
+  },
+
   "notifications": {
     "toast": {
       "enabled": true,
       "contactMessage": "Kontaktujte IT oddeleni"
-    },
-    "email": {
-      "enabled": false,
-      "provider": "microsoft_graph",
-      "graph": {
-        "tenantId": "",
-        "clientId": "",
-        "clientSecret": "",
-        "senderAddress": ""
-      },
-      "recipients": {
-        "immediate": [],
-        "digest": []
-      },
-      "immediateAlertOn": [ "block", "warn" ],
-      "digestSchedule": "daily",
-      "digestTime": "08:00"
     }
-  },
-  "logging": {
-    "queuePath":          "C:\\ProgramData\\USBGuardian\\queue",
-    "sentPath":           "C:\\ProgramData\\USBGuardian\\sent",
-    "sentRetentionDays":  90,
-    "logLevel":           "Information"
   }
 }

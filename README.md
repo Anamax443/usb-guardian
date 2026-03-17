@@ -30,9 +30,10 @@ Podrobný popis compliance viz [`docs/architecture.md`](docs/architecture.md).
 | 4b | Disconnect tracking, fix duplikátů (offset persist), N+1 fix | ✅ Hotovo |
 | 4c | Incident queue (bounded Channel), jitter, retry 503 | ✅ Hotovo |
 | 5 | RSA podpis whitelistu – SignatureVerifier, WhitelistSigner nástroj | ✅ Hotovo |
-| 6 | Toast z SYSTEM kontextu (Privilege Separation) | 🔜 Plánováno |
-| 6 | Email notifikace (Microsoft Graph API) | 🔜 Plánováno |
-| 7 | Admin UI – dashboard, správa whitelistu, reporty | 📋 Plánováno |
+| 6 | HTTPS – self-signed certifikát, TLS validace, New-Certificate.ps1 | ✅ Hotovo |
+| 7 | Toast z SYSTEM kontextu (Privilege Separation) | 🔜 Plánováno |
+| 8 | Email notifikace (Microsoft Graph API) | 🔜 Plánováno |
+| 9 | Admin UI – dashboard, správa whitelistu, reporty | 📋 Plánováno |
 
 ---
 
@@ -230,6 +231,7 @@ Soubor `agent\USBGuardian\Config\agent.config.json`:
 | `logging.sentPath` | `C:\ProgramData\USBGuardian\sent` | Archivní složka |
 | `signing.enabled` | `true` | RSA ověření podpisu whitelistu (vypnout pouze pro vývoj) |
 | `signing.publicKeyPath` | `Config/whitelist_public.pem` | Cesta k veřejnému klíči |
+| `tls.validateServerCertificate` | `true` | Ověření TLS certifikátu serveru (false pouze pro vývoj) |
 
 ---
 
@@ -357,6 +359,9 @@ usb-guardian/
 │   ├── 01_create_database.sql
 │   ├── 02_create_tables.sql
 │   └── 03_add_sourcefile.sql
+├── scripts/
+│   ├── New-Certificate.ps1     ← generování TLS certifikátu na serveru
+│   └── Install-Certificate.ps1 ← instalace certifikátu na klientské stanice
 └── docs/architecture.md        ← technická dokumentace + deployment guide
 ```
 
@@ -405,9 +410,9 @@ Start-Process "http://B-S-W-SQL-04:5050/swagger"
 - [x] Jitter při startu – náhodné zpoždění 0–60s (thundering herd ochrana pro 500+ PC)
 - [x] Retry při 503 – agent opakuje při plné frontě serveru (3× po 30s)
 - [x] RSA podpis whitelistu – SignatureVerifier (RSA-4096 SHA-256), WhitelistSigner nástroj
+- [x] HTTPS – self-signed certifikát, TLS validace agenta, New-Certificate.ps1 skript
 - [ ] Toast z SYSTEM kontextu (Privilege Separation – helper process v user session)
 - [ ] WM_DEVICECHANGE jako záloha za WMI
-- [ ] HTTPS pro API
 - [ ] API verzování `/api/v1/`
 - [ ] Email notifikace (Microsoft Graph API)
 - [ ] Admin UI – dashboard, správa whitelistu, reporty
@@ -417,4 +422,4 @@ Start-Process "http://B-S-W-SQL-04:5050/swagger"
 
 ---
 
-*USB Guardian – Fáze 5 dokončena | IT Security Tool | NIS2 + ISO 27001 compliant*
+*USB Guardian – Fáze 6 dokončena | IT Security Tool | NIS2 + ISO 27001 compliant*
