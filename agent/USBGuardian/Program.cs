@@ -1,11 +1,12 @@
 // ============================================================
-// Program.cs
+// Program.cs  –  AGENT (klientský stroj)
 // Vstupní bod aplikace – konfigurace a DI kontejner.
 // Spouští se jako Windows Service nebo konzolová aplikace
 // (přepínání dle přítomnosti --console argumentu).
+//
+// Log formát: HH:mm:ss [KLIENT] info: USBGuardian.DeviceMonitor[0]
 // ============================================================
 
-using System.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -15,23 +16,25 @@ using USBGuardian.Security;
 var builder = Host.CreateApplicationBuilder(args);
 
 // ── Konfigurace ──────────────────────────────────────────────
-// Načteme agent.config.json ze složky vedle exe souboru
-var exeDir = AppContext.BaseDirectory;
+var exeDir     = AppContext.BaseDirectory;
 var configPath = Path.Combine(exeDir, "Config", "agent.config.json");
 
 builder.Configuration
     .SetBasePath(exeDir)
     .AddJsonFile(configPath, optional: false, reloadOnChange: true)
     .AddJsonFile(Path.Combine(exeDir, "Config", "agent.config.local.json"),
-        optional: true, reloadOnChange: true);    // lokální přepisy (necommitovat)
+        optional: true, reloadOnChange: true);
 
 // ── Logování ─────────────────────────────────────────────────
+// Vlastní formatter přidává [KLIENT] za timestamp:
+//   16:01:33 [KLIENT] info: USBGuardian.DeviceMonitor[0]
 builder.Logging
     .ClearProviders()
-    .AddSimpleConsole(options =>
+    .AddConsole(o => o.FormatterName = "role-tag")
+    .AddConsoleFormatter<RoleTagFormatter, RoleTagFormatterOptions>(o =>
     {
-        options.TimestampFormat = "HH:mm:ss ";  // timestamp v konzoli
-        options.SingleLine      = false;
+        o.RoleTag         = "[KLIENT]";
+        o.TimestampFormat = "HH:mm:ss ";
     })
     .SetMinimumLevel(LogLevel.Information);
 
@@ -40,8 +43,6 @@ builder.Services.AddSingleton(sp =>
 {
     var config  = builder.Configuration;
     var logger  = sp.GetRequiredService<ILogger<SignatureVerifier>>();
-    var exeDir  = AppContext.BaseDirectory;
-    // Veřejný klíč distribuován spolu s agentem
     var keyPath = config["signing:publicKeyPath"]
                   ?? Path.Combine(exeDir, "Config", "whitelist_public.pem");
     return new SignatureVerifier(logger, keyPath);
@@ -53,14 +54,9 @@ builder.Services.AddSingleton(sp =>
     var logger         = sp.GetRequiredService<ILogger<WhitelistChecker>>();
     var wlPath         = config["whitelist:localPath"]
                          ?? @"C:\ProgramData\USBGuardian\whitelist\whitelist.json";
-    var allowWildcards = bool.Parse(
-                         config["whitelist:allowWildcards"] ?? "false");
-    // RSA verifikace – výchozí true v produkci, lze vypnout pro vývoj/testování
-    var sigEnabled     = bool.Parse(
-                         config["signing:enabled"] ?? "true");
-    var sigVerifier    = sigEnabled
-                         ? sp.GetRequiredService<SignatureVerifier>()
-                         : null;
+    var allowWildcards = bool.Parse(config["whitelist:allowWildcards"] ?? "false");
+    var sigEnabled     = bool.Parse(config["signing:enabled"] ?? "true");
+    var sigVerifier    = sigEnabled ? sp.GetRequiredService<SignatureVerifier>() : null;
     return new WhitelistChecker(logger, wlPath, allowWildcards, sigEnabled, sigVerifier);
 });
 
@@ -72,17 +68,16 @@ builder.Services.AddSingleton(sp =>
                             ?? @"C:\ProgramData\USBGuardian\queue";
     var sentPath          = config["logging:sentPath"]
                             ?? @"C:\ProgramData\USBGuardian\sent";
-    var sentRetentionDays = int.Parse(
-                            config["logging:sentRetentionDays"] ?? "90");
+    var sentRetentionDays = int.Parse(config["logging:sentRetentionDays"] ?? "90");
     return new IncidentLogger(logger, queuePath, sentPath, sentRetentionDays);
 });
 
 builder.Services.AddSingleton(sp =>
 {
-    var config   = builder.Configuration;
-    var logger   = sp.GetRequiredService<ILogger<NotificationService>>();
-    var enabled  = bool.Parse(config["notifications:toast:enabled"] ?? "true");
-    var contact  = config["notifications:toast:contactMessage"] ?? "Kontaktujte IT oddeleni";
+    var config  = builder.Configuration;
+    var logger  = sp.GetRequiredService<ILogger<NotificationService>>();
+    var enabled = bool.Parse(config["notifications:toast:enabled"] ?? "true");
+    var contact = config["notifications:toast:contactMessage"] ?? "Kontaktujte IT oddeleni";
     return new NotificationService(logger, enabled, contact);
 });
 
@@ -94,52 +89,46 @@ builder.Services.AddSingleton(sp =>
 
 builder.Services.AddSingleton(sp =>
 {
-    var config   = builder.Configuration;
-    var logger   = sp.GetRequiredService<ILogger<PolicyEnforcer>>();
-    var notif    = sp.GetRequiredService<NotificationService>();
-    var iLogger  = sp.GetRequiredService<IncidentLogger>();
-    var blocker  = sp.GetRequiredService<DeviceBlocker>();
-    var mode     = config["policy:mode"] ?? "warn";
-    var expired  = config["policy:onExpiredWhitelist"] ?? "warn";
-    var contact  = config["notifications:toast:contactMessage"] ?? "Kontaktujte IT oddeleni";
+    var config  = builder.Configuration;
+    var logger  = sp.GetRequiredService<ILogger<PolicyEnforcer>>();
+    var notif   = sp.GetRequiredService<NotificationService>();
+    var iLogger = sp.GetRequiredService<IncidentLogger>();
+    var blocker = sp.GetRequiredService<DeviceBlocker>();
+    var mode    = config["policy:mode"] ?? "warn";
+    var expired = config["policy:onExpiredWhitelist"] ?? "warn";
+    var contact = config["notifications:toast:contactMessage"] ?? "Kontaktujte IT oddeleni";
     return new PolicyEnforcer(logger, notif, iLogger, blocker, mode, expired, contact);
 });
 
-// Hlavní background service – WMI monitoring
 builder.Services.AddHostedService<DeviceMonitor>();
 
-// ── Sync services – pouze pokud je syncUrl nakonfigurováno ───
+// ── Sync services ────────────────────────────────────────────
 var syncUrl = builder.Configuration["whitelist:syncUrl"] ?? string.Empty;
 
 if (!string.IsNullOrEmpty(syncUrl))
 {
-    // TLS validace – výchozí true (produkce), false pro vývoj bez certifikátu
     var validateTls = bool.Parse(
         builder.Configuration["tls:validateServerCertificate"] ?? "true");
 
     if (!validateTls)
         Console.WriteLine("VAROVÁNÍ: TLS validace certifikátu je VYPNUTA (pouze pro vývoj!)");
 
-    // Synchronizace whitelistu ze serveru
     builder.Services.AddHostedService(sp =>
     {
         var config   = builder.Configuration;
         var logger   = sp.GetRequiredService<ILogger<WhitelistSync>>();
         var wlPath   = config["whitelist:localPath"]
                        ?? @"C:\ProgramData\USBGuardian\whitelist\whitelist.json";
-        var interval = int.Parse(
-                       config["sync:whitelistSyncIntervalMinutes"] ?? "15");
+        var interval = int.Parse(config["sync:whitelistSyncIntervalMinutes"] ?? "15");
         return new WhitelistSync(logger, syncUrl, wlPath, interval, validateTls);
     });
 
-    // Odesílání incidentů na server
     builder.Services.AddHostedService(sp =>
     {
-        var config        = builder.Configuration;
-        var logger        = sp.GetRequiredService<ILogger<IncidentSync>>();
-        var iLogger       = sp.GetRequiredService<IncidentLogger>();
-        var interval      = int.Parse(
-                            config["sync:incidentSyncIntervalMinutes"] ?? "1");
+        var config   = builder.Configuration;
+        var logger   = sp.GetRequiredService<ILogger<IncidentSync>>();
+        var iLogger  = sp.GetRequiredService<IncidentLogger>();
+        var interval = int.Parse(config["sync:incidentSyncIntervalMinutes"] ?? "1");
         return new IncidentSync(logger, syncUrl, iLogger, interval, validateTls);
     });
 
@@ -151,8 +140,6 @@ else
 }
 
 // ── Spuštění ─────────────────────────────────────────────────
-// Pokud běží jako Windows Service → UseWindowsService()
-// Pokud má argument --console → spustí se jako konzolová app (pro vývoj)
 if (args.Contains("--console"))
 {
     Console.WriteLine("USB Guardian – konzolový režim (Ctrl+C pro ukončení)");
