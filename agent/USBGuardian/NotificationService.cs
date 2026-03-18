@@ -1,32 +1,42 @@
 // ============================================================
 // NotificationService.cs
-// Zobrazí Windows Toast notifikaci uživateli.
-// Používá PowerShell → funguje bez nutnosti instalace extra knihoven.
+// Zapisuje Toast zprávy do fronty pro ToastHelper.
+//
+// Agent běží pod SYSTEM – nemůže zobrazit Toast přímo.
+// Řešení: zapíše JSON do toast-queue\ a ToastHelper
+// (spuštěný v user session při přihlášení/odemčení) zobrazí Toast.
+//
+// Fronta: C:\ProgramData\USBGuardian\toast-queue\toast_*.json
 // ============================================================
 
+using System.Text.Json;
 using Microsoft.Extensions.Logging;
+using USBGuardian.Models;
 
 namespace USBGuardian;
 
 public class NotificationService
 {
     private readonly ILogger<NotificationService> _logger;
-    private readonly bool _enabled;
+    private readonly bool   _enabled;
     private readonly string _contactMessage;
+    private readonly string _queuePath;
 
-    // Název aplikace zobrazený v notifikaci (Windows akční centrum)
-    private const string AppName = "USB Guardian – IT Security";
-
-    public NotificationService(ILogger<NotificationService> logger,
-        bool enabled, string contactMessage)
+    public NotificationService(
+        ILogger<NotificationService> logger,
+        bool   enabled,
+        string contactMessage,
+        string queuePath = @"C:\ProgramData\USBGuardian\toast-queue")
     {
         _logger         = logger;
         _enabled        = enabled;
         _contactMessage = contactMessage;
+        _queuePath      = queuePath;
     }
 
     // --------------------------------------------------------
-    // Zobrazí varování přes Windows Toast Notification
+    // Zobrazí varování – zapíše zprávu do Toast fronty.
+    // ToastHelper ji přečte při příštím přihlášení / odemčení.
     // --------------------------------------------------------
     public void ShowWarning(string title, string message)
     {
@@ -38,51 +48,95 @@ public class NotificationService
 
         try
         {
-            // Sestavíme PowerShell skript pro zobrazení Toast notifikace
-            // Tato metoda funguje na Windows 10/11 bez extra závislostí
-            var fullMessage = $"{message}\n{_contactMessage}";
+            // Zajistit existenci složky fronty
+            Directory.CreateDirectory(_queuePath);
 
-            var psScript = $@"
-                [Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null
-                [Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime] | Out-Null
-
-                $template = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent(
-                    [Windows.UI.Notifications.ToastTemplateType]::ToastText02)
-
-                $textNodes = $template.GetElementsByTagName('text')
-                $textNodes[0].AppendChild($template.CreateTextNode('{EscapeForPs(title)}')) | Out-Null
-                $textNodes[1].AppendChild($template.CreateTextNode('{EscapeForPs(fullMessage)}')) | Out-Null
-
-                $toast = [Windows.UI.Notifications.ToastNotification]::new($template)
-                $notifier = [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('{AppName}')
-                $notifier.Show($toast)
-            ";
-
-            // Spustíme PowerShell jako oddělený proces (nezablokuje service thread)
-            var psi = new System.Diagnostics.ProcessStartInfo
+            // Sestavit zprávu – název a velikost z message stringu
+            // Pro přesnější data použij ShowWarningForDevice()
+            var toastMsg = new ToastQueueMessage
             {
-                FileName               = "powershell.exe",
-                Arguments              = $"-NoProfile -NonInteractive -Command \"{psScript}\"",
-                UseShellExecute        = false,
-                CreateNoWindow         = true,
-                RedirectStandardOutput = true,
-                RedirectStandardError  = true
+                DetectedAt     = DateTime.UtcNow,
+                Title          = title,
+                Body           = message,
+                ContactMessage = _contactMessage
             };
 
-            using var proc = System.Diagnostics.Process.Start(psi);
-            proc?.WaitForExit(5000);    // max 5 sekund čekání
+            // Unikátní název souboru – timestamp + náhodný suffix (bez kolizí)
+            var fileName = $"toast_{DateTime.UtcNow:yyyyMMdd_HHmmss_fff}_{Guid.NewGuid():N[..8]}.json";
+            var filePath = Path.Combine(_queuePath, fileName);
+
+            var json = JsonSerializer.Serialize(toastMsg,
+                new JsonSerializerOptions { WriteIndented = true });
+
+            File.WriteAllText(filePath, json);
 
             _logger.LogInformation("Toast notifikace zobrazena: {Title}", title);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Chyba při zobrazení toast notifikace");
+            _logger.LogError(ex, "Chyba při zápisu Toast zprávy do fronty");
         }
     }
 
     // --------------------------------------------------------
-    // Escapování speciálních znaků pro PowerShell string
+    // Přetížení s DeviceInfo – bohatší data v notifikaci
+    // Volat z PolicyEnforcer pro lepší Toast zprávy
     // --------------------------------------------------------
-    private static string EscapeForPs(string input) =>
-        input.Replace("'", "''").Replace("\n", " | ");
+    public void ShowWarningForDevice(string title, DeviceInfo device, string action)
+    {
+        if (!_enabled)
+        {
+            _logger.LogDebug("Toast notifikace vypnuty v konfiguraci");
+            return;
+        }
+
+        try
+        {
+            Directory.CreateDirectory(_queuePath);
+
+            var toastMsg = new ToastQueueMessage
+            {
+                DetectedAt     = DateTime.UtcNow,
+                Title          = title,
+                Body           = $"Médium \"{device.FriendlyName}\" nebylo schváleno IT oddělením.",
+                DeviceName     = device.FriendlyName,
+                DeviceSize     = device.SizeFormatted,
+                UserName       = Environment.UserName,
+                MachineName    = Environment.MachineName,
+                Action         = action,
+                ContactMessage = _contactMessage
+            };
+
+            var fileName = $"toast_{DateTime.UtcNow:yyyyMMdd_HHmmss_fff}_{Guid.NewGuid().ToString("N")[..8]}.json";
+            var filePath = Path.Combine(_queuePath, fileName);
+
+            var json = JsonSerializer.Serialize(toastMsg,
+                new JsonSerializerOptions { WriteIndented = true });
+
+            File.WriteAllText(filePath, json);
+
+            _logger.LogInformation("Toast notifikace zobrazena: {Title}", title);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Chyba při zápisu Toast zprávy do fronty");
+        }
+    }
+}
+
+// --------------------------------------------------------
+// ToastQueueMessage – interní model pro JSON soubor ve frontě
+// Odpovídá ToastMessage.cs v ToastHelper projektu
+// --------------------------------------------------------
+public class ToastQueueMessage
+{
+    public DateTime DetectedAt     { get; set; }
+    public string   Title          { get; set; } = string.Empty;
+    public string   Body           { get; set; } = string.Empty;
+    public string   DeviceName     { get; set; } = string.Empty;
+    public string   DeviceSize     { get; set; } = string.Empty;
+    public string   UserName       { get; set; } = string.Empty;
+    public string   MachineName    { get; set; } = string.Empty;
+    public string   Action         { get; set; } = string.Empty;
+    public string   ContactMessage { get; set; } = string.Empty;
 }

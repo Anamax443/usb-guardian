@@ -186,3 +186,31 @@ Get-ScheduledTask -TaskPath "\USBGuardian\"
 ```powershell
 Get-EventLog -LogName Application -Source "USBGuardian-Watchdog" -Newest 10
 ```
+
+## Toast Privilege Separation
+
+Agent běží pod SYSTEM – nemůže zobrazit Toast přímo. Řešení:
+
+```
+Agent (SYSTEM) → toast-queue\toast_*.json
+                       ↓
+Task Scheduler (při přihlášení + odemčení)
+                       ↓
+ToastHelper.exe (user session) → Windows Toast notifikace
+```
+
+### Vytvoření toast-queue složky (při nasazení)
+
+```powershell
+Start-Process powershell -Verb RunAs -ArgumentList "-Command `"
+New-Item -ItemType Directory -Force -Path 'C:\ProgramData\USBGuardian\toast-queue';
+icacls 'C:\ProgramData\USBGuardian\toast-queue' /grant 'SYSTEM:(OI)(CI)F';
+icacls 'C:\ProgramData\USBGuardian\toast-queue' /grant 'Users:(OI)(CI)M'
+`""
+```
+
+### Registrace ToastHelper tasku
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\Register-ToastHelper.ps1
+```

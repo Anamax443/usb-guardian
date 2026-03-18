@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows10.0.17763.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!-- Přímý přístup k WinRT API bez toolkit -->
+    <UseWindowsForms>false</UseWindowsForms>
+  </PropertyGroup>
+  <!-- Bez NuGet závislostí – WinRT je součástí Windows SDK -->
+</Project>
