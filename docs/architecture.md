@@ -175,3 +175,19 @@ dotnet run                 (server)
 | Admin UI | Dashboard, správa whitelistu, statistiky incidentů |
 | Email notifikace | Microsoft Graph API – alerting bez SMTP závislosti |
 | HTTPS produkce | Spustit `scripts\New-Certificate.ps1` na `B-S-W-SQL-04` |
+
+## Watchdog – Task Scheduler
+
+```
+Task Scheduler (\USBGuardian\USBGuardian-Watchdog)
+    ↓  každé 3 minuty + při startu systému
+Kontrola: běží "USB Guardian" service?
+    ↓ NE
+Start-Service + Event Log ID 200 (Warning)
+    ↓ selhání
+Event Log ID 500 (Error) – nutný zásah IT
+```
+
+- Běží pod **SYSTEM** – nezávisle na přihlášeném uživateli
+- Útočník musí zastavit **service i scheduled task** – více kroků, více stop
+- Registrace: `scripts\Register-Watchdog.ps1` (auto-elevace UAC)

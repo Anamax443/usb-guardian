@@ -157,3 +157,32 @@ usb-guardian/
 │   └── architecture.md
 └── README.md
 ```
+
+## Watchdog
+
+Scheduled Task `\USBGuardian\USBGuardian-Watchdog` hlídá běh agenta každé 3 minuty.
+Pokud agent nesleží, watchdog ho automaticky restartuje a zapíše událost do Windows Event Log.
+
+### Registrace watchdogu (jednorázově při nasazení)
+
+```powershell
+Start-Process powershell -Verb RunAs -ArgumentList "-ExecutionPolicy Bypass -NoExit -File D:\git\usb-guardian\scripts\Register-Watchdog.ps1"
+```
+
+### Ověření registrace
+
+```powershell
+Get-ScheduledTask -TaskPath "\USBGuardian\" 
+```
+
+### Event Log události
+
+| ID | Typ | Popis |
+|----|-----|-------|
+| 100 | Information | Service běží OK (pouze verbose režim) |
+| 200 | Warning | Service zastavena – watchdog restartoval |
+| 500 | Error | Restart selhal – nutný zásah IT |
+
+```powershell
+Get-EventLog -LogName Application -Source "USBGuardian-Watchdog" -Newest 10
+```
