@@ -101,6 +101,9 @@ if (bool.Parse(builder.Configuration["AdSync:Enabled"] ?? "false"))
         int.Parse(builder.Configuration["AdSync:IntervalMinutes"] ?? "60")));
 }
 
+// ── E-mailové alerty nad incidenty (běží, jen když je e-mail zapnutý) ──
+builder.Services.AddHostedService<USBGuardian.Admin.Notifications.IncidentAlertService>();
+
 // ── Blazor Server ─────────────────────────────────────────────
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();

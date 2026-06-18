@@ -1,6 +1,7 @@
 @page "/nastaveni"
 @rendermode @(new InteractiveServerRenderMode(prerender: false))
 @using System.Net.Mail
+@using USBGuardian.Admin.Notifications
 @inject IConfiguration Config
 @inject IDbContextFactory<AppDbContext> DbFactory
 @inject USBGuardian.Admin.Security.AccessCache Access
@@ -68,7 +69,10 @@
     <dt>STARTTLS</dt><dd><input type="checkbox" @bind="_emailStarttls" /></dd>
     <dt>Odesílatel (From)</dt><dd><input class="inp" @bind="_emailFrom" placeholder="robot@firma.cz" /></dd>
     <dt>Příjemci (čárkou)</dt><dd><input class="inp" @bind="_emailRecipients" placeholder="it@firma.cz, admin@firma.cz" /></dd>
+    <dt>Interval alertů (min)</dt><dd><input class="inp" style="min-width:90px" @bind="_emailInterval" /></dd>
 </dl>
+<p class="muted">Alert posílá souhrn NOVÝCH neschválených incidentů (blok/varování) v daném intervalu;
+při prvním zapnutí se nastaví baseline (historie se neposílá).</p>
 <div class="toolbar">
     <button class="btn" @onclick="SaveEmail" disabled="@_busy">Uložit e-mail</button>
     <button class="btn" @onclick="TestEmail" disabled="@_busy">Poslat test</button>
@@ -100,7 +104,7 @@ denní souhrn) je další krok.</p>
     private string _sqlServer = "—", _sqlDb = "—";
 
     private bool _emailEnabled, _emailStarttls = true, _emailBad;
-    private string _emailHost = "", _emailPort = "25", _emailFrom = "", _emailRecipients = "";
+    private string _emailHost = "", _emailPort = "25", _emailFrom = "", _emailRecipients = "", _emailInterval = "15";
     private string? _emailMsg;
 
     protected override async Task OnInitializedAsync()
@@ -124,6 +128,7 @@ denní souhrn) je další krok.</p>
             _emailFrom       = await Get(db, "email.from");
             _emailRecipients = await Get(db, "email.recipients");
             _emailStarttls   = !string.Equals(await Get(db, "email.starttls"), "false", StringComparison.OrdinalIgnoreCase);
+            var ai = await Get(db, "email.alertIntervalMinutes"); _emailInterval = string.IsNullOrEmpty(ai) ? "15" : ai;
 
             _dbError = null;
         }
@@ -155,6 +160,7 @@ denní souhrn) je další krok.</p>
             await Set(db, "email.from",       (_emailFrom ?? "").Trim());
             await Set(db, "email.recipients", (_emailRecipients ?? "").Trim());
             await Set(db, "email.starttls",   _emailStarttls.ToString().ToLowerInvariant());
+            await Set(db, "email.alertIntervalMinutes", (_emailInterval ?? "15").Trim());
             _emailMsg = "Uloženo."; _emailBad = false;
         }
         catch (Exception ex) { _emailMsg = "Chyba: " + ex.Message; _emailBad = true; }
@@ -172,18 +178,8 @@ denní souhrn) je další krok.</p>
         try
         {
             var port = int.TryParse(_emailPort, out var p) ? p : 25;
-#pragma warning disable SYSLIB0014
-            using var client = new SmtpClient(_emailHost.Trim(), port)
-            { EnableSsl = _emailStarttls, DeliveryMethod = SmtpDeliveryMethod.Network };
-#pragma warning restore SYSLIB0014
-            using var msg = new MailMessage
-            {
-                From = new MailAddress(_emailFrom.Trim()),
-                Subject = "USB Guardian – test",
-                Body = "Testovací e-mail z USB Guardian konzole."
-            };
-            foreach (var r in to) msg.To.Add(r);
-            await client.SendMailAsync(msg);
+            var cfg = new EmailConfig(true, _emailHost.Trim(), port, _emailStarttls, _emailFrom.Trim(), to.ToArray(), 15);
+            await EmailSender.SendAsync(cfg, "USB Guardian - test", "Testovaci e-mail z USB Guardian konzole.");
             _emailMsg = "Test odeslán na: " + string.Join(", ", to); _emailBad = false;
         }
         catch (Exception ex) { _emailMsg = "Chyba odeslání: " + ex.Message; _emailBad = true; }
