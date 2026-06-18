@@ -7,9 +7,8 @@ computers. Every device must be approved by IT and recorded in a central whiteli
 Unapproved media are warned or blocked. Designed as a technical control for
 **NIS2 / Act 181/2014 Coll. / ISO 27001**.
 
-> **Portability:** no company-specific values (server, domain, groups, accounts) live in the
-> code — everything is in `*.local.json` (gitignored). Deploying to another company = editing
-> configuration, not code.
+> **Configuration:** no company-specific values (server, domain, groups, accounts) live in the
+> code — everything is in `*.local.json` (gitignored).
 
 ## Project status
 

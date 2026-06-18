@@ -2,7 +2,6 @@
   // ============================================================
   // appsettings.local.json — JEDINÉ místo s firemně specifickými
   // hodnotami. Zkopíruj na 'appsettings.local.json' a uprav.
-  // Nasazení do jiné firmy = změna tohoto souboru, NE kódu.
   // Soubor je gitignored (*.local.json).
   // ============================================================
 

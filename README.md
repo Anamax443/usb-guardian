@@ -7,9 +7,8 @@ na firemních počítačích. Každé médium musí být schváleno IT oddělen�
 centrálního whitelistu. Nepovolená média jsou varována nebo zablokována. Navrženo jako
 technické opatření pro **NIS2 / zákon 181/2014 Sb. / ISO 27001**.
 
-> **Portabilita:** žádné firemně specifické hodnoty (server, doména, skupiny, účty) nejsou
-> v kódu — vše je v `*.local.json` (gitignored). Nasazení do jiné firmy = úprava konfigurace,
-> ne kódu.
+> **Konfigurace:** žádné firemně specifické hodnoty (server, doména, skupiny, účty) nejsou
+> v kódu — vše je v `*.local.json` (gitignored).
 
 ## Stav projektu
 
