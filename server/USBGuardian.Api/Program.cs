@@ -6,6 +6,8 @@
 // Log formát: HH:mm:ss [SERVER] info: USBGuardian.API.XyzController[0]
 // ============================================================
 
+using System.Security.Principal;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -66,7 +68,19 @@ builder.Services.AddAuthentication(
     Microsoft.AspNetCore.Authentication.Negotiate.NegotiateDefaults.AuthenticationScheme)
     .AddNegotiate();
 
-builder.Services.AddAuthorization();
+// Policy "USBGuardianClients" – přístup k API jen pro členy AD skupin z konfigurace
+var allowedGroups = builder.Configuration.GetSection("Authorization:AllowedGroups").Get<string[]>()
+                    ?? Array.Empty<string>();
+builder.Services.AddAuthorization(options =>
+{
+    options.AddPolicy("USBGuardianClients", policy => policy.RequireAssertion(ctx =>
+    {
+        if (ctx.User.Identity is not WindowsIdentity { IsAuthenticated: true } wi) return false;
+        if (allowedGroups.Length == 0) return true;            // bez konfigurace nepřekážet
+        var principal = new WindowsPrincipal(wi);
+        return allowedGroups.Any(principal.IsInRole);
+    }));
+});
 
 // ── Self-contained TLS (vlastní self-signed cert, bez CA / cert store) ──
 var tlsCertPath = builder.Configuration["tls:certPath"] ?? @"C:\ProgramData\USBGuardian\api-tls.pfx";
