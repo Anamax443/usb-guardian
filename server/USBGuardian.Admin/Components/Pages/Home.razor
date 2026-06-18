@@ -173,18 +173,26 @@ else
 
             if (_group)
             {
-                _agg = await baseq
+                var raw = await baseq
                     .GroupBy(i => new { i.SerialNumber, i.Hostname, i.Username })
-                    .Select(g => new Agg(
-                        g.Max(x => x.FriendlyName) ?? "", g.Max(x => x.VendorId) ?? "", g.Max(x => x.ProductId) ?? "",
+                    .Select(g => new
+                    {
                         g.Key.SerialNumber, g.Key.Hostname, g.Key.Username,
-                        g.Count(),
-                        g.Count(x => x.Action == "Blocked"),
-                        g.Count(x => x.Action == "Warned"),
-                        g.Max(x => x.Timestamp)))
-                    .OrderByDescending(g => g.Last)
+                        Name    = g.Max(x => x.FriendlyName),
+                        Vendor  = g.Max(x => x.VendorId),
+                        Product = g.Max(x => x.ProductId),
+                        Count   = g.Count(),
+                        Blocked = g.Sum(x => x.Action == "Blocked" ? 1 : 0),
+                        Warned  = g.Sum(x => x.Action == "Warned" ? 1 : 0),
+                        Last    = g.Max(x => x.Timestamp)
+                    })
+                    .OrderByDescending(x => x.Last)
                     .Take(300)
                     .ToListAsync();
+
+                _agg = raw.Select(x => new Agg(
+                    x.Name ?? "", x.Vendor ?? "", x.Product ?? "", x.SerialNumber, x.Hostname, x.Username,
+                    x.Count, x.Blocked, x.Warned, x.Last)).ToList();
             }
             else
             {
