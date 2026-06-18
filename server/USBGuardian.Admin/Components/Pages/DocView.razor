@@ -1,0 +1,44 @@
+@page "/dokumentace/{Doc}"
+@using Markdig
+
+<div class="doc-toolbar no-print" data-no-print>
+    <a href="dokumentace">← Rozcestník</a>
+    <button class="iconbtn" onclick="window.print()" title="Vytisknout">🖨 Tisk</button>
+</div>
+
+@if (_html is null)
+{
+    <div class="banner bad">Dokument „@Doc" nenalezen.</div>
+}
+else
+{
+    <article class="doc">@((MarkupString)_html)</article>
+}
+
+@code {
+    [Parameter] public string Doc { get; set; } = string.Empty;
+
+    // whitelist názvů → soubor (žádný path traversal)
+    private static readonly Dictionary<string, string> Map = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["architektura"] = "architecture.md",
+        ["handoff"]      = "HANDOFF.md",
+        ["handoff-en"]   = "HANDOFF.en.md",
+        ["readme"]       = "README.md",
+        ["readme-en"]    = "README.en.md",
+    };
+
+    private string? _html;
+
+    protected override void OnParametersSet()
+    {
+        _html = null;
+        if (!Map.TryGetValue(Doc, out var file)) return;
+
+        var path = Path.Combine(AppContext.BaseDirectory, "docs", file);
+        if (!File.Exists(path)) return;
+
+        var pipeline = new MarkdownPipelineBuilder().UseAdvancedExtensions().Build();
+        _html = Markdown.ToHtml(File.ReadAllText(path), pipeline);
+    }
+}

@@ -17,6 +17,8 @@
     <PackageReference Include="Microsoft.AspNetCore.Authentication.Negotiate" Version="8.0.0" />
     <!-- AD sync (LDAP dotaz na počítače v doméně) -->
     <PackageReference Include="System.DirectoryServices" Version="8.0.0" />
+    <!-- Render dokumentace (.md → tisknutelné HTML v konzoli) -->
+    <PackageReference Include="Markdig" Version="0.37.0" />
   </ItemGroup>
 
   <ItemGroup>
@@ -30,6 +32,15 @@
     <None Update="appsettings.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
+  </ItemGroup>
+
+  <!-- Dokumentace (.md) zabalená do buildu – renderuje se jako tisknutelné HTML v konzoli -->
+  <ItemGroup>
+    <None Include="..\..\README.md"            Link="docs\README.md"><CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory></None>
+    <None Include="..\..\README.en.md"         Link="docs\README.en.md"><CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory></None>
+    <None Include="..\..\HANDOFF.md"           Link="docs\HANDOFF.md"><CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory></None>
+    <None Include="..\..\HANDOFF.en.md"        Link="docs\HANDOFF.en.md"><CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory></None>
+    <None Include="..\..\docs\architecture.md" Link="docs\architecture.md"><CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory></None>
   </ItemGroup>
 
   <!-- Zaražení git commit hashe do assembly (zobrazí se v patičce konzole) -->

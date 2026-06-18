@@ -9,12 +9,13 @@
     inventář stanic.</p>
 
     <h2>Rozcestník dokumentace</h2>
+    <p class="muted">Samostatné tisknutelné stránky (🖨 v light režimu) — žádné externí odkazy.</p>
     <ul class="linklist">
-        <li><a href="@Repo("README.md")" target="_blank" rel="noopener">README</a> — funkční přehled, komponenty, konfigurace, nasazení</li>
-        <li><a href="@Repo("HANDOFF.md")" target="_blank" rel="noopener">HANDOFF</a> — předávka projektu + živý stav</li>
-        <li><a href="@Repo("docs/architecture.md")" target="_blank" rel="noopener">Architektura</a> — datový tok, komponenty, bezpečnostní vrstvy</li>
-        <li><a href="@Repo("README.en.md")" target="_blank" rel="noopener">English docs</a> — README.en.md / HANDOFF.en.md</li>
-        <li>In-app nápověda → níže na této stránce (tisknutelná ve světlém režimu)</li>
+        <li><a href="dokumentace/architektura">Architektura</a> — datový tok, komponenty, bezpečnostní vrstvy</li>
+        <li><a href="dokumentace/handoff">HANDOFF</a> — předávka projektu + živý stav</li>
+        <li><a href="dokumentace/readme">README</a> — funkční přehled, komponenty, konfigurace, nasazení</li>
+        <li><a href="dokumentace/readme-en">README (EN)</a> · <a href="dokumentace/handoff-en">HANDOFF (EN)</a></li>
+        <li>Provozní nápověda → níže na této stránce</li>
     </ul>
 
     <h2>Přístup</h2>
@@ -63,12 +64,6 @@
 @code {
     private string _sql = "—";
     private string _db  = "—";
-
-    private string Repo(string path)
-    {
-        var baseUrl = Config["RepoUrl"];
-        return string.IsNullOrEmpty(baseUrl) ? "#" : $"{baseUrl}/blob/main/{path}";
-    }
 
     protected override void OnInitialized()
     {
