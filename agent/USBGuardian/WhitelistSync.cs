@@ -30,24 +30,16 @@ public class WhitelistSync : BackgroundService
         string syncUrl,
         string localWhitelistPath,
         int syncIntervalMinutes,
-        bool validateServerCertificate = true)
+        bool validateServerCertificate = true,
+        string pinnedThumbprint = "")
     {
         _logger              = logger;
         _syncUrl             = syncUrl;
         _localWhitelistPath  = localWhitelistPath;
         _syncIntervalMinutes = syncIntervalMinutes;
 
-        // TLS: v produkci vždy validovat certifikát serveru
-        // Vypnout pouze pro vývoj (validateServerCertificate=false v agent.config.local.json)
-        var handler = new HttpClientHandler
-        {
-            UseDefaultCredentials        = true,
-            ServerCertificateCustomValidationCallback =
-                validateServerCertificate
-                    ? null  // výchozí validace OS
-                    : HttpClientHandler.DangerousAcceptAnyServerCertificateValidator
-        };
-        _httpClient = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(30) };
+        // TLS: pinning (otisk API certu) / vývojové vypnutí / výchozí validace
+        _httpClient = USBGuardian.Security.TlsClient.Create(validateServerCertificate, pinnedThumbprint, 30);
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)

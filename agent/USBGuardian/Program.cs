@@ -129,8 +129,11 @@ if (!string.IsNullOrEmpty(syncUrl))
 {
     var validateTls = bool.Parse(
         builder.Configuration["tls:validateServerCertificate"] ?? "true");
+    var pinnedThumbprint = builder.Configuration["tls:pinnedThumbprint"] ?? string.Empty;
 
-    if (!validateTls)
+    if (!string.IsNullOrWhiteSpace(pinnedThumbprint))
+        Console.WriteLine($"TLS pinning aktivní – ověřuji otisk API certu ({pinnedThumbprint})");
+    else if (!validateTls)
         Console.WriteLine("VAROVÁNÍ: TLS validace certifikátu je VYPNUTA (pouze pro vývoj!)");
 
     builder.Services.AddHostedService(sp =>
@@ -140,7 +143,7 @@ if (!string.IsNullOrEmpty(syncUrl))
         var wlPath   = config["whitelist:localPath"]
                        ?? @"C:\ProgramData\USBGuardian\whitelist\whitelist.json";
         var interval = int.Parse(config["sync:whitelistSyncIntervalMinutes"] ?? "15");
-        return new WhitelistSync(logger, syncUrl, wlPath, interval, validateTls);
+        return new WhitelistSync(logger, syncUrl, wlPath, interval, validateTls, pinnedThumbprint);
     });
 
     builder.Services.AddHostedService(sp =>
@@ -149,7 +152,7 @@ if (!string.IsNullOrEmpty(syncUrl))
         var logger   = sp.GetRequiredService<ILogger<IncidentSync>>();
         var iLogger  = sp.GetRequiredService<IncidentLogger>();
         var interval = int.Parse(config["sync:incidentSyncIntervalMinutes"] ?? "1");
-        return new IncidentSync(logger, syncUrl, iLogger, interval, validateTls);
+        return new IncidentSync(logger, syncUrl, iLogger, interval, validateTls, pinnedThumbprint);
     });
 
     Console.WriteLine($"Sync aktivní → {syncUrl}");

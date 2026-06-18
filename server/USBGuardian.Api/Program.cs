@@ -68,6 +68,15 @@ builder.Services.AddAuthentication(
 
 builder.Services.AddAuthorization();
 
+// ── Self-contained TLS (vlastní self-signed cert, bez CA / cert store) ──
+var tlsCertPath = builder.Configuration["tls:certPath"] ?? @"C:\ProgramData\USBGuardian\api-tls.pfx";
+var tlsCert     = USBGuardian.Api.SelfCert.LoadOrCreate(tlsCertPath, Environment.MachineName);
+builder.WebHost.ConfigureKestrel(o =>
+{
+    o.ListenAnyIP(5050);                                       // HTTP (přechodně; zvážit zavřít)
+    o.ListenAnyIP(5443, listen => listen.UseHttps(tlsCert));  // HTTPS – self-cert
+});
+
 var app = builder.Build();
 
 // ── Middleware pipeline ───────────────────────────────────────
@@ -80,6 +89,18 @@ if (app.Environment.IsDevelopment())
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
+
+// Otisk TLS certu pro pinning na agentech (veřejná informace)
+app.MapGet("/api/cert-info", () => Results.Json(new
+{
+    thumbprint = tlsCert.Thumbprint,
+    subject    = tlsCert.Subject,
+    notAfter   = tlsCert.NotAfter
+})).AllowAnonymous();
+
+app.Logger.LogWarning(
+    "=== API TLS self-cert PIN (thumbprint pro agenty): {Tp} | platí do {Exp} ===",
+    tlsCert.Thumbprint, tlsCert.NotAfter);
 
 // ── Migrace DB při startu ─────────────────────────────────────
 using (var scope = app.Services.CreateScope())

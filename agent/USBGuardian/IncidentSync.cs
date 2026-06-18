@@ -46,23 +46,16 @@ public class IncidentSync : BackgroundService
         string syncUrl,
         IncidentLogger incidentLogger,
         int syncIntervalMinutes = 1,
-        bool validateServerCertificate = true)
+        bool validateServerCertificate = true,
+        string pinnedThumbprint = "")
     {
         _logger              = logger;
         _syncUrl             = syncUrl;
         _incidentLogger      = incidentLogger;
         _syncIntervalMinutes = syncIntervalMinutes;
 
-        // TLS: v produkci vždy validovat certifikát serveru
-        var handler = new HttpClientHandler
-        {
-            UseDefaultCredentials        = true,
-            ServerCertificateCustomValidationCallback =
-                validateServerCertificate
-                    ? null
-                    : HttpClientHandler.DangerousAcceptAnyServerCertificateValidator
-        };
-        _httpClient = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(60) };
+        // TLS: pinning (otisk API certu) / vývojové vypnutí / výchozí validace
+        _httpClient = USBGuardian.Security.TlsClient.Create(validateServerCertificate, pinnedThumbprint, 60);
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)

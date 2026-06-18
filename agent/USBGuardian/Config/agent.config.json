@@ -21,8 +21,15 @@
   // validateServerCertificate: true  = agent ověří TLS certifikát (produkce)
   // validateServerCertificate: false = agent přijme jakýkoliv certifikát (vývoj)
   // Certifikát serveru musí být nainstalován v Trusted Root (Install-Certificate.ps1)
+  // ── TLS konfigurace ─────────────────────────────────────────
+  // pinnedThumbprint: otisk self-cert API (self-contained TLS bez CA).
+  //   Když je vyplněn, agent ověří, že server předkládá přesně tento cert
+  //   (šifrované + ověřená identita). Otisk získáš z logu API nebo /api/cert-info.
+  // validateServerCertificate: použije se jen když pinnedThumbprint je prázdný
+  //   (true = validace přes CA, false = bez ověření – jen vývoj).
   "tls": {
-    "validateServerCertificate": true
+    "validateServerCertificate": true,
+    "pinnedThumbprint": ""
   },
 
   // ── RSA podpis whitelistu ───────────────────────────────────
