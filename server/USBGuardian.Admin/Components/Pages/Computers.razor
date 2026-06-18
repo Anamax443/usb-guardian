@@ -1,0 +1,80 @@
+@page "/stanice"
+@inject IDbContextFactory<AppDbContext> DbFactory
+
+<h1>Stanice</h1>
+
+@if (_error is not null)
+{
+    <div class="banner bad">Nelze načíst data z databáze: @_error</div>
+}
+else if (_loading)
+{
+    <p>Načítám…</p>
+}
+else
+{
+    <div class="cards">
+        <div class="card"><div class="num">@_all.Count</div><div class="lbl">Stanic v AD</div></div>
+        <div class="card"><div class="num">@_reporting</div><div class="lbl">Hlásí agenta</div></div>
+        <div class="card bad"><div class="num">@_missing</div><div class="lbl">Chybí agent</div></div>
+    </div>
+
+    <h2>Inventář (@_all.Count)</h2>
+    <div style="margin-bottom:10px">
+        <label><input type="checkbox" @bind="_onlyMissing" @bind:after="StateHasChanged" /> jen „chybí agent"</label>
+    </div>
+    <table>
+        <thead>
+            <tr><th>Hostname</th><th>OS</th><th>Doména</th><th>Stav</th><th>Agent verze</th><th>Poslední kontakt</th></tr>
+        </thead>
+        <tbody>
+            @foreach (var c in Filtered())
+            {
+                <tr>
+                    <td>@c.Hostname</td>
+                    <td>@c.OperatingSystem</td>
+                    <td class="muted">@c.Domain</td>
+                    <td>
+                        @if (Reports(c))      { <span class="pill ok">hlásí</span> }
+                        else if (c.InActiveDirectory) { <span class="pill bad">chybí agent</span> }
+                        else                  { <span class="pill warn">není v AD</span> }
+                    </td>
+                    <td>@(string.IsNullOrEmpty(c.AgentVersion) ? "—" : c.AgentVersion)</td>
+                    <td>@(c.LastSeen is null ? "—" : c.LastSeen.Value.ToLocalTime().ToString("dd.MM.yyyy HH:mm"))</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    private bool _loading = true;
+    private bool _onlyMissing;
+    private string? _error;
+    private List<Computer> _all = new();
+    private int _reporting, _missing;
+
+    private static bool Reports(Computer c) => !string.IsNullOrEmpty(c.AgentVersion) || c.LastSeen is not null;
+
+    private IEnumerable<Computer> Filtered() =>
+        _onlyMissing ? _all.Where(c => c.InActiveDirectory && !Reports(c)) : _all;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            _all = await db.Computers.OrderBy(c => c.Hostname).ToListAsync();
+            _reporting = _all.Count(Reports);
+            _missing   = _all.Count(c => c.InActiveDirectory && !Reports(c));
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+}

@@ -5,9 +5,12 @@ obj/
 *.suo
 .vs/
 
-# Lokální konfigurace – NIKDY necommitovat (obsahují doménové názvy, servery)
+# Lokální konfigurace – NIKDY necommitovat (obsahují doménové názvy, servery,
+# connection stringy a dev bypassy). Glob pokryje všechny projekty.
+*.local.json
 agent/USBGuardian/Config/agent.config.local.json
 server/USBGuardian.Api/appsettings.local.json
+server/USBGuardian.Admin/appsettings.local.json
 
 # Publikované výstupy
 publish/

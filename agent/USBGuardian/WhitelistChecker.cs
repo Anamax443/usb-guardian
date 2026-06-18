@@ -89,6 +89,19 @@ public class WhitelistChecker
 
     public string GetVersion()  => LoadWhitelist()?.Version ?? "unknown";
 
+    /// <summary>Read-only snapshot pro lokální konzoli.</summary>
+    public record WhitelistSnapshot(string Version, WhitelistStatus Status, int DeviceCount, DateTime ValidUntil);
+
+    public WhitelistSnapshot GetSnapshot()
+    {
+        var wl = LoadWhitelist();
+        return new WhitelistSnapshot(
+            wl?.Version ?? "unknown",
+            GetStatus(),
+            wl?.Devices.Count ?? 0,
+            wl?.ValidUntil ?? DateTime.MinValue);
+    }
+
     public WhitelistStatus GetStatus()
     {
         var whitelist = LoadWhitelist();

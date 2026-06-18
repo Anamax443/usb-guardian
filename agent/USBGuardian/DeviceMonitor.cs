@@ -74,6 +74,20 @@ public class DeviceMonitor : BackgroundService
     }
 
     // --------------------------------------------------------
+    // Read-only snapshot pro lokální konzoli (živý stav)
+    // --------------------------------------------------------
+    public record ActiveConnectionInfo(string PnpDeviceId, string FriendlyName, DateTime ConnectedAt);
+
+    /// <summary>Aktuálně připojená sledovaná média (kopie, thread-safe).</summary>
+    public IReadOnlyList<ActiveConnectionInfo> GetActiveConnections() =>
+        _activeConnections
+            .Select(kv => new ActiveConnectionInfo(kv.Key, kv.Value.FriendlyName, kv.Value.ConnectedAt))
+            .ToList();
+
+    /// <summary>Čas poslední WMI události (UTC) – indikátor živosti monitoringu.</summary>
+    public DateTime LastWmiEventAtUtc => _lastWmiEventAt;
+
+    // --------------------------------------------------------
     // Spuštění monitoringu
     // --------------------------------------------------------
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)

@@ -1,0 +1,49 @@
+@page "/dokumentace"
+
+<h1>Dokumentace</h1>
+
+<div class="doc">
+    <p>Serverová admin konzole nástroje <strong>USB Guardian</strong> — sledování paměťových
+    médií na firemních stanicích (NIS2 / ISO 27001). Konzole agreguje data ze všech agentů
+    a spravuje inventář stanic.</p>
+
+    <h2>Přístup</h2>
+    <ul>
+        <li>Autentizace <strong>Windows (Kerberos)</strong>. Dovnitř jen členové AD skupiny
+            uvedené v Nastavení (<code>AdminGroups</code>) nebo účty na whitelistu
+            (<code>AllowedUsers</code>).</li>
+        <li>Pro <strong>tiché přihlášení</strong> (bez dialogu) choď přes hostname
+            <code>http://b-s-w-mikos:4200</code>, ne přes IP.</li>
+    </ul>
+
+    <h2>Přehled</h2>
+    <p>Incidenty (připojení neschválených médií) za posledních 30 dní — počty Blokováno /
+    Varování a tabulka posledních událostí včetně identifikátorů média
+    (<strong>VID / PID / sériové číslo</strong>) — to jsou hodnoty pro whitelist.</p>
+
+    <h2>Stanice</h2>
+    <p>Inventář počítačů z Active Directory (automaticky, viz AD sync). Dlaždice ukazují
+    kolik stanic <strong>hlásí agenta</strong> a kterým <strong>agent chybí</strong>
+    (filtr „jen chybí agent" = seznam pro nasazení agenta).</p>
+
+    <h2>AD sync</h2>
+    <p>Server v intervalu (Nastavení → AD sync) načte počítače z domény a zapíše je do
+    evidence. Klíčem je <strong>hostname</strong> (ne IP — stanice mají dynamické adresy).
+    Nepřepisuje data hlášená agentem (poslední kontakt, verze agenta).</p>
+
+    <h2>Jak schválit médium (whitelist)</h2>
+    <p>Zjisti VID/PID/sériové číslo z Přehledu a přidej zařízení do whitelistu. Whitelist je
+    podepsaný RSA klíčem — publikace nové verze vyžaduje podpis (offline nástroj
+    <code>WhitelistSigner</code>); webová správa whitelistu s podpisovým workflow je v plánu.</p>
+
+    <h2>Provoz</h2>
+    <ul>
+        <li>Běží jako Windows služba <code>USBGuardianConsole</code> na <code>10.8.2.213</code>,
+            port <code>4200</code>, čte/píše SQL <code>B-S-W-SQL-04</code> (DB <code>USBGuardian</code>).</li>
+        <li>Incidenty ze stanic přijímá a zapisuje <strong>API</strong> (samostatná služba) —
+            konzole je jen čte; konzole sama píše inventář stanic a (později) whitelist.</li>
+    </ul>
+
+    <p class="muted">Plná technická dokumentace: repozitář <code>usb-guardian</code> →
+    <code>README.md</code> a <code>docs/architecture.md</code>.</p>
+</div>

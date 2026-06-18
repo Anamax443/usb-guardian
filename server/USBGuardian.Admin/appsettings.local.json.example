@@ -1,0 +1,18 @@
+{
+  "_comment": "Zkopíruj na 'appsettings.local.json' a doplň reálné hodnoty. Tento soubor je gitignored.",
+
+  "ConnectionStrings": {
+    "DefaultConnection": "Server=tcp:B-S-W-SQL-04,1433;Database=USBGuardian;Integrated Security=true;TrustServerCertificate=true;"
+  },
+
+  "Authorization": {
+    "AdminGroups": [ "AXINETWORK\\USB-Guardian-Admins" ],
+    "DevAllowAll": false
+  },
+
+  "Kestrel": {
+    "Endpoints": {
+      "Http": { "Url": "http://0.0.0.0:4200" }
+    }
+  }
+}

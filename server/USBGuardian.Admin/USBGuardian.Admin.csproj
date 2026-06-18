@@ -1,0 +1,46 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>USBGuardian.Admin</RootNamespace>
+    <AssemblyName>USBGuardian.Admin</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- SQL Server přístup přes EF Core (stejná verze jako API) -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="8.0.0" />
+    <!-- Windows Service hosting (native, jako agent i API) -->
+    <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="8.0.0" />
+    <!-- Windows Authentication (Kerberos/NTLM) -->
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.Negotiate" Version="8.0.0" />
+    <!-- AD sync (LDAP dotaz na počítače v doméně) -->
+    <PackageReference Include="System.DirectoryServices" Version="8.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- REUSE: stejné zdrojové soubory EF modelů + DbContext jako API
+         (slinkované = jeden zdroj pravdy, bez tahání obsahu/deps API projektu) -->
+    <Compile Include="..\USBGuardian.Api\Models\DbModels.cs" Link="Shared\DbModels.cs" />
+    <Compile Include="..\USBGuardian.Api\Data\AppDbContext.cs" Link="Shared\AppDbContext.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="appsettings.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+  <!-- Zaražení git commit hashe do assembly (zobrazí se v patičce konzole) -->
+  <Target Name="StampGitCommit" BeforeTargets="CoreGenerateAssemblyInfo">
+    <Exec Command="git -C &quot;$(MSBuildProjectDirectory)&quot; rev-parse --short HEAD"
+          ConsoleToMSBuild="true" ContinueOnError="true" StandardOutputImportance="low">
+      <Output TaskParameter="ConsoleOutput" PropertyName="GitCommitHash" />
+    </Exec>
+    <ItemGroup>
+      <AssemblyMetadata Include="GitCommit" Value="$(GitCommitHash)" Condition="'$(GitCommitHash)' != ''" />
+    </ItemGroup>
+  </Target>
+
+</Project>

@@ -1,0 +1,35 @@
+@inherits LayoutComponentBase
+
+<div class="page">
+    <header class="topbar">
+        <div class="brand">USB&nbsp;Guardian <span class="sub">konzole</span></div>
+        <nav class="nav">
+            <NavLink href="" Match="NavLinkMatch.All">Přehled</NavLink>
+            <NavLink href="stanice">Stanice</NavLink>
+            <NavLink href="nastaveni">Nastavení</NavLink>
+            <NavLink href="dokumentace">Dokumentace</NavLink>
+        </nav>
+        <AuthorizeView>
+            <Authorized>
+                <div class="user">@context.User.Identity?.Name</div>
+            </Authorized>
+        </AuthorizeView>
+    </header>
+    <main class="content">
+        @Body
+    </main>
+    <footer class="foot">
+        <span id="liveclock">—</span>
+        <span class="muted">USB Guardian konzole · commit @AppInfo.Commit</span>
+    </footer>
+</div>
+
+<script>
+  (function () {
+    function tick() {
+      var e = document.getElementById('liveclock');
+      if (e) e.textContent = new Date().toLocaleString('cs-CZ');
+    }
+    tick(); setInterval(tick, 1000);
+  })();
+</script>

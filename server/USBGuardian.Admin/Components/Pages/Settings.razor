@@ -1,0 +1,58 @@
+@page "/nastaveni"
+@inject IConfiguration Config
+
+<h1>Nastavení</h1>
+
+<p class="muted">Aktuální efektivní konfigurace konzole. Změny zatím přes
+<code>appsettings.local.json</code> na serveru (<code>C:\Apps\USBGuardianConsole</code>) + restart služby.
+Editace z UI (DB-backed) je v plánu.</p>
+
+<h2>Autorizace</h2>
+<dl class="cfg">
+    <dt>Admin skupiny (AD)</dt><dd>@Join("Authorization:AdminGroups")</dd>
+    <dt>Povolení uživatelé (whitelist)</dt><dd>@Join("Authorization:AllowedUsers")</dd>
+    <dt>DevAllowAll (bypass)</dt><dd>@(Config.GetValue<bool>("Authorization:DevAllowAll") ? "ANO ⚠" : "ne")</dd>
+</dl>
+
+<h2>AD sync</h2>
+<dl class="cfg">
+    <dt>Zapnuto</dt><dd>@(Config.GetValue<bool>("AdSync:Enabled") ? "ano" : "ne")</dd>
+    <dt>Interval (min)</dt><dd>@(Config["AdSync:IntervalMinutes"] ?? "60")</dd>
+    <dt>SearchBase (OU)</dt><dd>@(string.IsNullOrWhiteSpace(Config["AdSync:SearchBase"]) ? "(celá doména)" : Config["AdSync:SearchBase"])</dd>
+    <dt>Vč. disabled účtů</dt><dd>@(Config.GetValue<bool>("AdSync:IncludeDisabled") ? "ano" : "ne")</dd>
+</dl>
+
+<h2>Databáze</h2>
+<dl class="cfg">
+    <dt>SQL Server</dt><dd class="mono">@_sqlServer</dd>
+    <dt>Databáze</dt><dd class="mono">@_sqlDb</dd>
+</dl>
+
+<h2>Síť</h2>
+<dl class="cfg">
+    <dt>Endpoint</dt><dd class="mono">@(Config["Kestrel:Endpoints:Http:Url"] ?? "—")</dd>
+</dl>
+
+@code {
+    private string _sqlServer = "—";
+    private string _sqlDb = "—";
+
+    protected override void OnInitialized()
+    {
+        var cs = Config.GetConnectionString("DefaultConnection") ?? "";
+        foreach (var part in cs.Split(';', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var kv = part.Split('=', 2);
+            if (kv.Length != 2) continue;
+            var k = kv[0].Trim().ToLowerInvariant();
+            if (k is "server" or "data source") _sqlServer = kv[1].Trim();
+            if (k is "database" or "initial catalog") _sqlDb = kv[1].Trim();
+        }
+    }
+
+    private string Join(string key)
+    {
+        var vals = Config.GetSection(key).Get<string[]>();
+        return vals is { Length: > 0 } ? string.Join(", ", vals) : "—";
+    }
+}

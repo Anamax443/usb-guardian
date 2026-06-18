@@ -14,10 +14,20 @@ public class Computer
     [Key] public int Id { get; set; }
     public string Hostname { get; set; } = string.Empty;
     public string? Domain { get; set; }
-    public DateTime LastSeen { get; set; }
+
+    /// <summary>Poslední kontakt agenta. NULL = agent zatím nereportoval (řádek může pocházet jen z AD syncu).</summary>
+    public DateTime? LastSeen { get; set; }
     public string AgentVersion { get; set; } = string.Empty;
     public bool IsActive { get; set; } = true;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+
+    // ── AD sync (doplňuje serverová konzole na .213) ──
+    /// <summary>OS z Active Directory.</summary>
+    public string? OperatingSystem { get; set; }
+    /// <summary>Nalezen v posledním AD syncu (false = už v AD není).</summary>
+    public bool InActiveDirectory { get; set; }
+    /// <summary>Čas posledního AD syncu tohoto záznamu.</summary>
+    public DateTime? AdSyncedAt { get; set; }
 }
 
 [Table("WhitelistDevices")]

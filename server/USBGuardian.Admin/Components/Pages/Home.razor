@@ -1,0 +1,100 @@
+@page "/"
+@inject IDbContextFactory<AppDbContext> DbFactory
+
+<h1>Přehled</h1>
+
+@if (_error is not null)
+{
+    <div class="banner bad">Nelze načíst data z databáze: @_error</div>
+}
+else if (_loading)
+{
+    <p>Načítám…</p>
+}
+else
+{
+    <div class="cards">
+        <div class="card"><div class="num">@_total</div><div class="lbl">Incidentů (30 dní)</div></div>
+        <div class="card bad"><div class="num">@_blocked</div><div class="lbl">Blokováno</div></div>
+        <div class="card warn"><div class="num">@_warned</div><div class="lbl">Varování</div></div>
+        <div class="card"><div class="num">@_computers</div><div class="lbl">Stanic</div></div>
+    </div>
+
+    <h2>Poslední incidenty</h2>
+    @if (_recent.Count == 0)
+    {
+        <p class="muted">Žádné incidenty.</p>
+    }
+    else
+    {
+        <table>
+            <thead>
+                <tr>
+                    <th>Čas</th><th>Stanice</th><th>Uživatel</th><th>Médium</th>
+                    <th>VID</th><th>PID</th><th>Sériové číslo</th><th>Velikost</th><th>Akce</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var i in _recent)
+                {
+                    <tr>
+                        <td>@i.Timestamp.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</td>
+                        <td>@i.Hostname</td>
+                        <td>@i.Username</td>
+                        <td>@i.FriendlyName</td>
+                        <td class="mono">@i.VendorId</td>
+                        <td class="mono">@i.ProductId</td>
+                        <td class="mono">@i.SerialNumber</td>
+                        <td class="muted">@FormatSize(i.SizeBytes)</td>
+                        <td><span class="pill @PillClass(i.Action)">@i.Action</span></td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+}
+
+@code {
+    private bool _loading = true;
+    private string? _error;
+    private int _total, _blocked, _warned, _computers;
+    private List<Incident> _recent = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var from = DateTime.UtcNow.AddDays(-30);
+            var window = db.Incidents.Where(i => i.Timestamp >= from);
+
+            _total     = await window.CountAsync();
+            _blocked   = await window.CountAsync(i => i.Action == "Blocked");
+            _warned    = await window.CountAsync(i => i.Action == "Warned");
+            _computers = await window.Select(i => i.Hostname).Distinct().CountAsync();
+
+            _recent = await db.Incidents
+                .OrderByDescending(i => i.Timestamp)
+                .Take(25)
+                .ToListAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private static string PillClass(string action) => action switch
+    {
+        "Blocked" => "bad",
+        "Warned"  => "warn",
+        _         => "ok"
+    };
+
+    private static string FormatSize(long bytes) =>
+        bytes > 0 ? $"{bytes / 1_073_741_824.0:F1} GB" : "—";
+}

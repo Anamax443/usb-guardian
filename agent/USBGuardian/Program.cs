@@ -11,6 +11,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using USBGuardian;
+using USBGuardian.LocalConsole;
 using USBGuardian.Security;
 
 var builder = Host.CreateApplicationBuilder(args);
@@ -100,7 +101,26 @@ builder.Services.AddSingleton(sp =>
     return new PolicyEnforcer(logger, notif, iLogger, blocker, mode, expired, contact);
 });
 
-builder.Services.AddHostedService<DeviceMonitor>();
+// DeviceMonitor jako singleton + hosted service (sdílený stav čte lokální konzole)
+builder.Services.AddSingleton<DeviceMonitor>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<DeviceMonitor>());
+
+// ── Lokální admin konzole (loopback, read-only) ──────────────
+// Výchozí VYPNUTO – minimální attack surface (NIS2). Zapnout přes
+// agent.config.local.json: { "localConsole": { "enabled": true } }
+if (bool.Parse(builder.Configuration["localConsole:enabled"] ?? "false"))
+{
+    builder.Services.AddHostedService(sp => new LocalConsoleService(
+        sp.GetRequiredService<ILogger<LocalConsoleService>>(),
+        sp.GetRequiredService<DeviceMonitor>(),
+        sp.GetRequiredService<WhitelistChecker>(),
+        sp.GetRequiredService<IncidentLogger>(),
+        builder.Configuration["policy:mode"] ?? "warn",
+        int.Parse(builder.Configuration["localConsole:port"] ?? "5080")));
+
+    Console.WriteLine(
+        $"Lokální konzole aktivní → http://127.0.0.1:{builder.Configuration["localConsole:port"] ?? "5080"}/ (admin-only)");
+}
 
 // ── Sync services ────────────────────────────────────────────
 var syncUrl = builder.Configuration["whitelist:syncUrl"] ?? string.Empty;

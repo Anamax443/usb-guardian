@@ -48,5 +48,14 @@
       "enabled": true,
       "contactMessage": "Kontaktujte IT oddeleni"
     }
+  },
+
+  // ── Lokální admin konzole ───────────────────────────────────
+  // enabled: false = výchozí (minimální attack surface, NIS2)
+  // Naslouchá jen na 127.0.0.1, vyžaduje lokálního admina, read-only.
+  // Pro vývoj/diagnostiku zapnout v agent.config.local.json.
+  "localConsole": {
+    "enabled": false,
+    "port": 5080
   }
 }

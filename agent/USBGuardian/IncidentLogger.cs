@@ -284,6 +284,39 @@ public class IncidentLogger
     }
 
     // --------------------------------------------------------
+    // Posledních N záznamů z dnešního souboru (read-only, pro lokální konzoli)
+    // Nejnovější první. Prázdný seznam když dnešní soubor neexistuje.
+    // --------------------------------------------------------
+    public List<DeviceRecord> GetRecentRecords(int count)
+    {
+        var today    = DateTime.UtcNow.Date;
+        var hostname = Environment.MachineName;
+        var filePath = Path.Combine(_queuePath, $"log_{hostname}_{today:yyyy-MM-dd}.json");
+
+        lock (_writeLock)
+        {
+            if (!File.Exists(filePath))
+                return new List<DeviceRecord>();
+
+            try
+            {
+                var daily = JsonSerializer.Deserialize<DailyLog>(File.ReadAllText(filePath),
+                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+
+                return daily?.Records
+                    .AsEnumerable()
+                    .Reverse()
+                    .Take(count)
+                    .ToList() ?? new List<DeviceRecord>();
+            }
+            catch
+            {
+                return new List<DeviceRecord>();
+            }
+        }
+    }
+
+    // --------------------------------------------------------
     // Statistika fronty
     // --------------------------------------------------------
     public (int files, int totalRecords) GetQueueStats()
