@@ -74,8 +74,10 @@ Firewall `:4200` byl vytvořen přes DCOM/CIM. Konfigurace na serveru:
 
 - **Zavřít HTTP 5050** na SQL-04 (jen HTTPS) – NIS2. (Potřebuje SQL-04: firewall block, nebo přebindovat API.)
 - **Distribuce + vzdálená instalace agenta** na ~210 stanic bez agenta. Agent config = `syncUrl https://…:5443`
-  + `tls.pinnedThumbprint`. Vzdálená instalace přes WinRM (`Enable-PSRemoting` na klientech), bez uložených
-  admin creds, audit, just-in-time; nejdřív prototypovat kanál na `TRNKAMW11N`.
+  + `tls.pinnedThumbprint`. **Lokální instalace hotová**: `scripts\Install-Agent.ps1 -SourcePath <publish>`
+  (vytvoří službu „USB Guardian" + recovery + watchdog, zachová per-machine `agent.config.local.json`),
+  `scripts\Uninstall-Agent.ps1`. Zbývá **vzdálený** kanál přes WinRM (`Enable-PSRemoting` na klientech), bez
+  uložených admin creds, audit, just-in-time; nejdřív prototypovat na `TRNKAMW11N`.
 - **Podpisový/publikační workflow** whitelistu (staging → offline podpis → publikace) → odemkne whitelist,
   **vynucování** i **blocklist** „naostro" k agentům (potřebují podepsanou distribuci + propagaci přes heartbeat).
 - **Per-serial blocklist** (zákaz konkrétního média, near-real-time k agentům – přednost před whitelistem).

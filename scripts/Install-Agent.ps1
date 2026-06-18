@@ -1,0 +1,122 @@
+# ============================================================
+# Install-Agent.ps1
+# Instalace USB Guardian agenta jako Windows služby (SYSTEM).
+#
+# Co dělá:
+#   1. Zkopíruje self-contained publish do C:\Program Files\USBGuardian
+#      (ZACHOVÁ existující Config\agent.config.local.json – per-machine
+#       sync nastavení se NEPŘEPÍŠE).
+#   2. Vytvoří/aktualizuje službu "USB Guardian" (start=auto, LocalSystem)
+#      + recovery (restart při pádu).
+#   3. Zaregistruje watchdog scheduled task (Register-Watchdog.ps1).
+#   4. Spustí službu.
+#
+# Použití (z publish výstupu):
+#   dotnet publish agent\USBGuardian -c Release -r win-x64 --self-contained -o D:\deploy\USBGuardianAgent
+#   .\Install-Agent.ps1 -SourcePath D:\deploy\USBGuardianAgent
+#
+# Pozn.: agent potřebuje Config\agent.config.local.json se syncUrl +
+#   tls.pinnedThumbprint (jinak whitelist sync nepojede). Skript na to upozorní.
+#
+# Skript si sám vyžádá UAC elevaci.
+# ============================================================
+
+param(
+    [Parameter(Mandatory = $true)]
+    [string] $SourcePath,
+    [string] $InstallDir  = "C:\Program Files\USBGuardian",
+    [string] $ServiceName = "USB Guardian"
+)
+
+# ── Auto-elevace ─────────────────────────────────────────────
+$currentUser = [Security.Principal.WindowsIdentity]::GetCurrent()
+$isAdmin = ([Security.Principal.WindowsPrincipal]$currentUser).IsInRole(
+    [Security.Principal.WindowsBuiltInRole]::Administrator)
+
+if (-not $isAdmin) {
+    Write-Host "Vyzaduji opravneni spravce - zobrazuji UAC dialog..."
+    Start-Process powershell.exe -Verb RunAs `
+        -ArgumentList "-NonInteractive -NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`" -SourcePath `"$SourcePath`" -InstallDir `"$InstallDir`" -ServiceName `"$ServiceName`""
+    exit
+}
+
+$ErrorActionPreference = "Stop"
+$exeName = "USBGuardian.exe"
+$srcExe  = Join-Path $SourcePath $exeName
+
+# ── Validace zdroje ──────────────────────────────────────────
+if (-not (Test-Path $srcExe)) {
+    Write-Host "CHYBA: $exeName nenalezen v '$SourcePath'." -ForegroundColor Red
+    Write-Host "Nejdriv publish: dotnet publish agent\USBGuardian -c Release -r win-x64 --self-contained -o <SourcePath>"
+    exit 1
+}
+
+Write-Host "USB Guardian – instalace agenta" -ForegroundColor Cyan
+Write-Host "  Zdroj:  $SourcePath"
+Write-Host "  Cil:    $InstallDir"
+Write-Host "  Sluzba: $ServiceName"
+Write-Host ""
+
+# ── 1) Zastavit existující službu (kvuli zamceni souboru) ────
+$existing = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
+if ($existing) {
+    Write-Host "Sluzba existuje – zastavuji pred kopirovanim..."
+    if ($existing.Status -ne 'Stopped') {
+        Stop-Service -Name $ServiceName -Force
+        try { (Get-Service $ServiceName).WaitForStatus('Stopped', [TimeSpan]::FromSeconds(30)) } catch {}
+    }
+}
+
+# ── 2) Kopie souboru (ZACHOVAT agent.config.local.json) ──────
+New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
+Write-Host "Kopiruji soubory (zachovavam Config\agent.config.local.json)..."
+# /XO nekopiruje starsi; /XF vynecha per-machine local config, aby se neprepsal
+$rc = robocopy $SourcePath $InstallDir /E /XF agent.config.local.json /R:2 /W:2 /NFL /NDL /NP
+if ($LASTEXITCODE -ge 8) {
+    Write-Host "CHYBA: robocopy selhal (kod $LASTEXITCODE)." -ForegroundColor Red
+    exit 1
+}
+
+# Skripty (watchdog) vedle agenta
+$scriptsDst = Join-Path $InstallDir "scripts"
+New-Item -ItemType Directory -Force -Path $scriptsDst | Out-Null
+Copy-Item -Path (Join-Path $PSScriptRoot 'Watch-USBGuardian.ps1') -Destination $scriptsDst -Force
+Copy-Item -Path (Join-Path $PSScriptRoot 'Register-Watchdog.ps1')  -Destination $scriptsDst -Force
+
+# ── 3) Vytvorit / aktualizovat sluzbu ────────────────────────
+$binPath = Join-Path $InstallDir $exeName
+if ($existing) {
+    Write-Host "Aktualizuji binPath existujici sluzby..."
+    & sc.exe config $ServiceName binPath= "`"$binPath`"" start= auto obj= LocalSystem | Out-Null
+} else {
+    Write-Host "Vytvarim sluzbu..."
+    New-Service -Name $ServiceName -BinaryPathName "`"$binPath`"" `
+        -DisplayName $ServiceName -StartupType Automatic `
+        -Description "USB Guardian – monitoring pametovych medii (NIS2)." | Out-Null
+}
+
+# Recovery: restart pri padu (1. a 2. selhani po 60s, reset citace po 1 dni)
+& sc.exe failure $ServiceName reset= 86400 actions= restart/60000/restart/60000/restart/60000 | Out-Null
+
+# ── 4) Watchdog ──────────────────────────────────────────────
+Write-Host "Registruji watchdog..."
+& powershell.exe -NonInteractive -NoProfile -ExecutionPolicy Bypass -File (Join-Path $scriptsDst 'Register-Watchdog.ps1')
+
+# ── 5) Kontrola per-machine configu + start ──────────────────
+$localCfg = Join-Path $InstallDir "Config\agent.config.local.json"
+if (-not (Test-Path $localCfg)) {
+    Write-Host ""
+    Write-Host "UPOZORNENI: chybi $localCfg" -ForegroundColor Yellow
+    Write-Host "  Agent pobezi, ale BEZ sync nastaveni. Vytvor soubor se syncUrl + tls.pinnedThumbprint:"
+    Write-Host '  { "whitelist": { "syncUrl": "https://B-S-W-SQL-04:5443" }, "tls": { "pinnedThumbprint": "E6F6..." } }'
+}
+
+Write-Host ""
+Write-Host "Spoustim sluzbu..."
+Start-Service -Name $ServiceName
+try { (Get-Service $ServiceName).WaitForStatus('Running', [TimeSpan]::FromSeconds(30)) } catch {}
+$st = (Get-Service $ServiceName).Status
+
+Write-Host ""
+Write-Host "Hotovo. Sluzba '$ServiceName' stav: $st" -ForegroundColor Green
+Write-Host "  Odinstalace: .\Uninstall-Agent.ps1"
