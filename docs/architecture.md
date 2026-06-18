@@ -68,6 +68,43 @@
 | `IncidentQueueWorker` | Background worker – zpracovává příchozí incidenty do DB |
 | `AppDbContext` | EF Core kontext – SQL Server přes gMSA Windows Auth |
 
+## Serverová admin konzole (USBGuardian.Admin)
+
+Samostatná **Blazor Server** aplikace na app serveru (`10.8.2.213`), Windows služba
+`USBGuardianConsole`, port `:4200`. Oddělená od ingestion API (odolnost – příjem incidentů
+od 500+ agentů nesmí ovlivnit adminní použití). Čte/píše SQL-04, modely reusnuté z API
+(slinkované `DbModels.cs` + `AppDbContext.cs` – žádná duplikace).
+
+| Komponenta | Popis |
+|-----------|-------|
+| `Home` (Přehled) | Incidenty za 30 dní + poslední události vč. VID/PID/sériové číslo |
+| `Computers` (Stanice) | Inventář z AD; dlaždice = filtr; cesta v AD (OU); tlačítko Aktualizovat z AD |
+| `Settings` / `Docs` | Efektivní konfigurace (read-only) / nápověda v prohlížeči |
+| `AdSyncRunner` | Logika AD syncu – volatelná z časovače i z UI (semafor proti souběhu) |
+| `AdSyncService` | Časovač nad `AdSyncRunner` (interval z configu) |
+| `AppInfo` | Commit hash buildu (MSBuild stamp z gitu) → patička |
+
+**Autorizace:** Windows Auth (Negotiate). Přístup jen členům `Authorization:AdminGroups`
+(AD skupina) **nebo** účtům v `Authorization:AllowedUsers` (whitelist). Kontrola přes
+`WindowsPrincipal.IsInRole` (řeší doménové skupiny). `DevAllowAll` = bypass jen pro vývoj.
+
+### AD sync
+
+```
+Active Directory (objectCategory=computer, ne disabled)
+        ↓  (new DirectoryEntry() – ambient doména, nic natvrdo)
+AdSyncRunner: name → Hostname, dNSHostName → Domain, operatingSystem, distinguishedName → AdPath (OU)
+        ↓  upsert (klíč = hostname), NEpřepisuje LastSeen/AgentVersion (vlastní agent/API)
+SQL Computers + reconciliation: InActiveDirectory; "v AD ⨯ hlásí agenta" = kam chybí agent
+```
+
+## Lokální admin konzole agenta
+
+`LocalConsoleService` – `HttpListener` na `127.0.0.1` (volitelné, default vypnuto). Admin-only
+(`WindowsPrincipal.IsInRole(Administrator)`), read-only. Živý in-memory stav agenta (whitelist,
+WMI watchdog, fronta, připojená média). `HttpListener` schválně místo Kestrelu – agent
+(`Sdk.Worker`) nepotřebuje ASP.NET Core runtime; loopback → plain HTTP akceptovatelné.
+
 ## Identifikace zařízení
 
 ```
@@ -170,10 +207,14 @@ dotnet run                 (server)
 
 | Položka | Popis |
 |---------|-------|
+| Vzdálená instalace agenta | Na stanice bez agenta (seznam z AD sync); WinRM kanál, just-in-time creds, audit, žádné uložené admin creds |
+| Webová správa whitelistu | Přidání schváleného média z konzole → DB; **staging + offline podpis** (privátní klíč nikdy na serveru) |
+| Hardening konzole | gMSA místo LocalSystem; dedikovaná skupina `USB-Guardian-Admins`; HTTPS; přesun API z SQL-04 na .213 (plný dvouvrstvý model) |
 | Toast Privilege Separation | Helper process v user session – jednosměrné Pipes SYSTEM → user |
-| Task Scheduler watchdog | Záloha za service recovery – spustí agenta pokud nesleží |
-| Admin UI | Dashboard, správa whitelistu, statistiky incidentů |
 | Email notifikace | Microsoft Graph API – alerting bez SMTP závislosti |
+
+> Hotovo (dřív pending): **Admin UI** – serverová Blazor konzole (Přehled, Stanice, Nastavení,
+> Dokumentace) + AD sync inventář stanic. Viz „Serverová admin konzole".
 | HTTPS produkce | Spustit `scripts\New-Certificate.ps1` na `B-S-W-SQL-04` |
 
 ## Watchdog – Task Scheduler
