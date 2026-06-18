@@ -1,43 +1,179 @@
 @page "/nastaveni"
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
 @inject IConfiguration Config
+@inject IDbContextFactory<AppDbContext> DbFactory
+@inject USBGuardian.Admin.Security.AccessCache Access
 
 <h1>Nastavení</h1>
 
-<p class="muted">Aktuální efektivní konfigurace konzole. Změny zatím přes
-<code>appsettings.local.json</code> na serveru (<code>C:\Apps\USBGuardianConsole</code>) + restart služby.
-Editace z UI (DB-backed) je v plánu.</p>
+@if (_dbError is not null)
+{
+    <div class="banner bad">Centrální nastavení nedostupné: @_dbError<br/>
+        <span class="muted">Spusť <code>database/06_appsettings.sql</code> a grant na <code>AppSettings</code> pro účet konzole.</span></div>
+}
 
-<h2>Autorizace</h2>
+<h2>Vynucování</h2>
 <dl class="cfg">
-    <dt>Admin skupiny (AD)</dt><dd>@Join("Authorization:AdminGroups")</dd>
-    <dt>Povolení uživatelé (whitelist)</dt><dd>@Join("Authorization:AllowedUsers")</dd>
-    <dt>DevAllowAll (bypass)</dt><dd>@(Config.GetValue<bool>("Authorization:DevAllowAll") ? "ANO ⚠" : "ne")</dd>
+    <dt>Aktivně vyžadovat pouze schválená média</dt>
+    <dd>
+        @if (_enforce) { <span class="pill bad">ZAPNUTO — blokovat neschválená</span> }
+        else           { <span class="pill warn">vypnuto — jen varovat</span> }
+        &nbsp;<button class="btn" @onclick="ToggleEnforce" disabled="@_busy">@(_enforce ? "Vypnout" : "Zapnout")</button>
+    </dd>
 </dl>
+<p class="muted">Centrální politika. Agenti ji začnou respektovat po doplnění distribuce přes heartbeat
+(další krok, sdílený s blocklistem). Dnes agent jede dle lokálního <code>policy.mode</code>.</p>
+
+<h2>Přístup do konzole</h2>
+<p class="muted">Bootstrap z <code>appsettings.local.json</code> (nelze vyřadit — ochrana proti lockoutu)
++ DB seznam spravovaný zde. Pro tiché SSO choď přes hostname, ne IP.</p>
+<dl class="cfg">
+    <dt>Bootstrap skupiny</dt><dd>@Join("Authorization:AdminGroups")</dd>
+    <dt>Bootstrap uživatelé</dt><dd>@Join("Authorization:AllowedUsers")</dd>
+</dl>
+
+<h3>Povolení uživatelé (DB)</h3>
+<div class="toolbar">
+    <input class="inp mono" @bind="_newUser" placeholder="DOMENA\uzivatel" />
+    <button class="btn" @onclick="AddUser" disabled="@_busy">Přidat</button>
+</div>
+<ul class="linklist">
+    @foreach (var u in _users)
+    {
+        <li><span class="mono">@u</span> <button class="iconbtn" @onclick="() => RemoveUser(u)" title="Odebrat">✕</button></li>
+    }
+    @if (_users.Count == 0) { <li class="muted">— žádní —</li> }
+</ul>
+
+<h3>Povolené skupiny (DB)</h3>
+<div class="toolbar">
+    <input class="inp mono" @bind="_newGroup" placeholder="DOMENA\skupina" />
+    <button class="btn" @onclick="AddGroup" disabled="@_busy">Přidat</button>
+</div>
+<ul class="linklist">
+    @foreach (var g in _groups)
+    {
+        <li><span class="mono">@g</span> <button class="iconbtn" @onclick="() => RemoveGroup(g)" title="Odebrat">✕</button></li>
+    }
+    @if (_groups.Count == 0) { <li class="muted">— žádné —</li> }
+</ul>
 
 <h2>AD sync</h2>
 <dl class="cfg">
     <dt>Zapnuto</dt><dd>@(Config.GetValue<bool>("AdSync:Enabled") ? "ano" : "ne")</dd>
     <dt>Interval (min)</dt><dd>@(Config["AdSync:IntervalMinutes"] ?? "60")</dd>
     <dt>SearchBase (OU)</dt><dd>@(string.IsNullOrWhiteSpace(Config["AdSync:SearchBase"]) ? "(celá doména)" : Config["AdSync:SearchBase"])</dd>
-    <dt>Vč. disabled účtů</dt><dd>@(Config.GetValue<bool>("AdSync:IncludeDisabled") ? "ano" : "ne")</dd>
 </dl>
 
-<h2>Databáze</h2>
+<h2>Databáze / síť</h2>
 <dl class="cfg">
     <dt>SQL Server</dt><dd class="mono">@_sqlServer</dd>
     <dt>Databáze</dt><dd class="mono">@_sqlDb</dd>
-</dl>
-
-<h2>Síť</h2>
-<dl class="cfg">
     <dt>Endpoint</dt><dd class="mono">@(Config["Kestrel:Endpoints:Http:Url"] ?? "—")</dd>
+    <dt>Build</dt><dd class="mono">commit @AppInfo.Commit</dd>
 </dl>
 
 @code {
-    private string _sqlServer = "—";
-    private string _sqlDb = "—";
+    private bool _enforce, _busy;
+    private string? _dbError;
+    private string _newUser = "", _newGroup = "";
+    private List<string> _users = new(), _groups = new();
+    private string _sqlServer = "—", _sqlDb = "—";
 
-    protected override void OnInitialized()
+    protected override async Task OnInitializedAsync()
+    {
+        ParseConnection();
+        await Load();
+    }
+
+    private async Task Load()
+    {
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            _enforce = string.Equals(await Get(db, "policy.enforce"), "true", StringComparison.OrdinalIgnoreCase);
+            _users   = SplitList(await Get(db, "access.users"));
+            _groups  = SplitList(await Get(db, "access.groups"));
+            _dbError = null;
+        }
+        catch (Exception ex) { _dbError = ex.Message; }
+    }
+
+    private async Task ToggleEnforce()
+    {
+        _busy = true;
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            await Set(db, "policy.enforce", (!_enforce).ToString().ToLowerInvariant());
+            await Load();
+        }
+        catch (Exception ex) { _dbError = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private Task AddUser()   => AddTo("access.users", _newUser, () => _newUser = "");
+    private Task RemoveUser(string v)  => RemoveFrom("access.users", v);
+    private Task AddGroup()  => AddTo("access.groups", _newGroup, () => _newGroup = "");
+    private Task RemoveGroup(string v) => RemoveFrom("access.groups", v);
+
+    private async Task AddTo(string key, string val, Action clear)
+    {
+        var v = (val ?? "").Trim();
+        if (v.Length == 0) return;
+        _busy = true;
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var list = SplitList(await Get(db, key));
+            if (!list.Contains(v, StringComparer.OrdinalIgnoreCase)) list.Add(v);
+            await Set(db, key, string.Join(",", list));
+            clear();
+            await Access.ReloadAsync();
+            await Load();
+        }
+        catch (Exception ex) { _dbError = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task RemoveFrom(string key, string val)
+    {
+        _busy = true;
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var list = SplitList(await Get(db, key))
+                .Where(x => !x.Equals(val, StringComparison.OrdinalIgnoreCase)).ToList();
+            await Set(db, key, string.Join(",", list));
+            await Access.ReloadAsync();
+            await Load();
+        }
+        catch (Exception ex) { _dbError = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private static async Task<string> Get(AppDbContext db, string key)
+        => (await db.AppSettings.FirstOrDefaultAsync(s => s.Key == key))?.Value ?? "";
+
+    private static async Task Set(AppDbContext db, string key, string value)
+    {
+        var s = await db.AppSettings.FirstOrDefaultAsync(x => x.Key == key);
+        if (s is null) db.AppSettings.Add(new AppSetting { Key = key, Value = value });
+        else s.Value = value;
+        await db.SaveChangesAsync();
+    }
+
+    private static List<string> SplitList(string s) =>
+        string.IsNullOrWhiteSpace(s) ? new()
+        : s.Split(new[] { ',', ';', '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+
+    private string Join(string key)
+    {
+        var vals = Config.GetSection(key).Get<string[]>();
+        return vals is { Length: > 0 } ? string.Join(", ", vals) : "—";
+    }
+
+    private void ParseConnection()
     {
         var cs = Config.GetConnectionString("DefaultConnection") ?? "";
         foreach (var part in cs.Split(';', StringSplitOptions.RemoveEmptyEntries))
@@ -48,11 +184,5 @@ Editace z UI (DB-backed) je v plánu.</p>
             if (k is "server" or "data source") _sqlServer = kv[1].Trim();
             if (k is "database" or "initial catalog") _sqlDb = kv[1].Trim();
         }
-    }
-
-    private string Join(string key)
-    {
-        var vals = Config.GetSection(key).Get<string[]>();
-        return vals is { Length: > 0 } ? string.Join(", ", vals) : "—";
     }
 }

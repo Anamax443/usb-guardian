@@ -18,6 +18,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
 using USBGuardian.Admin.AdSync;
 using USBGuardian.Admin.Components;
+using USBGuardian.Admin.Security;
 using USBGuardian.Api.Data;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -50,6 +51,9 @@ var allowedUsers = builder.Configuration.GetSection("Authorization:AllowedUsers"
                    ?? Array.Empty<string>();
 var devAllowAll  = builder.Configuration.GetValue<bool>("Authorization:DevAllowAll");
 
+// DB-spravovaný seznam přístupu (rozšiřuje config bootstrap, viz AccessCache)
+builder.Services.AddSingleton<AccessCache>();
+
 builder.Services.AddAuthorization(options =>
 {
     options.FallbackPolicy = new AuthorizationPolicyBuilder()
@@ -58,17 +62,28 @@ builder.Services.AddAuthorization(options =>
             if (devAllowAll) return true;
             if (ctx.User.Identity is not WindowsIdentity { IsAuthenticated: true } wi) return false;
 
-            // 1) Whitelist uživatelů – "DOMENA\user" nebo holé "user" (case-insensitive)
             var name = wi.Name ?? string.Empty;
             var sam  = name.Contains('\\') ? name[(name.IndexOf('\\') + 1)..] : name;
-            if (allowedUsers.Any(u =>
-                    u.Equals(name, StringComparison.OrdinalIgnoreCase) ||
-                    u.Equals(sam,  StringComparison.OrdinalIgnoreCase)))
-                return true;
-
-            // 2) Členství v admin AD skupině
             var principal = new WindowsPrincipal(wi);
-            return adminGroups.Any(principal.IsInRole);
+
+            bool MatchUser(string u) => u.Equals(name, StringComparison.OrdinalIgnoreCase)
+                                     || u.Equals(sam, StringComparison.OrdinalIgnoreCase);
+
+            // 1) BOOTSTRAP z appsettings – nelze vyřadit (ochrana proti lockoutu)
+            if (allowedUsers.Any(MatchUser)) return true;
+            if (adminGroups.Any(principal.IsInRole)) return true;
+
+            // 2) DB-spravovaný seznam (přidává se z Nastavení)
+            if (ctx.Resource is HttpContext http)
+            {
+                var cache = http.RequestServices.GetService<AccessCache>();
+                if (cache is not null)
+                {
+                    if (cache.Users.Any(MatchUser)) return true;
+                    if (cache.Groups.Any(principal.IsInRole)) return true;
+                }
+            }
+            return false;
         })
         .Build();
 });
@@ -91,6 +106,9 @@ builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 
 var app = builder.Build();
+
+// Načíst DB-spravovaný seznam přístupu (bez pádu, když tabulka ještě není)
+await app.Services.GetRequiredService<AccessCache>().ReloadAsync();
 
 app.UseStaticFiles();
 app.UseRouting();

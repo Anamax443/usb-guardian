@@ -32,6 +32,13 @@ public class Computer
     public string? AdPath { get; set; }
 }
 
+[Table("AppSettings")]
+public class AppSetting
+{
+    [Key] public string Key { get; set; } = string.Empty;
+    public string Value { get; set; } = string.Empty;
+}
+
 [Table("WhitelistDevices")]
 public class WhitelistDevice
 {

@@ -17,6 +17,7 @@ public class AppDbContext : DbContext
     public DbSet<WhitelistDevice> WhitelistDevices => Set<WhitelistDevice>();
     public DbSet<WhitelistVersion> WhitelistVersions => Set<WhitelistVersion>();
     public DbSet<Incident> Incidents => Set<Incident>();
+    public DbSet<AppSetting> AppSettings => Set<AppSetting>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

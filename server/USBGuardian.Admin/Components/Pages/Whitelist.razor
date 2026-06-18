@@ -61,19 +61,40 @@ else
             <tbody>
                 @foreach (var d in _devices)
                 {
-                    <tr>
-                        <td class="mono">@(string.IsNullOrEmpty(d.VendorId) ? "—" : d.VendorId)</td>
-                        <td class="mono">@(string.IsNullOrEmpty(d.ProductId) ? "—" : d.ProductId)</td>
-                        <td class="mono">@(string.IsNullOrEmpty(d.SerialNumber) ? "—" : d.SerialNumber)</td>
-                        <td>@(string.IsNullOrEmpty(d.Description) ? "—" : d.Description)</td>
-                        <td class="muted">@d.ApprovedBy</td>
-                        <td>
-                            @if (d.IsActive) { <span class="pill ok">aktivní</span> }
-                            else if (!string.IsNullOrEmpty(d.VendorId)) { <span class="pill warn">čeká na publikaci</span> }
-                            else { <span class="pill warn">čeká na výskyt</span> }
-                        </td>
-                        <td><button class="iconbtn" @onclick="() => Remove(d.Id)" title="Odebrat">✕</button></td>
-                    </tr>
+                    if (_editId == d.Id)
+                    {
+                        <tr>
+                            <td><input class="inp mono" style="min-width:90px" @bind="_eVid" /></td>
+                            <td><input class="inp mono" style="min-width:130px" @bind="_ePid" /></td>
+                            <td><input class="inp mono" style="min-width:120px" @bind="_eSerial" /></td>
+                            <td><input class="inp" @bind="_eDesc" /></td>
+                            <td class="muted">@d.ApprovedBy</td>
+                            <td>—</td>
+                            <td>
+                                <button class="iconbtn" @onclick="SaveEdit" disabled="@_busy" title="Uložit">✔</button>
+                                <button class="iconbtn" @onclick="CancelEdit" title="Zrušit">✕</button>
+                            </td>
+                        </tr>
+                    }
+                    else
+                    {
+                        <tr>
+                            <td class="mono">@(string.IsNullOrEmpty(d.VendorId) ? "—" : d.VendorId)</td>
+                            <td class="mono">@(string.IsNullOrEmpty(d.ProductId) ? "—" : d.ProductId)</td>
+                            <td class="mono">@(string.IsNullOrEmpty(d.SerialNumber) ? "—" : d.SerialNumber)</td>
+                            <td>@(string.IsNullOrEmpty(d.Description) ? "—" : d.Description)</td>
+                            <td class="muted">@d.ApprovedBy</td>
+                            <td>
+                                @if (d.IsActive) { <span class="pill ok">aktivní</span> }
+                                else if (!string.IsNullOrEmpty(d.VendorId)) { <span class="pill warn">čeká na publikaci</span> }
+                                else { <span class="pill warn">čeká na výskyt</span> }
+                            </td>
+                            <td>
+                                <button class="iconbtn" @onclick="() => StartEdit(d)" title="Upravit">✎</button>
+                                <button class="iconbtn" @onclick="() => Remove(d.Id)" title="Odebrat">✕</button>
+                            </td>
+                        </tr>
+                    }
                 }
             </tbody>
         </table>
@@ -212,6 +233,39 @@ else
             await Load();
         }
         catch (Exception ex) { Msg("Chyba importu: " + ex.Message, true); }
+        finally { _busy = false; }
+    }
+
+    private int? _editId;
+    private string _eVid = "", _ePid = "", _eSerial = "", _eDesc = "";
+
+    private void StartEdit(WhitelistDevice d)
+    {
+        _editId = d.Id; _eVid = d.VendorId; _ePid = d.ProductId; _eSerial = d.SerialNumber; _eDesc = d.Description;
+    }
+
+    private void CancelEdit() => _editId = null;
+
+    private async Task SaveEdit()
+    {
+        if (_editId is null) return;
+        _busy = true;
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var d = await db.WhitelistDevices.FindAsync(_editId.Value);
+            if (d is not null)
+            {
+                d.VendorId = (_eVid ?? "").Trim();
+                d.ProductId = (_ePid ?? "").Trim();
+                d.SerialNumber = (_eSerial ?? "").Trim();
+                d.Description = (_eDesc ?? "").Trim();
+                await db.SaveChangesAsync();
+            }
+            _editId = null;
+            await Load();
+        }
+        catch (Exception ex) { Msg("Chyba uložení: " + ex.Message, true); }
         finally { _busy = false; }
     }
 
