@@ -6,7 +6,7 @@
 # Mechanismus (stejný jako deploy konzole na .213 – síťový token
 # účtu, bez UAC na klientech):
 #   1. robocopy self-contained publish -> \\HOST\C$\Program Files\USBGuardian
-#   2. vytvoreni sluzby "USB Guardian" pres CIM (Win32_Service.Create, DCOM)
+#   2. vytvoreni sluzby "USB Guardian" pres sc.exe \\HOST create (SCM/named-pipes)
 #   3. recovery (sc.exe \\HOST failure) + watchdog (schtasks /S HOST)
 #   4. start sluzby
 # Per-host vysledek -> audit CSV.
@@ -82,31 +82,20 @@ $perHost = {
         if ($LASTEXITCODE -ge 8) { throw "robocopy selhal (kod $LASTEXITCODE)" }
         & robocopy (Split-Path $watchSrc) "$share\scripts" (Split-Path $watchSrc -Leaf) /R:2 /W:2 /NFL /NDL /NP /NJH /NJS | Out-Null
 
-        $binPath = "`"$InstallDir\USBGuardian.exe`""
-
-        $cim = New-CimSession -ComputerName $h -SessionOption (New-CimSessionOption -Protocol Dcom) -OperationTimeoutSec 60
-        try {
-            if ($exists) {
-                & sc.exe "\\$h" config $ServiceName binPath= $binPath start= auto obj= LocalSystem | Out-Null
-            } else {
-                $res = Invoke-CimMethod -CimSession $cim -ClassName Win32_Service -MethodName Create -Arguments @{
-                    Name            = $ServiceName
-                    DisplayName     = $ServiceName
-                    PathName        = $binPath
-                    ServiceType     = [uint32]16
-                    ErrorControl    = [uint32]1
-                    StartMode       = 'Automatic'
-                    DesktopInteract = $false
-                    StartName       = 'LocalSystem'
-                }
-                if ($res.ReturnValue -ne 0) { throw "Win32_Service.Create vratilo $($res.ReturnValue)" }
-            }
-        } finally { Remove-CimSession $cim }
+        # Sluzba pres sc.exe (SCM/named-pipes – stejna cesta jako robocopy/SMB, co funguje;
+        # CIM/DCOM Win32_Service.Create na klientech selhavalo). cmd.exe kvuli quotingu cesty s mezerou.
+        $exe = "$InstallDir\USBGuardian.exe"
+        if ($exists) {
+            & cmd.exe /c ('sc.exe \\{0} config "{1}" binPath= "\"{2}\"" start= auto obj= LocalSystem' -f $h, $ServiceName, $exe) | Out-Null
+        } else {
+            $scOut = (& cmd.exe /c ('sc.exe \\{0} create "{1}" binPath= "\"{2}\"" start= auto obj= LocalSystem DisplayName= "{1}"' -f $h, $ServiceName, $exe) 2>&1 | Out-String)
+            if ($LASTEXITCODE -ne 0) { throw "sc create selhal ($LASTEXITCODE): $($scOut.Trim())" }
+        }
 
         & sc.exe "\\$h" failure $ServiceName reset= 86400 actions= restart/60000/restart/60000/restart/60000 | Out-Null
 
-        $wt = "powershell.exe -NonInteractive -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$InstallDir\scripts\Watch-USBGuardian.ps1`""
-        & schtasks.exe /Create /S $h /RU SYSTEM /RL HIGHEST /SC MINUTE /MO 3 /TN "USBGuardian\USBGuardian-Watchdog" /TR $wt /F 2>&1 | Out-Null
+        $tr = 'powershell.exe -NonInteractive -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File \"{0}\scripts\Watch-USBGuardian.ps1\"' -f $InstallDir
+        & cmd.exe /c ('schtasks /Create /S {0} /RU SYSTEM /RL HIGHEST /SC MINUTE /MO 3 /TN "USBGuardian\USBGuardian-Watchdog" /TR "{1}" /F' -f $h, $tr) 2>&1 | Out-Null
 
         & sc.exe "\\$h" start $ServiceName | Out-Null
         Start-Sleep -Seconds 2

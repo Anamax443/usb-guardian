@@ -233,9 +233,28 @@ Klíč `cmd.report.<HOST>` v `AppSettings` slouží i jako audit „naposledy vy
 Tabulka `AppSettings` (key/value, migrace 06) spravovaná z Nastavení; `AccessCache` singleton:
 - `policy.enforce` – vynucovat jen schválená média (agent začne respektovat po heartbeat distribuci – pending).
 - `comm.silentAfterMinutes` – práh „zmlklého agenta" (default 180); hranice pro tečku komunikace i dlaždici na Stanicích.
+- `deploy.*` – auto-enrollment (viz níže): `enabled`/`dryRun`/`intervalMinutes`/`maxPerRun`/`allowHosts`/`targetsFile`/`lastRun`.
 - `access.users` / `access.groups` – whitelist přístupu do konzole (`appsettings` = lockout-safe bootstrap).
 - `email.*` – SMTP relay (M365 Direct Send) + `IncidentAlertService` (background notifier: souhrn nových
   neschválených incidentů, baseline při 1. běhu, interval/throttle; `EmailSender`).
+
+## Auto-enrollment agenta (konzole nasazuje sama)
+
+```
+AdSync → Computers (kdo nemá agenta)
+AgentDeployService (24/7, default VYPNUTO + dry-run)
+   ↓ ostrý režim
+deploy.targetsFile (seznam stanic bez agenta)         [konzole = B-S-W-MIKOS$, jen zápis]
+   ↓ čte
+Scheduled task na .213 pod gMSA gmsa-USBGdep$         [least-privilege: admin jen na klientech]
+   ↓ Deploy-AgentFleet.ps1
+\\HOST\C$ robocopy + sc.exe \\HOST create + watchdog + start  → agent na klientovi (LocalSystem)
+```
+
+Least-privilege: konzole **nemění identitu** (zůstává `B-S-W-MIKOS$`, SQL granty beze změny), instalaci dělá
+oddělený task pod deploy účtem. **Prostředí (AXIMA): PS skripty musí být podepsané** (AllSigned GPO) prod certem
+`CN=powershell.axinetwork.loc` + publisher v `LocalMachine\TrustedPublisher`; před podpisem CRLF+UTF-8 BOM.
+Nastavení: [auto-deploy-setup.md](auto-deploy-setup.md).
 
 ## Konzole – funkce stránek
 

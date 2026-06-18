@@ -22,10 +22,13 @@ technické opatření pro **NIS2 / zákon 181/2014 Sb. / ISO 27001**.
 | 12 | **Whitelist** – zadání jen sériovým číslem + autofill z incidentů + import + editace polí + aktivní checkbox | ✅ |
 | 13 | **Centrální nastavení (DB)** – vynucování, whitelist přístupu do konzole, e-mail + alerty nad incidenty | ✅ |
 | 14 | **Šifrovaná komunikace agent↔API** – self-signed cert (bez CA, MachineKeySet) + pinning otisku | ✅ |
+| 15 | **Dohled komunikace** – dlaždice „Zmlklo agentů" + konfigurovatelný práh; **„Vyžádat data" na klik**; řaditelná tabulka Detailně | ✅ |
+| 16 | **Startovní sken** už-připojených médií; whitelist poll 2 min; centrální `onExpired`/`enforce` | ✅ |
+| 17 | **Auto-enrollment agenta** – konzole sama nasadí agenta na stanice bez něj (gMSA + scheduled task, dry-run/opt-in) | 🟡 pilot |
 | – | Zavřít nešifrované HTTP 5050 (jen HTTPS) | 🔜 NIS2 |
-| – | Distribuce + **vzdálená instalace agenta** (WinRM) na stanice bez něj | 🔜 |
 | – | **Podpisový/publikační workflow** whitelistu → vynucování + blocklist „naostro" k agentům | 🔜 |
-| – | Per-serial **blocklist** (zákaz konkrétního média, near-real-time k agentům) | 🔜 |
+| – | Per-serial **blocklist** + blokace už-připojeného média | 🔜 |
+| – | Monitoring expirace podpisového certu | 🔜 |
 
 ## Architektura
 
@@ -68,15 +71,19 @@ dark/light přepínač `axima.theme` bez FOUC, tisk = light, semafor stavů). St
   Deaktivovaných / Incidentů / Blokováno / Varování, prokliky na listy). **Filtr** (období
   30/90/rok/vše, akce, fulltext) + **kumulace** (seskupení médium+stanice+uživatel s počtem) +
   identifikátory **VID/PID/sériové číslo** + sloupec **„Schváleno"** (aktuálně dle whitelistu).
-- **Stanice** – inventář z AD; dlaždice filtrují (vše / hlásí / chybí agent), **hledání**,
-  **cesta v AD** (OU) vedle hostname, **ikona komunikace** (zelená ≤60 min / žlutá mlčí / šedá
-  žádný kontakt), tlačítko **Aktualizovat z AD**.
+  Tabulka **„Detailně" má řaditelné hlavičky** (řazení v DB přes query-string).
+- **Stanice** – inventář z AD; dlaždice filtrují (vše / hlásí / **zmlklo agentů** / chybí agent),
+  **hledání**, **cesta v AD** (OU) vedle hostname, **ikona komunikace** (zelená ≤ práh / žlutá zmlkl
+  / šedá žádný kontakt; práh `comm.silentAfterMinutes` v Nastavení), tlačítko **Aktualizovat z AD**
+  a **„Vyžádat data"** (řádek/hromadně) – vynutí odevzdání dat při nejbližším heartbeatu.
 - **Whitelist** – schválená média; **stačí zadat sériové číslo** (VID/PID/název se dotáhnou
   z incidentů, i zpětně), **hromadný import**, **editace polí** inline, **checkbox Aktivní**
   (dočasná deaktivace bez mazání).
-- **Nastavení** (centrální, v DB) – **vynucování** (vyžadovat jen schválená média), **whitelist
-  přístupu** do konzole (uživatelé/skupiny; appsettings = lockout-safe bootstrap), **e-mail**
-  (SMTP relay/Direct Send + test) a **alerty nad incidenty** (interval), AD sync / DB / build info.
+- **Nastavení** (centrální, v DB) – **vynucování** (vyžadovat jen schválená média), **dohled
+  komunikace** (práh „zmlklého agenta"), **whitelist přístupu** do konzole (uživatelé/skupiny;
+  appsettings = lockout-safe bootstrap), **e-mail** (SMTP relay/Direct Send + test) a **alerty
+  nad incidenty** (interval), **auto-enrollment agenta** (master vypínač + dry-run + cíle),
+  AD sync / DB / build info.
 - **Dokumentace** – rozcestník + **tisknutelné HTML** stránky (render `.md` přes Markdig, žádné
   externí odkazy).
 
@@ -113,6 +120,23 @@ NIS2 vyžaduje šifrovaný přenos. Řešeno **bez závislosti na CA / externím
   (jen vývoj) nebo CA validace.
 
 Agent prod config: `whitelist.syncUrl = https://SERVER:5443` + `tls.pinnedThumbprint = <otisk z /api/cert-info>`.
+
+## Distribuce a auto-enrollment agenta
+
+Stanice bez agenta jsou vidět na **Stanicích** (dlaždice „Chybí agent"). Nasazení:
+
+- **Lokální instalace:** `scripts\Install-Agent.ps1 -SourcePath <publish>` (vytvoří službu „USB Guardian"
+  + recovery + watchdog, nasadí per-machine `agent.config.local.json`), `scripts\Uninstall-Agent.ps1`.
+- **Hromadně:** `scripts\Deploy-AgentFleet.ps1 -TargetsFile … -SourcePath …` – paralelní rollout přes
+  `\\HOST\C$` + `sc.exe \\HOST create` + watchdog; přeskočí offline/už-nainstalované; audit CSV. (PS 5.1 i 7.)
+- **Auto-enrollment (konzole nasazuje sama):** `AgentDeployService` v konzoli po AD syncu najde stanice bez
+  agenta a (v ostrém režimu) zapíše seznam do `deploy.targetsFile`; instalaci provede **scheduled task na .213
+  pod dedikovaným gMSA** (least-privilege – jen ten účet má admin na klientech). **Default VYPNUTO + dry-run.**
+  Nastavení účtu: [docs/auto-deploy-setup.md](docs/auto-deploy-setup.md) (+ `scripts\New-DeployGmsa.ps1`).
+
+> **Prostředí AXIMA:** PS skripty co běží na strojích **musí být podepsané** (execution policy AllSigned přes GPO)
+> prod certem `CN=powershell.axinetwork.loc` a publisher musí být v `LocalMachine\TrustedPublisher`
+> (na .213 i klientech, fleet přes GPO). Před podpisem **CRLF + UTF-8 BOM** (jinak HashMismatch).
 
 ## Konfigurace
 
@@ -217,10 +241,13 @@ usb-guardian/
 │   └── USBGuardian.Admin/    # Blazor Server admin konzole (.213)
 │       ├── Components/        # Pages (Home, Computers, Settings, Docs), Layout
 │       ├── AdSync/            # AdSyncRunner + AdSyncService
+│       ├── Deploy/            # AgentDeployService (auto-enrollment orchestrátor)
+│       ├── Notifications/     # IncidentAlertService + EmailSender
 │       └── appsettings.local.json.example
-├── database/                 # 01–05 SQL skripty
-├── scripts/                  # certifikáty, watchdog, ToastHelper
-├── docs/architecture.md
+├── database/                 # 01–06 SQL skripty
+├── scripts/                  # certifikáty, watchdog, ToastHelper, Install/Uninstall-Agent,
+│                             #   Deploy-AgentFleet, New-DeployGmsa
+├── docs/architecture.md, docs/auto-deploy-setup.md
 ├── README.md / README.en.md
 └── HANDOFF.md / HANDOFF.en.md
 ```

@@ -4,14 +4,14 @@
 
 **Date:** 2026-06-18 · **Repo:** `Anamax443/usb-guardian` · **Author:** Milan Trnka (AXIMA)
 
-Document for whoever takes over. Architecture: [docs/architecture.md](docs/architecture.md),
+Document for whoever takes over the project. Architecture: [docs/architecture.md](docs/architecture.md),
 functional description: [README.en.md](README.en.md).
 
 ## 1. What it is
 
-Monitoring of storage media on company stations (NIS2). The agent detects connected USB/SD/disk,
-compares against a signed whitelist and warns / blocks; it pushes incidents to the API. The server
-console aggregates data, keeps a station inventory from AD and shows where the agent is missing.
+Monitoring of storage media on company stations (NIS2). The agent on a station detects connected
+USB/SD/disk, compares against a signed whitelist and warns / blocks; it pushes incidents to the API.
+The server console aggregates data, keeps a station inventory from AD and shows where the agent is missing.
 
 ## 2. Current Live State
 
@@ -25,26 +25,29 @@ console aggregates data, keeps a station inventory from AD and shows where the a
 | **Console authorization** | AD `AXINETWORK\SQL Admins2` + whitelist `AXINETWORK\trnkam` (+ DB list from Settings) |
 | **Agent↔API encryption** | HTTPS + **thumbprint pinning** (no CA) — verified end-to-end (heartbeat OK from .181) |
 | **AD sync** | enabled 60 min + on-demand; **211 in AD, ~210 without agent** |
-| **Live commit (console)** | `4e3ef32` (console footer; verify via `/api/version`) |
-| **Agent (test)** | `.181` (TRNKAMW11) – `syncUrl=https://B-S-W-SQL-04:5443` + pin; 1st rollout target `TRNKAMW11N` (dyn. IP) |
+| **Live commit (console)** | see console footer / `/api/version` (after the last doc sweep) |
+| **Console – pages** | Overview (filter+aggregation+sortable "Detailed"), Stations (AD inventory + "Agents gone silent" tile + "Request data"), Whitelist, Settings (enforcement/access/email/alerts/communication monitoring/**auto-enrollment**), Documentation |
+| **Deploy account (auto-enroll)** | **gMSA `AXINETWORK\gmsa-USBGdep$`** – in `PC Admins` (admin on clients), installed on `.213`; scheduled task `\USBGuardian\USBGuardian-Watchdog`… deploy task `USBGuardian-AutoDeploy` on `.213` |
+| **Agent (test)** | `.181` (TRNKAMW11) – `syncUrl=https://B-S-W-SQL-04:5443` + pin; **auto-deploy pilot is running** (copies files, sc.exe create being fine-tuned) |
 
 ## 3. Key decisions (why)
 
-- **Push, not pull** – 500+ clients behind NAT/firewall; agent only needs outbound.
-- **Two-tier** – logic (console, AD sync) on app server `.213`, DB is storage on SQL-04.
+- **Push, not pull** – 500+ clients behind NAT/firewall; the agent only needs an outbound connection.
+- **Two-tier** – operations (console, AD sync) on app server `.213`, DB is just storage on SQL-04.
   (Note: the API still runs on SQL-04; moving it to .213 is planned hardening.)
-- **Console = .NET/Blazor**, not Node – reuses EF models from the API (linked `DbModels`/`AppDbContext`).
-- **Agent local console via `HttpListener`** – no ASP.NET Core runtime needed.
+- **Console = .NET/Blazor**, not Node – reuses EF models from the API (linked `DbModels`/`AppDbContext`),
+  one language, ASP.NET Core is already on the server.
+- **Agent local console via `HttpListener`**, not Kestrel – the agent does not need the ASP.NET Core runtime.
 - **Keyed by hostname, not IP** – stations have dynamic IPs.
 - **Whitelist RSA private key never on the server** – publishing a signed version is an offline step (NIS2).
-- **Encryption without a CA** – API generates its own self-signed cert (`MachineKeySet`, NOT EphemeralKeySet!),
-  agent verifies it via **thumbprint pinning**. Independent of the company CA / external certs.
-- **Central settings in DB** (`AppSettings`) – enforcement, access, e-mail; the agent still uses its local
-  `policy.mode` (distribution via heartbeat is a next step).
+- **Encryption without a CA** – the API generates its own self-signed cert (`MachineKeySet`, NOT EphemeralKeySet!),
+  the agent verifies it via **thumbprint pinning**. Independent of the company CA / external certs.
+- **Central settings in DB** (`AppSettings`) – enforcement, access, e-mail; the agent still runs by its local
+  `policy.mode` (distribution via heartbeat is the next step).
 - **Portability** – no company values in code; everything in `*.local.json`, domain from `new DirectoryEntry()`.
 
 > Fixed latent repo bugs: missing authorization policy `USBGuardianClients` (controllers returned 500);
-> `EphemeralKeySet → MachineKeySet` (Schannel can't do the server TLS handshake otherwise).
+> `EphemeralKeySet → MachineKeySet` (otherwise Schannel won't do the server TLS handshake).
 
 ## 4. Console deploy (manual, from TRNKAMW11)
 
@@ -57,22 +60,51 @@ robocopy D:\deploy\USBGuardianConsole \\10.8.2.213\C$\Apps\USBGuardianConsole /E
 sc.exe \\10.8.2.213 start USBGuardianConsole
 ```
 
-The API deploy runs on SQL-04 (trnkam has no admin there → operator), self-contained build + restart.
+Firewall `:4200` was created via DCOM/CIM. Configuration on the server:
+`C:\Apps\USBGuardianConsole\appsettings.local.json` (see `*.example`).
 
-## 5. Next steps / pending
+## 5. Status and next steps
 
+### 5.1 Done and live on the console (.213)
+- **"Agents gone silent" tile** on Stations + threshold `comm.silentAfterMinutes` (Settings → Communication monitoring).
+  Reveals stations that previously reported an agent but whose `LastSeen` is older than the threshold (outage/tamper).
+- **"Request data" on click** (Stations, per-row/bulk) – `ReportNow` command via `AppSettings` `cmd.report.<HOST>`.
+- **Overview → "Detailed" table with sortable headers** (sorting in the DB via query-string).
+- **Auto-enrollment orchestrator** `AgentDeployService` + Settings "Agent auto-enrollment" (default OFF + dry-run).
+
+### 5.2 In repo, awaiting rollout / operator
+- **API (SQL-04, operator):** `HeartbeatController` returns `ReportNow` (once, based on the previous `LastSeen`).
+  + fix `DateTimeStyles` (otherwise heartbeat 500). Without an API deploy, "Request data" only writes a flag, the agent won't get it.
+- **Agent (rollout):** **whitelist poll 15 → 2 min**; **startup scan of already-connected media** (WMI watchers caught
+  only new connections); `ReportNow` handling (flush); fixes: `onExpiredWhitelist` (block/allow/warn), publicKeyPath
+  relative to exe (otherwise the whitelist is rejected when running as a service), GUID `:N[..8]`, removed unused `Microsoft.Data.Sqlite`.
+
+### 5.3 Agent auto-enrollment (console .213 deploys it itself) — IN PROGRESS, pilot
+Goal: the console, running 24/7 after AD sync, deploys the agent itself onto stations without an agent. **Least-privilege:** the console only writes
+the target list (`deploy.targetsFile`), the installation is done by a **scheduled task on .213 under gMSA** (only that account has admin on the PCs).
+- **Done:** gMSA `gmsa-USBGdep$` (in `PC Admins`, on .213), task `USBGuardian-AutoDeploy`, .213 provisioned
+  (agent publish `C:\Apps\USBGuardianAgentPublish` + scripts), `Deploy-AgentFleet.ps1` (runspace pool = PS5.1 compat),
+  `scripts\New-DeployGmsa.ps1`, `Install-Agent.ps1`/`Uninstall-Agent.ps1`. Detail: [docs/auto-deploy-setup.md](docs/auto-deploy-setup.md).
+- **Pilot .181:** file robocopy **works** (gMSA admin via `PC Admins`); service creation via CIM/DCOM failed
+  → switched to **`sc.exe \\HOST create`** (via cmd because of quoting). **Script must be re-signed** (see 5.4) and finished.
+- **Remaining for "live" auto-enrollment:** enable in Settings (dry-run → verify → turn off); expand from .181 to .180 → fleet.
+
+### 5.4 Environment for PS scripts (IMPORTANT – AXIMA gotchas)
+- **AllSigned (GPO):** every PS script that runs there **must be signed** with the prod cert `CN=powershell.axinetwork.loc`
+  (`-ExecutionPolicy Bypass` does NOT bypass this). Signing via the `.213:4100` service / share `\\herkules\ITC\UTIL\04-manualy-instalace\PS-scripty`.
+  Applies to `Deploy-AgentFleet.ps1` (on .213) and `Watch-USBGuardian.ps1` (on clients).
+- **Before signing CRLF + UTF-8 BOM** (the repo has LF → otherwise `HashMismatch`).
+- **Trusted Publisher:** for non-interactive runs (gMSA/SYSTEM) the signing cert must be in `LocalMachine\TrustedPublisher`
+  on .213 and clients (added on .181+.213; **fleet via GPO** – cert export `_AXIMA-CodeSign-publisher.cer` on the share).
+
+### 5.5 Roadmap (pending)
+- **Monitoring of signing cert expiry** (user wants it) – cert valid until 2028-06-17; alert via e-mail from the console.
 - **Close HTTP 5050** on SQL-04 (HTTPS only) – NIS2.
-- **Distribution + remote agent install** onto ~210 stations. Agent config = `syncUrl https://…:5443`
-  + `tls.pinnedThumbprint`. Remote install via WinRM (`Enable-PSRemoting` on clients), no stored admin
-  creds, audited, just-in-time; first prototype the channel against `TRNKAMW11N`.
-- **Signing/publishing workflow** for the whitelist (staging → offline signing → publish) → unlocks the
-  whitelist, **enforcement** and **blocklist** live to agents (need signed distribution + heartbeat propagation).
-- **Per-serial blocklist** (ban a specific device, near-real-time to agents – takes precedence over whitelist).
-- **E-mail alerts**: config + sending done (`IncidentAlertService`); fire once new incidents arrive.
-- **Hardening:** gMSA instead of LocalSystem for the console, dedicated `USB-Guardian-Admins` instead of
-  `SQL Admins2`, HTTPS for the console, move the API off SQL-04 onto .213.
-- **Cleanup:** unused `Microsoft.Data.Sqlite` in the agent; stray `server/USBGuardianAPI/`;
-  broken GUID format `:N[..8]` in `NotificationService.ShowWarning`.
+- **Whitelist signing/publishing workflow** → unlocks enforcement and the **blocklist** "for real".
+- **Per-serial blocklist** + **blocking already-connected media** (the startup scan is half the way there).
+- **Hardening:** dedicated `USB-Guardian-Admins` instead of `SQL Admins2`, HTTPS console, move the API off SQL-04 onto .213.
+- **Cleanup:** stray (untracked) folder `server/USBGuardianAPI/` remains (duplicate – to be deleted).
+  Done: unused `Microsoft.Data.Sqlite`, GUID `:N[..8]`.
 
 ## 6. Documentation map
 
@@ -81,3 +113,4 @@ The API deploy runs on SQL-04 (trnkam has no admin there → operator), self-con
 | `README.md` / `.en.md` | Functional overview, components, configuration, deployment |
 | `HANDOFF.md` / `.en.md` | This document – handoff + live state |
 | `docs/architecture.md` | Technical architecture, data flow, security layers |
+| `docs/auto-deploy-setup.md` | Setup of the deploy gMSA + GPO + scheduled task for auto-enrollment |

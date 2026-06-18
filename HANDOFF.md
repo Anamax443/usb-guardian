@@ -25,8 +25,10 @@ Serverová konzole agreguje data, drží inventář stanic z AD a ukazuje, kam c
 | **Autorizace konzole** | AD `AXINETWORK\SQL Admins2` + whitelist `AXINETWORK\trnkam` (+ DB seznam z Nastavení) |
 | **Šifrování agent↔API** | HTTPS + **pinning otisku** (bez CA) — ověřeno end-to-end (heartbeat OK z .181) |
 | **AD sync** | zapnutý 60 min + on-demand; **211 v AD, ~210 bez agenta** |
-| **Live commit (konzole)** | `4e3ef32` (v patičce konzole; ověř přes `/api/version`) |
-| **Agent (test)** | `.181` (TRNKAMW11) – `syncUrl=https://B-S-W-SQL-04:5443` + pin; 1. rollout target `TRNKAMW11N` (dyn. IP) |
+| **Live commit (konzole)** | viz patička konzole / `/api/version` (po posledním doc sweepu) |
+| **Konzole – stránky** | Přehled (filtr+kumulace+řazení Detailně), Stanice (AD inventář + dlaždice „Zmlklo agentů" + „Vyžádat data"), Whitelist, Nastavení (vynucování/přístup/email/alerty/dohled komunikace/**auto-enrollment**), Dokumentace |
+| **Deploy účet (auto-enroll)** | **gMSA `AXINETWORK\gmsa-USBGdep$`** – v `PC Admins` (admin na klientech), nainstalován na `.213`; scheduled task `\USBGuardian\USBGuardian-Watchdog`… deploy task `USBGuardian-AutoDeploy` na `.213` |
+| **Agent (test)** | `.181` (TRNKAMW11) – `syncUrl=https://B-S-W-SQL-04:5443` + pin; **pilot auto-deploye běží** (soubory kopíruje, dolaďuje se sc.exe create) |
 
 ## 3. Klíčová rozhodnutí (proč)
 
@@ -61,41 +63,48 @@ sc.exe \\10.8.2.213 start USBGuardianConsole
 Firewall `:4200` byl vytvořen přes DCOM/CIM. Konfigurace na serveru:
 `C:\Apps\USBGuardianConsole\appsettings.local.json` (viz `*.example`).
 
-## 5. Další kroky / pending
+## 5. Stav a další kroky
 
-> **Nově implementováno (čeká na nasazení API operátorem + rollout agenta):**
-> - **Whitelist na klienty rychleji**: `WhitelistSync` interval **15 → 2 min** (konfig `sync:whitelistSyncIntervalMinutes`).
->   Nový schválený whitelist je na klientech do ~2 min (heartbeat sám stáhne). Stačí redeploy agenta.
-> - **„Vyžádat data" na klik** (Stanice): příkaz `ReportNow` přibalený do heartbeatu (klíč `cmd.report.<HOST>`
->   v `AppSettings`; API jen čte, jednorázovost přes porovnání s předchozím `LastSeen`). Agent při něm hned
->   flushne incidenty. **Vyžaduje deploy API na SQL-04 (operátor)** + redeploy agenta; konzole funguje hned.
-> - **Dlaždice „Zmlklo agentů"** + práh `comm.silentAfterMinutes` (Nastavení); **řaditelné** sloupce „Detailně" (Přehled).
+### 5.1 Hotovo a živé na konzoli (.213)
+- **Dlaždice „Zmlklo agentů"** na Stanicích + práh `comm.silentAfterMinutes` (Nastavení → Dohled komunikace).
+  Odhalí stanice, co dřív hlásily agenta, ale `LastSeen` je starší než práh (výpadek/tamper).
+- **„Vyžádat data" na klik** (Stanice, řádek/hromadně) – příkaz `ReportNow` přes `AppSettings` `cmd.report.<HOST>`.
+- **Přehled → tabulka „Detailně" s řaditelnými hlavičkami** (řazení v DB přes query-string).
+- **Auto-enrollment orchestrátor** `AgentDeployService` + Nastavení „Auto-enrollment agenta" (default VYPNUTO + dry-run).
 
+### 5.2 V repu, čeká na rollout / operátora
+- **API (SQL-04, operátor):** `HeartbeatController` vrací `ReportNow` (jednorázově dle předchozího `LastSeen`).
+  + fix `DateTimeStyles` (jinak heartbeat 500). Bez deploye API „Vyžádat data" jen zapíše příznak, agent ho nedostane.
+- **Agent (rollout):** **whitelist poll 15 → 2 min**; **startovní sken už-připojených médií** (WMI watchers chytaly
+  jen nová připojení); `ReportNow` handling (flush); fixy: `onExpiredWhitelist` (block/allow/warn), publicKeyPath
+  vůči exe (jinak whitelist jako služba odmítnut), GUID `:N[..8]`, odebrán nepoužitý `Microsoft.Data.Sqlite`.
 
-- **Zavřít HTTP 5050** na SQL-04 (jen HTTPS) – NIS2. (Potřebuje SQL-04: firewall block, nebo přebindovat API.)
-- **Distribuce + vzdálená instalace agenta** na ~210 stanic bez agenta. Agent config = `syncUrl https://…:5443`
-  + `tls.pinnedThumbprint`. **Lokální instalace hotová**: `scripts\Install-Agent.ps1 -SourcePath <publish>`
-  (vytvoří službu „USB Guardian" + recovery + watchdog, zachová per-machine `agent.config.local.json`),
-  `scripts\Uninstall-Agent.ps1`. Zbývá **vzdálený** kanál přes WinRM (`Enable-PSRemoting` na klientech), bez
-  uložených admin creds, audit, just-in-time; nejdřív prototypovat na `TRNKAMW11N`.
-- **Auto-enrollment agenta (konzole .213 nasazuje sama)** — `AgentDeployService` (hosted service)
-  + `scripts\Deploy-AgentFleet.ps1` + Nastavení „Auto-enrollment agenta". Konzole po AD syncu najde
-  stanice bez agenta a nasadí je (C$ + CIM service create + watchdog). **Default VYPNUTO + dry-run.**
-  - **Rozhodnuto: dedikovaný deploy účet** (vytvořit nový – gMSA doporučeno) s **lokálním adminem na klientech**
-    (GPO Restricted Groups). Konzole musí běžet pod ním (dnes LocalSystem `B-S-W-MIKOS$`).
-  - **Ops prereq (čeká):** (1) vytvořit deploy účet + GPO workstation-admin; (2) přepnout službu konzole
-    na tento účet (`sc.exe \\10.8.2.213 config "USB Guardian Console" obj= …`); (3) nasadit na .213
-    publish agenta (`deploy.sourcePath`) + `Deploy-AgentFleet.ps1`/`Watch-USBGuardian.ps1` (`deploy.scriptPath`);
-    (4) v Nastavení zapnout (nejdřív dry-run → ověřit → vypnout dry-run). Pilot: `.181`, pak `.180`.
-- **Podpisový/publikační workflow** whitelistu (staging → offline podpis → publikace) → odemkne whitelist,
-  **vynucování** i **blocklist** „naostro" k agentům (potřebují podepsanou distribuci + propagaci přes heartbeat).
-- **Per-serial blocklist** (zákaz konkrétního média, near-real-time k agentům – přednost před whitelistem).
-- **E-mailové alerty**: konfigurace + odesílání hotové (`IncidentAlertService`); fungují, jakmile dorazí nové incidenty.
-- **Hardening:** gMSA místo LocalSystem pro konzoli, dedikovaná `USB-Guardian-Admins` místo `SQL Admins2`,
-  HTTPS pro konzoli, přesun API z SQL-04 na .213 (dvouvrstvý princip).
-- **Úklid:** ~~nepoužitý `Microsoft.Data.Sqlite` v agentu~~ (hotovo); ~~vadný GUID format `:N[..8]` v
-  `NotificationService.ShowWarning`~~ (hotovo); zbývá stray (untracked) složka `server/USBGuardianAPI/`
-  (duplikát vedle `USBGuardian.Api/` – ke smazání).
+### 5.3 Auto-enrollment agenta (konzole .213 nasazuje sama) — ROZPRACOVÁNO, pilot
+Cíl: konzole 24/7 po AD syncu sama nasadí agenta na stanice bez agenta. **Least-privilege:** konzole jen zapíše
+seznam cílů (`deploy.targetsFile`), instalaci dělá **scheduled task na .213 pod gMSA** (jen ten účet má admin na PC).
+- **Hotovo:** gMSA `gmsa-USBGdep$` (v `PC Admins`, na .213), task `USBGuardian-AutoDeploy`, .213 naprovisionována
+  (publish agenta `C:\Apps\USBGuardianAgentPublish` + skripty), `Deploy-AgentFleet.ps1` (runspace pool = PS5.1 kompat),
+  `scripts\New-DeployGmsa.ps1`, `Install-Agent.ps1`/`Uninstall-Agent.ps1`. Detail: [docs/auto-deploy-setup.md](docs/auto-deploy-setup.md).
+- **Pilot .181:** robocopy souborů **funguje** (gMSA admin přes `PC Admins`); vytvoření služby přes CIM/DCOM selhalo
+  → přepnuto na **`sc.exe \\HOST create`** (přes cmd kvůli quotingu). **Skript nutno znovu podepsat** (viz 5.4) a doběhnout.
+- **Zbývá k „ostrému" auto-enrollmentu:** v Nastavení zapnout (dry-run → ověřit → vypnout); rozšířit z .181 na .180 → fleet.
+
+### 5.4 Prostředí pro PS skripty (DŮLEŽITÉ – AXIMA gotchas)
+- **AllSigned (GPO):** každý PS skript co tam běží **musí být podepsaný** prod certem `CN=powershell.axinetwork.loc`
+  (`-ExecutionPolicy Bypass` to NEOBEJDE). Podpis přes službu `.213:4100` / share `\\herkules\ITC\UTIL\04-manualy-instalace\PS-scripty`.
+  Týká se `Deploy-AgentFleet.ps1` (na .213) a `Watch-USBGuardian.ps1` (na klientech).
+- **Před podpisem CRLF + UTF-8 BOM** (repo má LF → jinak `HashMismatch`).
+- **Trusted Publisher:** pro neinteraktivní běh (gMSA/SYSTEM) musí být podpisový cert v `LocalMachine\TrustedPublisher`
+  na .213 i klientech (přidáno na .181+.213; **fleet přes GPO** – cert export `_AXIMA-CodeSign-publisher.cer` na share).
+
+### 5.5 Roadmapa (pending)
+- **Monitoring expirace podpisového certu** (uživatel chce) – cert platí do 2028-06-17; alert přes e-mail z konzole.
+- **Zavřít HTTP 5050** na SQL-04 (jen HTTPS) – NIS2.
+- **Podpisový/publikační workflow whitelistu** → odemkne vynucování i **blocklist** „naostro".
+- **Per-serial blocklist** + **blokace už-připojeného média** (startovní sken je půlka cesty).
+- **Hardening:** dedikovaná `USB-Guardian-Admins` místo `SQL Admins2`, HTTPS konzole, přesun API z SQL-04 na .213.
+- **Úklid:** zbývá stray (untracked) složka `server/USBGuardianAPI/` (duplikát – ke smazání).
+  Hotovo: nepoužitý `Microsoft.Data.Sqlite`, GUID `:N[..8]`.
 
 ## 6. Mapa dokumentace
 
@@ -104,3 +113,4 @@ Firewall `:4200` byl vytvořen přes DCOM/CIM. Konfigurace na serveru:
 | `README.md` / `.en.md` | Funkční přehled, komponenty, konfigurace, nasazení |
 | `HANDOFF.md` / `.en.md` | Tento dokument – předávka + živý stav |
 | `docs/architecture.md` | Technická architektura, datový tok, bezpečnostní vrstvy |
+| `docs/auto-deploy-setup.md` | Nastavení deploy gMSA + GPO + scheduled task pro auto-enrollment |
