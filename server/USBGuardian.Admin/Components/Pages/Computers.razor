@@ -15,6 +15,8 @@ else
             <div class="num">@_all.Count</div><div class="lbl">Stanic v AD</div></a>
         <a class="card tile @(Stav == "hlasi" ? "active" : "")" href="@Url(stav: "hlasi")">
             <div class="num">@_reporting</div><div class="lbl">Hlásí agenta</div></a>
+        <a class="card tile @(_silent > 0 ? "warn" : "") @(Stav == "zmlkl" ? "active" : "")" href="@Url(stav: "zmlkl")">
+            <div class="num">@_silent</div><div class="lbl">Zmlklo agentů</div></a>
         <a class="card tile bad @(Stav == "chybi" ? "active" : "")" href="@Url(stav: "chybi")">
             <div class="num">@_missing</div><div class="lbl">Chybí agent</div></a>
     </div>
@@ -63,41 +65,49 @@ else
             }
         </tbody>
     </table>
-    <p class="muted" data-no-print>Komunikace: <span class="dot ok"></span> komunikuje (≤ 60 min) ·
-        <span class="dot warn"></span> mlčí (starší) · <span class="dot off"></span> žádný kontakt</p>
+    <p class="muted" data-no-print>Komunikace: <span class="dot ok"></span> komunikuje (≤ @_silentAfterMin min) ·
+        <span class="dot warn"></span> zmlkl (starší) · <span class="dot off"></span> žádný kontakt</p>
 }
 
 @code {
     [SupplyParameterFromQuery(Name = "stav")] public string? Stav { get; set; }
     [SupplyParameterFromQuery(Name = "q")]    public string? Q { get; set; }
 
-    private const int OnlineMinutes = 60;
+    private const int DefaultSilentAfterMinutes = 180;
 
     private string? _error;
     private List<Computer> _all = new();
-    private int _reporting, _missing;
+    private int _reporting, _missing, _silent;
+    private int _silentAfterMin = DefaultSilentAfterMinutes;
     private readonly FormModel _form = new();
     private sealed class FormModel { }
 
     private static bool Reports(Computer c) => !string.IsNullOrEmpty(c.AgentVersion) || c.LastSeen is not null;
 
+    // Čerstvý = hlásil se v rámci prahu. Zmlklý = hlásí agenta, ale není čerstvý.
+    private bool Fresh(Computer c) =>
+        c.LastSeen is { } t && (DateTime.UtcNow - t).TotalMinutes <= _silentAfterMin;
+
+    private bool Silent(Computer c) => Reports(c) && !Fresh(c);
+
     private string CommClass(Computer c)
     {
         if (c.LastSeen is null) return "off";
-        return (DateTime.UtcNow - c.LastSeen.Value).TotalMinutes <= OnlineMinutes ? "ok" : "warn";
+        return Fresh(c) ? "ok" : "warn";
     }
 
     private string CommTitle(Computer c) => c.LastSeen is null
         ? "Žádný kontakt s agentem"
-        : (DateTime.UtcNow - c.LastSeen.Value).TotalMinutes <= OnlineMinutes
+        : Fresh(c)
             ? $"Komunikuje – naposledy {c.LastSeen.Value.ToLocalTime():dd.MM.yyyy HH:mm}"
-            : $"Mlčí – naposledy {c.LastSeen.Value.ToLocalTime():dd.MM.yyyy HH:mm}";
+            : $"Zmlkl (> {_silentAfterMin} min) – naposledy {c.LastSeen.Value.ToLocalTime():dd.MM.yyyy HH:mm}";
 
     private IEnumerable<Computer> Filtered()
     {
         IEnumerable<Computer> q = Stav switch
         {
             "hlasi" => _all.Where(Reports),
+            "zmlkl" => _all.Where(Silent),
             "chybi" => _all.Where(c => c.InActiveDirectory && !Reports(c)),
             _       => _all
         };
@@ -111,6 +121,16 @@ else
                 (c.Domain ?? "").Contains(s, StringComparison.OrdinalIgnoreCase));
         }
         return q;
+    }
+
+    private static async Task<int> LoadSilentThreshold(AppDbContext db)
+    {
+        try
+        {
+            var row = await db.AppSettings.FirstOrDefaultAsync(s => s.Key == "comm.silentAfterMinutes");
+            return int.TryParse(row?.Value, out var v) && v > 0 ? v : DefaultSilentAfterMinutes;
+        }
+        catch { return DefaultSilentAfterMinutes; }
     }
 
     private string Url(string stav)
@@ -128,8 +148,10 @@ else
         try
         {
             await using var db = await DbFactory.CreateDbContextAsync();
+            _silentAfterMin = await LoadSilentThreshold(db);
             _all = await db.Computers.OrderBy(c => c.Hostname).ToListAsync();
             _reporting = _all.Count(Reports);
+            _silent    = _all.Count(Silent);
             _missing   = _all.Count(c => c.InActiveDirectory && !Reports(c));
             _error = null;
         }

@@ -215,6 +215,7 @@ Bez CA, bez cert store. Agent ho ověří **pinningem otisku** (`TlsClient.cs`, 
 
 Tabulka `AppSettings` (key/value, migrace 06) spravovaná z Nastavení; `AccessCache` singleton:
 - `policy.enforce` – vynucovat jen schválená média (agent začne respektovat po heartbeat distribuci – pending).
+- `comm.silentAfterMinutes` – práh „zmlklého agenta" (default 180); hranice pro tečku komunikace i dlaždici na Stanicích.
 - `access.users` / `access.groups` – whitelist přístupu do konzole (`appsettings` = lockout-safe bootstrap).
 - `email.*` – SMTP relay (M365 Direct Send) + `IncidentAlertService` (background notifier: souhrn nových
   neschválených incidentů, baseline při 1. běhu, interval/throttle; `EmailSender`).
@@ -223,7 +224,8 @@ Tabulka `AppSettings` (key/value, migrace 06) spravovaná z Nastavení; `AccessC
 
 - **Přehled** – dlaždicový souhrn napříč listy + filtr (období/akce/fulltext) + kumulace (GroupBy přes
   anonymní typ → in-memory map) + sloupec „Schváleno" dle aktivního whitelistu.
-- **Stanice** – AD inventář, filtr, cesta v AD (OU), ikona komunikace (dle čerstvosti `LastSeen`).
+- **Stanice** – AD inventář, filtr, cesta v AD (OU), ikona komunikace (dle čerstvosti `LastSeen`),
+  dlaždice „Zmlklo agentů" (hlásí agenta, ale `LastSeen` starší než práh `comm.silentAfterMinutes` – možný výpadek/tamper).
 - **Whitelist** – serial-only zadání + backfill VID/PID z incidentů + import + inline edit + `IsActive` checkbox.
 - **Dokumentace** – render `.md` (Markdig) jako tisknutelné HTML, rozcestník.
 

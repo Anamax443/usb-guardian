@@ -26,6 +26,18 @@
 <p class="muted">Centrální politika. Agenti ji začnou respektovat po doplnění distribuce přes heartbeat
 (další krok, sdílený s blocklistem). Dnes agent jede dle lokálního <code>policy.mode</code>.</p>
 
+<h2>Dohled komunikace</h2>
+<dl class="cfg">
+    <dt>Agent platí za zmlklý po (min)</dt>
+    <dd>
+        <input class="inp" style="min-width:90px" @bind="_silentAfter" />
+        &nbsp;<button class="btn" @onclick="SaveComm" disabled="@_busy">Uložit</button>
+        @if (_commMsg is not null) { <span class="muted">&nbsp;@_commMsg</span> }
+    </dd>
+</dl>
+<p class="muted">Hranice pro tečku komunikace i dlaždici „Zmlklo agentů" na Stanicích. Stanice, která dřív
+    hlásila agenta a déle se neozvala, se počítá jako zmlklá (možný výpadek / tamper). Default 180 min.</p>
+
 <h2>Přístup do konzole</h2>
 <p class="muted">Bootstrap z <code>appsettings.local.json</code> (nelze vyřadit — ochrana proti lockoutu)
 + DB seznam spravovaný zde. Pro tiché SSO choď přes hostname, ne IP.</p>
@@ -107,6 +119,9 @@ denní souhrn) je další krok.</p>
     private string _emailHost = "", _emailPort = "25", _emailFrom = "", _emailRecipients = "", _emailInterval = "15";
     private string? _emailMsg;
 
+    private string _silentAfter = "180";
+    private string? _commMsg;
+
     protected override async Task OnInitializedAsync()
     {
         ParseConnection();
@@ -121,6 +136,8 @@ denní souhrn) je další krok.</p>
             _enforce = string.Equals(await Get(db, "policy.enforce"), "true", StringComparison.OrdinalIgnoreCase);
             _users   = SplitList(await Get(db, "access.users"));
             _groups  = SplitList(await Get(db, "access.groups"));
+
+            var sa = await Get(db, "comm.silentAfterMinutes"); _silentAfter = string.IsNullOrEmpty(sa) ? "180" : sa;
 
             _emailEnabled    = string.Equals(await Get(db, "email.enabled"), "true", StringComparison.OrdinalIgnoreCase);
             _emailHost       = await Get(db, "email.host");
@@ -145,6 +162,24 @@ denní souhrn) je další krok.</p>
             await Load();
         }
         catch (Exception ex) { _dbError = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task SaveComm()
+    {
+        _commMsg = null;
+        if (!int.TryParse(_silentAfter?.Trim(), out var min) || min <= 0)
+        { _commMsg = "Zadej kladné číslo minut."; return; }
+
+        _busy = true;
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            await Set(db, "comm.silentAfterMinutes", min.ToString());
+            _silentAfter = min.ToString();
+            _commMsg = "Uloženo.";
+        }
+        catch (Exception ex) { _commMsg = "Chyba: " + ex.Message; }
         finally { _busy = false; }
     }
 
