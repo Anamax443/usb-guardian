@@ -41,8 +41,8 @@ public class HeartbeatController : ControllerBase
             var key = "cmd.report." + (hostname ?? string.Empty).ToUpperInvariant();
             var cmdRow = await _db.AppSettings.FirstOrDefaultAsync(s => s.Key == key);
             if (cmdRow != null
-                && DateTime.TryParse(cmdRow.Value, null,
-                       System.Globalization.DateTimeStyles.RoundtripKind | System.Globalization.DateTimeStyles.AdjustToUniversal,
+                && DateTime.TryParse(cmdRow.Value, System.Globalization.CultureInfo.InvariantCulture,
+                       System.Globalization.DateTimeStyles.RoundtripKind,
                        out var requestedAt))
             {
                 reportNow = prevSeen is null || requestedAt > prevSeen.Value;

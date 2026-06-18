@@ -10,6 +10,8 @@
 }
 else
 {
+    @if (_reqError is not null) { <div class="banner bad">@_reqError</div> }
+
     <div class="cards">
         <a class="card tile @(Stav is null ? "active" : "")" href="@Url(stav: "")">
             <div class="num">@_all.Count</div><div class="lbl">Stanic v AD</div></a>
@@ -71,9 +73,16 @@ else
                                 <input type="hidden" name="ReqHost" value="@c.Hostname" />
                                 <button class="btn" type="submit" title="Vyžádat aktuální data při nejbližším heartbeatu (do ~2 min)">⟳ Vyžádat</button>
                             </EditForm>
-                            @if (Pending(c))
+                            @if (_reqMap.TryGetValue(c.Hostname, out var req))
                             {
-                                <span class="pill warn" title="Čeká na další heartbeat agenta (do ~2 min)">vyžádáno @_reqMap[c.Hostname].ToLocalTime().ToString("HH:mm")</span>
+                                @if (c.LastSeen is null || req > c.LastSeen.Value)
+                                {
+                                    <span class="pill warn" title="Čeká na další heartbeat agenta (do ~2 min)">vyžádáno @req.ToLocalTime().ToString("HH:mm")</span>
+                                }
+                                else
+                                {
+                                    <span class="muted" title="Agent se ozval po vyžádání (@req.ToLocalTime().ToString("HH:mm"))">✓ ozval se @c.LastSeen.Value.ToLocalTime().ToString("HH:mm")</span>
+                                }
                             }
                         }
                     </td>
@@ -101,10 +110,7 @@ else
 
     // hostname (UPPER) → čas posledního vyžádání dat (z AppSettings cmd.report.*)
     private Dictionary<string, DateTime> _reqMap = new(StringComparer.OrdinalIgnoreCase);
-
-    // Vyžádáno, ale agent se od té doby ještě neozval (req novější než LastSeen).
-    private bool Pending(Computer c) =>
-        _reqMap.TryGetValue(c.Hostname, out var req) && (c.LastSeen is null || req > c.LastSeen.Value);
+    private string? _reqError;   // chyba zápisu vyžádání (Load() ho nevynuluje)
 
     private static bool Reports(Computer c) => !string.IsNullOrEmpty(c.AgentVersion) || c.LastSeen is not null;
 
@@ -157,13 +163,12 @@ else
             var rows = await db.AppSettings.Where(s => s.Key.StartsWith(ReqKeyPrefix)).ToListAsync();
             foreach (var r in rows)
             {
-                if (DateTime.TryParse(r.Value, null,
-                        System.Globalization.DateTimeStyles.RoundtripKind | System.Globalization.DateTimeStyles.AdjustToUniversal,
-                        out var t))
+                if (DateTime.TryParse(r.Value, System.Globalization.CultureInfo.InvariantCulture,
+                        System.Globalization.DateTimeStyles.RoundtripKind, out var t))
                     map[r.Key.Substring(ReqKeyPrefix.Length)] = t;
             }
         }
-        catch { /* AppSettings nemusí existovat – funkce degraduje na žádné vyžádání */ }
+        catch { /* AppSettings nemusí existovat – degraduje na žádné vyžádání */ }
         return map;
     }
 
@@ -194,8 +199,9 @@ else
                 else            row.Value = now;
             }
             await db.SaveChangesAsync();
+            _reqError = null;
         }
-        catch (Exception ex) { _error = ex.Message; }
+        catch (Exception ex) { _reqError = "Vyžádání se nepodařilo uložit: " + ex.Message; }
     }
 
     private static async Task<int> LoadSilentThreshold(AppDbContext db)
