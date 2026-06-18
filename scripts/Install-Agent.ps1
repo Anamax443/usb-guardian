@@ -71,10 +71,18 @@ if ($existing) {
 New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
 Write-Host "Kopiruji soubory (zachovavam Config\agent.config.local.json)..."
 # /XO nekopiruje starsi; /XF vynecha per-machine local config, aby se neprepsal
-$rc = robocopy $SourcePath $InstallDir /E /XF agent.config.local.json /R:2 /W:2 /NFL /NDL /NP
+robocopy $SourcePath $InstallDir /E /XF agent.config.local.json /R:2 /W:2 /NFL /NDL /NP | Out-Null
 if ($LASTEXITCODE -ge 8) {
     Write-Host "CHYBA: robocopy selhal (kod $LASTEXITCODE)." -ForegroundColor Red
     exit 1
+}
+
+# Fresh install: nasadit per-machine config ze zdroje (upgrade ho /XF zachova).
+$tgtLocal = Join-Path $InstallDir "Config\agent.config.local.json"
+$srcLocal = Join-Path $SourcePath "Config\agent.config.local.json"
+if ((Test-Path $srcLocal) -and -not (Test-Path $tgtLocal)) {
+    Copy-Item $srcLocal $tgtLocal -Force
+    Write-Host "Per-machine config nasazen ze zdroje (fresh install)."
 }
 
 # Skripty (watchdog) vedle agenta
