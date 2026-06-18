@@ -1,23 +1,22 @@
 // ============================================================
 // AgentDeployService.cs
 // Auto-enrollment: konzole (.213) periodicky najde stanice z AD
-// BEZ agenta a (volitelně) na ně agenta vzdáleně nasadí.
+// BEZ agenta. Sama je NEINSTALUJE (least-privilege – konzole nemá
+// admin na klientech). Místo toho zapíše seznam do targets souboru;
+// vlastní instalaci provede scheduled task na .213 pod dedikovaným
+// deploy účtem (viz docs/auto-deploy-setup.md).
 //
 // BEZPEČNOST:
 //   - deploy.enabled  – master vypínač (default FALSE).
 //   - deploy.dryRun   – default TRUE: jen REPORTUJE koho by nasadil
-//                       (ping reachability), nic nemění.
+//                       (ping reachability), targets soubor nepíše.
 //   - deploy.allowHosts – volitelný allowlist (CSV hostname); prázdné = všechny bez agenta.
 //   - deploy.maxPerRun  – throttle počtu stanic na jeden běh.
-//   - Naostro (enabled && !dryRun) spustí scripts\Deploy-AgentFleet.ps1
-//     POD IDENTITOU KONZOLE – ta musí mít lokální admin na klientech
-//     (dedikovaný deploy účet, viz HANDOFF). Bez práv deploy selže (audit).
+//   - deploy.targetsFile – kam zapsat cíle (čte je scheduled task).
 //   - Souhrn posledního běhu → AppSettings deploy.lastRun (pro UI).
 // ============================================================
 
-using System.Diagnostics;
 using System.Net.NetworkInformation;
-using System.Text;
 using Microsoft.EntityFrameworkCore;
 using USBGuardian.Api.Data;
 using USBGuardian.Api.Models;
@@ -76,13 +75,13 @@ public class AgentDeployService : BackgroundService
 
         var summary = cfg.DryRun
             ? await DryRunAsync(targets, ct)
-            : await DeployAsync(cfg, targets, ct);
+            : await WriteTargetsAsync(cfg, targets);
 
         await SaveSummaryAsync(db, summary, ct);
         return cfg.IntervalMinutes;
     }
 
-    // Dry-run: jen reachability (ping), nic nemění – bezpečné jako read-only.
+    // Dry-run: jen reachability (ping), nic nepíše – bezpečné jako read-only.
     private async Task<string> DryRunAsync(List<string> targets, CancellationToken ct)
     {
         var reachable = 0;
@@ -97,54 +96,23 @@ public class AgentDeployService : BackgroundService
         return msg;
     }
 
-    // Ostrý běh: spustí fleet skript pod identitou konzole.
-    private async Task<string> DeployAsync(DeployConfig cfg, List<string> targets, CancellationToken ct)
+    // Ostrý běh: zapíše cíle do souboru; instalaci provede scheduled task pod deploy účtem.
+    private async Task<string> WriteTargetsAsync(DeployConfig cfg, List<string> targets)
     {
-        if (string.IsNullOrWhiteSpace(cfg.ScriptPath) || !File.Exists(cfg.ScriptPath))
-            return $"{Stamp()} CHYBA: deploy.scriptPath nenastaven/nenalezen ({cfg.ScriptPath}).";
-        if (string.IsNullOrWhiteSpace(cfg.SourcePath) || !Directory.Exists(cfg.SourcePath))
-            return $"{Stamp()} CHYBA: deploy.sourcePath nenastaven/nenalezen ({cfg.SourcePath}).";
-
-        var list = string.Join(",", targets);
-        var psi = new ProcessStartInfo
-        {
-            FileName               = "powershell.exe",
-            UseShellExecute        = false,
-            RedirectStandardOutput = true,
-            RedirectStandardError  = true,
-            CreateNoWindow         = true,
-        };
-        psi.ArgumentList.Add("-NonInteractive");
-        psi.ArgumentList.Add("-NoProfile");
-        psi.ArgumentList.Add("-ExecutionPolicy"); psi.ArgumentList.Add("Bypass");
-        psi.ArgumentList.Add("-File");     psi.ArgumentList.Add(cfg.ScriptPath);
-        psi.ArgumentList.Add("-Targets");  psi.ArgumentList.Add(list);
-        psi.ArgumentList.Add("-SourcePath"); psi.ArgumentList.Add(cfg.SourcePath);
-        psi.ArgumentList.Add("-ThrottleLimit"); psi.ArgumentList.Add(cfg.MaxPerRun.ToString());
-
-        _logger.LogInformation("Auto-deploy ostrý běh: {Count} stanic ({List})", targets.Count, list);
-
-        var sb = new StringBuilder();
+        if (string.IsNullOrWhiteSpace(cfg.TargetsFile))
+            return $"{Stamp()} CHYBA: deploy.targetsFile nenastaven (kam zapsat cíle pro deploy task).";
         try
         {
-            using var p = Process.Start(psi)!;
-            var stdout = await p.StandardOutput.ReadToEndAsync(ct);
-            var stderr = await p.StandardError.ReadToEndAsync(ct);
-            await p.WaitForExitAsync(ct);
-            sb.Append(stdout);
-            if (!string.IsNullOrWhiteSpace(stderr)) sb.AppendLine("ERR: " + stderr);
-            // Poslední řádky souhrnu skriptu
-            var tail = string.Join(" | ", sb.ToString()
-                .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                .Where(l => l.Contains("OK") || l.Contains("FAIL") || l.Contains("OFFLINE") || l.Contains("SKIP"))
-                .TakeLast(8));
-            var msg = $"{Stamp()} deploy {targets.Count} stanic, exit={p.ExitCode}. {tail}";
+            var dir = Path.GetDirectoryName(cfg.TargetsFile);
+            if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+            await File.WriteAllLinesAsync(cfg.TargetsFile, targets);
+            var msg = $"{Stamp()} zapsáno {targets.Count} cílů do {cfg.TargetsFile}; instalaci provede scheduled task (deploy účet).";
             _logger.LogInformation("Auto-deploy {Msg}", msg);
             return msg;
         }
         catch (Exception ex)
         {
-            return $"{Stamp()} CHYBA spuštění deploy skriptu: {ex.Message}";
+            return $"{Stamp()} CHYBA zápisu targets souboru: {ex.Message}";
         }
     }
 
@@ -171,8 +139,7 @@ public class AgentDeployService : BackgroundService
         public bool DryRun = true;
         public int  IntervalMinutes = 30;
         public int  MaxPerRun = 10;
-        public string ScriptPath = "";
-        public string SourcePath = "";
+        public string TargetsFile = "";
         public List<string> AllowHosts = new();
 
         public static async Task<DeployConfig> LoadAsync(AppDbContext db)
@@ -182,10 +149,9 @@ public class AgentDeployService : BackgroundService
 
             var c = new DeployConfig
             {
-                Enabled    = string.Equals(await Get("deploy.enabled"), "true", StringComparison.OrdinalIgnoreCase),
-                DryRun     = !string.Equals(await Get("deploy.dryRun"),  "false", StringComparison.OrdinalIgnoreCase),
-                ScriptPath = await Get("deploy.scriptPath"),
-                SourcePath = await Get("deploy.sourcePath"),
+                Enabled     = string.Equals(await Get("deploy.enabled"), "true", StringComparison.OrdinalIgnoreCase),
+                DryRun      = !string.Equals(await Get("deploy.dryRun"),  "false", StringComparison.OrdinalIgnoreCase),
+                TargetsFile = await Get("deploy.targetsFile"),
             };
             if (int.TryParse(await Get("deploy.intervalMinutes"), out var iv) && iv > 0) c.IntervalMinutes = iv;
             if (int.TryParse(await Get("deploy.maxPerRun"), out var mp) && mp > 0)       c.MaxPerRun = mp;

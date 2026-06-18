@@ -51,8 +51,7 @@
     <dt>Interval (min)</dt><dd><input class="inp" style="min-width:90px" @bind="_deployInterval" /></dd>
     <dt>Max stanic / běh</dt><dd><input class="inp" style="min-width:90px" @bind="_deployMaxPerRun" /></dd>
     <dt>Allowlist hostů (čárkou; prázdné = vše bez agenta)</dt><dd><input class="inp" @bind="_deployAllow" placeholder="PC01, PC02 …" /></dd>
-    <dt>Source path (publish agenta na .213)</dt><dd><input class="inp" @bind="_deploySource" placeholder="C:\Apps\USBGuardianAgentPublish" /></dd>
-    <dt>Script path (Deploy-AgentFleet.ps1)</dt><dd><input class="inp" @bind="_deployScript" placeholder="C:\Apps\USBGuardianConsole\scripts\Deploy-AgentFleet.ps1" /></dd>
+    <dt>Targets file (čte scheduled task pod deploy účtem)</dt><dd><input class="inp" @bind="_deployTargets" placeholder="C:\Apps\USBGuardianConsole\deploy-targets.txt" /></dd>
     <dt>Poslední běh</dt><dd class="mono">@(string.IsNullOrEmpty(_deployLastRun) ? "—" : _deployLastRun)</dd>
 </dl>
 <div class="toolbar">
@@ -146,7 +145,7 @@ denní souhrn) je další krok.</p>
 
     private bool _deployEnabled, _deployDryRun = true, _deployBad;
     private string _deployInterval = "30", _deployMaxPerRun = "10",
-                   _deployAllow = "", _deploySource = "", _deployScript = "", _deployLastRun = "";
+                   _deployAllow = "", _deployTargets = "", _deployLastRun = "";
     private string? _deployMsg;
 
     protected override async Task OnInitializedAsync()
@@ -179,8 +178,7 @@ denní souhrn) je další krok.</p>
             var dmi = await Get(db, "deploy.intervalMinutes"); _deployInterval  = string.IsNullOrEmpty(dmi) ? "30" : dmi;
             var dmp = await Get(db, "deploy.maxPerRun");       _deployMaxPerRun = string.IsNullOrEmpty(dmp) ? "10" : dmp;
             _deployAllow    = await Get(db, "deploy.allowHosts");
-            _deploySource   = await Get(db, "deploy.sourcePath");
-            _deployScript   = await Get(db, "deploy.scriptPath");
+            _deployTargets  = await Get(db, "deploy.targetsFile");
             _deployLastRun  = await Get(db, "deploy.lastRun");
 
             _dbError = null;
@@ -248,8 +246,7 @@ denní souhrn) je další krok.</p>
             await Set(db, "deploy.intervalMinutes", iv.ToString());
             await Set(db, "deploy.maxPerRun",       mp.ToString());
             await Set(db, "deploy.allowHosts",      (_deployAllow ?? "").Trim());
-            await Set(db, "deploy.sourcePath",      (_deploySource ?? "").Trim());
-            await Set(db, "deploy.scriptPath",      (_deployScript ?? "").Trim());
+            await Set(db, "deploy.targetsFile",     (_deployTargets ?? "").Trim());
             _deployMsg = "Uloženo."; _deployBad = false;
         }
         catch (Exception ex) { _deployMsg = "Chyba: " + ex.Message; _deployBad = true; }
