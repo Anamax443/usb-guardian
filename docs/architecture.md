@@ -203,19 +203,43 @@ dotnet run                 (server)
 - HTTPS certifikát: `scripts\New-Certificate.ps1` na produkčním serveru
 - AD skupiny: `USB-Guardian-Clients` – stroje s nasazeným agentem
 
+## Šifrovaná komunikace agent ↔ API (self-contained TLS)
+
+API si při startu vygeneruje/persistne vlastní self-signed cert (`SelfCert.cs`, **`MachineKeySet`** –
+běží i pod gMSA, NE EphemeralKeySet – s ní Schannel neudělá server handshake), Kestrel bind `:5443`.
+Bez CA, bez cert store. Agent ho ověří **pinningem otisku** (`TlsClient.cs`, `tls.pinnedThumbprint`)
+→ šifrované i ověřené. Otisk = `GET /api/cert-info` / log API. Přístup k API přes policy
+`USBGuardianClients` (členství v `Authorization:AllowedGroups`).
+
+## Centrální nastavení a alerty (konzole)
+
+Tabulka `AppSettings` (key/value, migrace 06) spravovaná z Nastavení; `AccessCache` singleton:
+- `policy.enforce` – vynucovat jen schválená média (agent začne respektovat po heartbeat distribuci – pending).
+- `access.users` / `access.groups` – whitelist přístupu do konzole (`appsettings` = lockout-safe bootstrap).
+- `email.*` – SMTP relay (M365 Direct Send) + `IncidentAlertService` (background notifier: souhrn nových
+  neschválených incidentů, baseline při 1. běhu, interval/throttle; `EmailSender`).
+
+## Konzole – funkce stránek
+
+- **Přehled** – dlaždicový souhrn napříč listy + filtr (období/akce/fulltext) + kumulace (GroupBy přes
+  anonymní typ → in-memory map) + sloupec „Schváleno" dle aktivního whitelistu.
+- **Stanice** – AD inventář, filtr, cesta v AD (OU), ikona komunikace (dle čerstvosti `LastSeen`).
+- **Whitelist** – serial-only zadání + backfill VID/PID z incidentů + import + inline edit + `IsActive` checkbox.
+- **Dokumentace** – render `.md` (Markdig) jako tisknutelné HTML, rozcestník.
+
 ## Pending (roadmap)
 
 | Položka | Popis |
 |---------|-------|
-| Vzdálená instalace agenta | Na stanice bez agenta (seznam z AD sync); WinRM kanál, just-in-time creds, audit, žádné uložené admin creds |
-| Webová správa whitelistu | Přidání schváleného média z konzole → DB; **staging + offline podpis** (privátní klíč nikdy na serveru) |
-| Hardening konzole | gMSA místo LocalSystem; dedikovaná skupina `USB-Guardian-Admins`; HTTPS; přesun API z SQL-04 na .213 (plný dvouvrstvý model) |
+| Zavřít HTTP 5050 | NIS2 – jen HTTPS (firewall block / přebindovat API na SQL-04) |
+| Vzdálená instalace agenta | Na stanice bez agenta (seznam z AD sync); WinRM, just-in-time creds, audit, žádné uložené creds |
+| Podpisový/publikační workflow | Whitelist staging → offline podpis → publikace; odemkne vynucování + blocklist „naostro" k agentům |
+| Per-serial blocklist | Zákaz konkrétního média, near-real-time k agentům (přednost před whitelistem) |
+| Hardening konzole | gMSA místo LocalSystem; dedikovaná `USB-Guardian-Admins`; HTTPS konzole; přesun API na .213 |
 | Toast Privilege Separation | Helper process v user session – jednosměrné Pipes SYSTEM → user |
-| Email notifikace | Microsoft Graph API – alerting bez SMTP závislosti |
 
-> Hotovo (dřív pending): **Admin UI** – serverová Blazor konzole (Přehled, Stanice, Nastavení,
-> Dokumentace) + AD sync inventář stanic. Viz „Serverová admin konzole".
-| HTTPS produkce | Spustit `scripts\New-Certificate.ps1` na `B-S-W-SQL-04` |
+> Hotovo (dřív pending): Admin UI (Blazor konzole + AD sync), **šifrovaná komunikace agent↔API**
+> (self-cert + pinning), centrální nastavení (vynucování/přístup/e-mail + alerty).
 
 ## Watchdog – Task Scheduler
 

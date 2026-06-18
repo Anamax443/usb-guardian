@@ -18,14 +18,15 @@ Serverová konzole agreguje data, drží inventář stanic z AD a ukazuje, kam c
 | | |
 |---|---|
 | **Doména** | `axinetwork.loc` |
-| **DB** | SQL Server `B-S-W-SQL-04`, databáze `USBGuardian` (skripty `database/01–05` aplikované) |
-| **API** | běží na `B-S-W-SQL-04`, `:5050` (HTTP) / `:5443` (HTTPS), Windows služba, gMSA `AXINETWORK\gmsa-SQL$` |
-| **Admin konzole** | **živá** `http://10.8.2.213:4200/` (`B-S-W-MIKOS`), Windows služba `USBGuardianConsole`, runtime `C:\Apps\USBGuardianConsole`, self-contained |
-| **Účet konzole** | zatím **LocalSystem** = `AXINETWORK\B-S-W-MIKOS$` (least-priv SQL grant: read vše + write Computers/Whitelist*) |
-| **Autorizace konzole** | AD skupina `AXINETWORK\SQL Admins2` + whitelist `AXINETWORK\trnkam` |
-| **AD sync** | zapnutý, interval 60 min + na vyžádání; živě **211 stanic v AD, 210 bez agenta** |
-| **Live commit** | `a13f62d` (zobrazený v patičce konzole) |
-| **Agent (test)** | stanice `.181` (TRNKAMW11); první rollout target `TRNKAMW11N` (dynamická IP) |
+| **DB** | SQL Server `B-S-W-SQL-04` (= `10.8.2.225`), databáze `USBGuardian`, skripty `database/01–06` aplikované |
+| **API** | `B-S-W-SQL-04`, Windows služba, gMSA `AXINETWORK\gmsa-SQL$`; **HTTPS `:5443`** (self-signed cert, **PIN `E6F6B4FCE0BB627F564E85D6509DE7C4B82CF2F0`**) + HTTP `:5050` (NIS2: zavřít) |
+| **Admin konzole** | **živá** `http://10.8.2.213:4200/` (`B-S-W-MIKOS`), služba `USBGuardianConsole`, `C:\Apps\USBGuardianConsole`, self-contained |
+| **Účet konzole** | **LocalSystem** = `AXINETWORK\B-S-W-MIKOS$` (SQL grant: read vše + write Computers/WhitelistDevices/WhitelistVersions/AppSettings) |
+| **Autorizace konzole** | AD `AXINETWORK\SQL Admins2` + whitelist `AXINETWORK\trnkam` (+ DB seznam z Nastavení) |
+| **Šifrování agent↔API** | HTTPS + **pinning otisku** (bez CA) — ověřeno end-to-end (heartbeat OK z .181) |
+| **AD sync** | zapnutý 60 min + on-demand; **211 v AD, ~210 bez agenta** |
+| **Live commit (konzole)** | `4e3ef32` (v patičce konzole; ověř přes `/api/version`) |
+| **Agent (test)** | `.181` (TRNKAMW11) – `syncUrl=https://B-S-W-SQL-04:5443` + pin; 1. rollout target `TRNKAMW11N` (dyn. IP) |
 
 ## 3. Klíčová rozhodnutí (proč)
 
@@ -37,7 +38,14 @@ Serverová konzole agreguje data, drží inventář stanic z AD a ukazuje, kam c
 - **Lokální konzole agenta přes `HttpListener`**, ne Kestrel – agent nepotřebuje ASP.NET Core runtime.
 - **Klíčování na hostname, ne IP** – stanice mají dynamické IP.
 - **Privátní RSA klíč whitelistu nikdy na serveru** – publikace podepsané verze = offline krok (NIS2).
+- **Šifrování bez CA** – API si vyrobí vlastní self-signed cert (`MachineKeySet`, NE EphemeralKeySet!),
+  agent ho ověří **pinningem otisku**. Nezávislé na firemní CA / externích certech.
+- **Centrální nastavení v DB** (`AppSettings`) – vynucování, přístup, e-mail; agent zatím jede dle lokálního
+  `policy.mode` (distribuce přes heartbeat je další krok).
 - **Portabilita** – žádné firemní hodnoty v kódu; vše v `*.local.json`, doména z `new DirectoryEntry()`.
+
+> Opravené latentní bugy v repu: chybějící authorization policy `USBGuardianClients` (controllery vracely 500);
+> `EphemeralKeySet → MachineKeySet` (jinak Schannel neudělá server TLS handshake).
 
 ## 4. Deploy konzole (ručně, z TRNKAMW11)
 
@@ -55,13 +63,18 @@ Firewall `:4200` byl vytvořen přes DCOM/CIM. Konfigurace na serveru:
 
 ## 5. Další kroky / pending
 
-- **Vzdálená instalace agenta** na 210 stanic bez agenta (WinRM – `Enable-PSRemoting` na klientech;
-  nejdřív prototypovat kanál na `TRNKAMW11N`). Žádné uložené admin creds, audit, just-in-time.
-- **Webová správa whitelistu** + podpisový workflow (staging → offline podpis → publikace).
-- **Hardening:** gMSA místo LocalSystem, dedikovaná skupina `USB-Guardian-Admins` místo `SQL Admins2`,
-  HTTPS pro konzoli, přesun API z SQL-04 na .213.
-- **Úklid:** nepoužitý `Microsoft.Data.Sqlite` v agentu (persistence je JSON); stray složka
-  `server/USBGuardianAPI/`; vadný GUID format `:N[..8]` v `NotificationService.ShowWarning`.
+- **Zavřít HTTP 5050** na SQL-04 (jen HTTPS) – NIS2. (Potřebuje SQL-04: firewall block, nebo přebindovat API.)
+- **Distribuce + vzdálená instalace agenta** na ~210 stanic bez agenta. Agent config = `syncUrl https://…:5443`
+  + `tls.pinnedThumbprint`. Vzdálená instalace přes WinRM (`Enable-PSRemoting` na klientech), bez uložených
+  admin creds, audit, just-in-time; nejdřív prototypovat kanál na `TRNKAMW11N`.
+- **Podpisový/publikační workflow** whitelistu (staging → offline podpis → publikace) → odemkne whitelist,
+  **vynucování** i **blocklist** „naostro" k agentům (potřebují podepsanou distribuci + propagaci přes heartbeat).
+- **Per-serial blocklist** (zákaz konkrétního média, near-real-time k agentům – přednost před whitelistem).
+- **E-mailové alerty**: konfigurace + odesílání hotové (`IncidentAlertService`); fungují, jakmile dorazí nové incidenty.
+- **Hardening:** gMSA místo LocalSystem pro konzoli, dedikovaná `USB-Guardian-Admins` místo `SQL Admins2`,
+  HTTPS pro konzoli, přesun API z SQL-04 na .213 (dvouvrstvý princip).
+- **Úklid:** nepoužitý `Microsoft.Data.Sqlite` v agentu; stray složka `server/USBGuardianAPI/`;
+  vadný GUID format `:N[..8]` v `NotificationService.ShowWarning`.
 
 ## 6. Mapa dokumentace
 

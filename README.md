@@ -14,20 +14,18 @@ technické opatření pro **NIS2 / zákon 181/2014 Sb. / ISO 27001**.
 
 | Fáze | Popis | Stav |
 |------|-------|------|
-| 1 | Agent – WMI detekce, warn mode, Toast | ✅ |
-| 2 | Block mode – DeviceIoControl IOCTL | ✅ |
-| 3 | API server – ASP.NET Core, SQL Server, gMSA, Kerberos | ✅ |
-| 4 | RSA-4096 podpis whitelistu – fail-secure | ✅ |
-| 5 | Incident queue – bounded Channel, jitter, retry 503 | ✅ |
-| 6 | HTTPS – Kestrel TLS, validace certifikátu agentem | ✅ |
-| 7 | Log role tagging `[KLIENT]`/`[SERVER]` | ✅ |
+| 1–7 | Agent (WMI/warn/block), API+SQL+gMSA+Kerberos, RSA-4096 podpis whitelistu, incident queue, log tagging | ✅ |
 | 8 | **Lokální admin konzole agenta** (HttpListener, loopback, read-only) | ✅ |
-| 9 | **Serverová admin konzole** (Blazor na .213): Přehled, Stanice, Nastavení, Dokumentace | ✅ |
-| 10 | **AD sync** – inventář stanic z Active Directory + reconciliation (kdo nemá agenta) | ✅ |
-| – | Vzdálená instalace agenta na stanice bez něj (WinRM) | 🔜 Plánováno |
-| – | Webová správa whitelistu + podpisový workflow | 🔜 Plánováno |
-| – | gMSA pro konzoli, dedikovaná skupina `USB-Guardian-Admins`, HTTPS konzole | 🔜 Hardening |
-| – | Toast Privilege Separation, Email notifikace (Graph) | 🔜 Plánováno |
+| 9 | **Serverová admin konzole** (Blazor na .213) dle **AXIMA UI standardu** (dark/light, patička, /api/version) | ✅ |
+| 10 | **AD sync** – inventář stanic z AD + reconciliation (kdo nemá agenta) + cesta v AD; ikona komunikace | ✅ |
+| 11 | **Přehled** – dlaždicový souhrn napříč listy, filtr (období/akce/hledání), kumulace, sloupec „Schváleno" | ✅ |
+| 12 | **Whitelist** – zadání jen sériovým číslem + autofill z incidentů + import + editace polí + aktivní checkbox | ✅ |
+| 13 | **Centrální nastavení (DB)** – vynucování, whitelist přístupu do konzole, e-mail + alerty nad incidenty | ✅ |
+| 14 | **Šifrovaná komunikace agent↔API** – self-signed cert (bez CA, MachineKeySet) + pinning otisku | ✅ |
+| – | Zavřít nešifrované HTTP 5050 (jen HTTPS) | 🔜 NIS2 |
+| – | Distribuce + **vzdálená instalace agenta** (WinRM) na stanice bez něj | 🔜 |
+| – | **Podpisový/publikační workflow** whitelistu → vynucování + blocklist „naostro" k agentům | 🔜 |
+| – | Per-serial **blocklist** (zákaz konkrétního média, near-real-time k agentům) | 🔜 |
 
 ## Architektura
 
@@ -63,19 +61,30 @@ Detail viz [docs/architecture.md](docs/architecture.md). Předávka a živý sta
 
 ## Serverová admin konzole (Blazor)
 
-Běží na app serveru (`10.8.2.213`), čte/píše SQL-04. Stránky:
+Běží na app serveru (`10.8.2.213`), čte/píše SQL-04, **AXIMA UI standard** (archetyp A – IT-ops:
+dark/light přepínač `axima.theme` bez FOUC, tisk = light, semafor stavů). Stránky:
 
-- **Přehled** – incidenty za 30 dní (Blokováno / Varování) + poslední události vč. identifikátorů
-  média **VID / PID / sériové číslo** (hodnoty pro whitelist).
-- **Stanice** – inventář počítačů z AD; dlaždice filtrují (vše / hlásí agenta / chybí agent);
-  cesta v AD (OU) vedle hostname; tlačítko **Aktualizovat z AD**.
-- **Nastavení** – efektivní konfigurace (read-only; editace přes `appsettings.local.json`).
-- **Dokumentace** – nápověda v prohlížeči.
+- **Přehled** – dlaždicový souhrn napříč listy (Stanic v AD / Chybí agent / Schválených médií /
+  Deaktivovaných / Incidentů / Blokováno / Varování, prokliky na listy). **Filtr** (období
+  30/90/rok/vše, akce, fulltext) + **kumulace** (seskupení médium+stanice+uživatel s počtem) +
+  identifikátory **VID/PID/sériové číslo** + sloupec **„Schváleno"** (aktuálně dle whitelistu).
+- **Stanice** – inventář z AD; dlaždice filtrují (vše / hlásí / chybí agent), **hledání**,
+  **cesta v AD** (OU) vedle hostname, **ikona komunikace** (zelená ≤60 min / žlutá mlčí / šedá
+  žádný kontakt), tlačítko **Aktualizovat z AD**.
+- **Whitelist** – schválená média; **stačí zadat sériové číslo** (VID/PID/název se dotáhnou
+  z incidentů, i zpětně), **hromadný import**, **editace polí** inline, **checkbox Aktivní**
+  (dočasná deaktivace bez mazání).
+- **Nastavení** (centrální, v DB) – **vynucování** (vyžadovat jen schválená média), **whitelist
+  přístupu** do konzole (uživatelé/skupiny; appsettings = lockout-safe bootstrap), **e-mail**
+  (SMTP relay/Direct Send + test) a **alerty nad incidenty** (interval), AD sync / DB / build info.
+- **Dokumentace** – rozcestník + **tisknutelné HTML** stránky (render `.md` přes Markdig, žádné
+  externí odkazy).
 
-Patička: živé hodiny + commit hash buildu.
+Patička (servisní řádek dle standardu): **živé hodiny + klikací commit hash + DB health + © Milan Trnka**.
+Kontrakt **`GET /api/version`**.
 
-**Autorizace:** Windows Auth, dovnitř jen členové skupin `Authorization:AdminGroups` nebo účty
-v `Authorization:AllowedUsers`. Pro tiché SSO chodit přes hostname, ne IP.
+**Autorizace:** Windows Auth, dovnitř jen členové `Authorization:AdminGroups` / účty
+`Authorization:AllowedUsers` (appsettings) **nebo** DB seznam z Nastavení. Pro tiché SSO chodit přes hostname, ne IP.
 
 ### AD sync
 
@@ -91,9 +100,24 @@ na `127.0.0.1`, **admin-only, read-only** – živý stav agenta (whitelist, WMI
 média) pro ověření funkčnosti a offline diagnostiku. Použit `HttpListener` (ne Kestrel), aby agent
 nepotřeboval ASP.NET Core runtime.
 
+## Šifrovaná komunikace agent ↔ API (self-contained TLS)
+
+NIS2 vyžaduje šifrovaný přenos. Řešeno **bez závislosti na CA / externím certu**:
+
+- **API** si při startu vygeneruje/persistne **vlastní self-signed cert** (`SelfCert.cs`,
+  `C:\ProgramData\USBGuardian\api-tls.pfx`), Kestrel ho nabinduje na `:5443`. Klíč je
+  **`MachineKeySet`** (běží i pod gMSA, Schannel ho použije). Otisk (PIN) zaloguje + vrací
+  `GET /api/cert-info`.
+- **Agent** server **nepinuje přes CA, ale přes otisk** (`tls.pinnedThumbprint` v configu,
+  `TlsClient.cs`) → šifrované **i** ověřené, bez CA. Bez pinu lze `validateServerCertificate=false`
+  (jen vývoj) nebo CA validace.
+
+Agent prod config: `whitelist.syncUrl = https://SERVER:5443` + `tls.pinnedThumbprint = <otisk z /api/cert-info>`.
+
 ## Konfigurace
 
-Firemně specifické hodnoty jsou **jen** v `*.local.json` (gitignored). Šablony `*.example` / s
+Firemně specifické hodnoty jsou **jen** v `*.local.json` (gitignored). Centrální provozní
+nastavení (vynucování, přístup, e-mail) je v **DB** (`AppSettings`), spravované z Nastavení. Šablony `*.example` / s
 placeholdery jsou v repu.
 
 | Komponenta | Šablona (v repu) | Reálné (gitignored) |
@@ -128,6 +152,7 @@ SQL skripty v `database/` (spustit v pořadí):
 | `03_add_sourcefile.sql` | SourceFile + DisconnectedAt |
 | `04_adsync_columns.sql` | LastSeen nullable + OperatingSystem / InActiveDirectory / AdSyncedAt |
 | `05_adpath.sql` | AdPath (cesta v AD) |
+| `06_appsettings.sql` | AppSettings (centrální nastavení: vynucování, přístup, e-mail) + grant |
 
 ## Rychlý start (vývoj)
 

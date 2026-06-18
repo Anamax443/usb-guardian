@@ -14,20 +14,18 @@ Unapproved media are warned or blocked. Designed as a technical control for
 
 | Phase | Description | Status |
 |------|-------|------|
-| 1 | Agent – WMI detection, warn mode, Toast | ✅ |
-| 2 | Block mode – DeviceIoControl IOCTL | ✅ |
-| 3 | API server – ASP.NET Core, SQL Server, gMSA, Kerberos | ✅ |
-| 4 | RSA-4096 whitelist signature – fail-secure | ✅ |
-| 5 | Incident queue – bounded Channel, jitter, retry 503 | ✅ |
-| 6 | HTTPS – Kestrel TLS, agent certificate validation | ✅ |
-| 7 | Log role tagging `[KLIENT]`/`[SERVER]` | ✅ |
+| 1–7 | Agent (WMI/warn/block), API+SQL+gMSA+Kerberos, RSA-4096 whitelist signature, incident queue, log tagging | ✅ |
 | 8 | **Agent local admin console** (HttpListener, loopback, read-only) | ✅ |
-| 9 | **Server admin console** (Blazor on .213): Overview, Stations, Settings, Docs | ✅ |
-| 10 | **AD sync** – station inventory from Active Directory + reconciliation (who lacks the agent) | ✅ |
-| – | Remote agent install onto stations without it (WinRM) | 🔜 Planned |
-| – | Web whitelist management + signing workflow | 🔜 Planned |
-| – | gMSA for console, dedicated `USB-Guardian-Admins` group, console HTTPS | 🔜 Hardening |
-| – | Toast Privilege Separation, email notifications (Graph) | 🔜 Planned |
+| 9 | **Server admin console** (Blazor on .213) per **AXIMA UI standard** (dark/light, footer, /api/version) | ✅ |
+| 10 | **AD sync** – station inventory from AD + reconciliation (who lacks the agent) + AD path; communication icon | ✅ |
+| 11 | **Overview** – cross-page tile summary, filter (period/action/search), aggregation, "Approved" column | ✅ |
+| 12 | **Whitelist** – entry by serial number only + autofill from incidents + import + inline field edit + active checkbox | ✅ |
+| 13 | **Central settings (DB)** – enforcement, console access whitelist, e-mail + incident alerts | ✅ |
+| 14 | **Encrypted agent↔API comms** – self-signed cert (no CA, MachineKeySet) + thumbprint pinning | ✅ |
+| – | Close unencrypted HTTP 5050 (HTTPS only) | 🔜 NIS2 |
+| – | Distribution + **remote agent install** (WinRM) onto stations without it | 🔜 |
+| – | **Signing/publishing workflow** for the whitelist → enforcement + blocklist live to agents | 🔜 |
+| – | Per-serial **blocklist** (ban a specific device, near-real-time to agents) | 🔜 |
 
 ## Architecture
 
@@ -40,10 +38,10 @@ Three components, push model (agent → API), two-tier server (logic on the app 
 │  WMI detection     │  push  HTTPS  │ (Blazor :4200)      │ read/ │ DB USBGuardian   │
 │  whitelist check   ├──────────────►│  Overview/Stations  │ write │  Incidents       │
 │  warn / block      │   ┌───────────┤  AD sync ◄── AD     ├──────►│  Computers       │
-│  local console     │   │  push     │  Settings / Docs    │       │  WhitelistDevices│
-│  (loopback :5080)  │   │           └────────────────────┘       │  WhitelistVersions│
+│  local console     │   │  push     │  Whitelist/Settings │       │  WhitelistDevices│
+│  (loopback :5080)  │   │           └────────────────────┘       │  AppSettings ... │
 └────────────────────┘   │           ┌────────────────────┐       └──────────────────┘
-                         └──────────►│ API (:5050/:5443)   ├──read/write──────▲
+                         └──────────►│ API (:5443 HTTPS)   ├──read/write──────▲
                                      │  incident ingestion  │                  │
                                      │  whitelist delivery   │──────────────────┘
                                      └────────────────────┘
@@ -63,59 +61,65 @@ Details: [docs/architecture.md](docs/architecture.md). Handoff & live state: [HA
 
 ## Server admin console (Blazor)
 
-Runs on the app server (`10.8.2.213`), reads/writes SQL-04. Pages:
+Runs on the app server (`10.8.2.213`), reads/writes SQL-04, **AXIMA UI standard** (archetype A – IT-ops:
+dark/light toggle `axima.theme` without FOUC, print = light, status traffic-lights). Pages:
 
-- **Overview** – 30-day incidents (Blocked / Warned) + recent events incl. device identifiers
-  **VID / PID / serial number** (the whitelist values).
-- **Stations** – computer inventory from AD; tiles filter (all / reporting / missing agent);
-  AD path (OU) next to hostname; **Refresh from AD** button.
-- **Settings** – effective configuration (read-only; edited via `appsettings.local.json`).
-- **Documentation** – in-browser help.
+- **Overview** – cross-page tile summary (Stations in AD / Missing agent / Approved media / Deactivated /
+  Incidents / Blocked / Warned, click-through). **Filter** (period 30/90/year/all, action, full-text) +
+  **aggregation** (group by media+station+user with count) + device identifiers **VID/PID/serial** +
+  **"Approved"** column (currently per whitelist).
+- **Stations** – inventory from AD; tiles filter (all / reporting / missing agent), **search**,
+  **AD path** (OU) next to hostname, **communication icon** (green ≤60 min / amber silent / grey no contact),
+  **Refresh from AD** button.
+- **Whitelist** – approved media; **enter just the serial number** (VID/PID/name autofill from incidents,
+  retroactively too), **bulk import**, **inline field edit**, **Active checkbox** (temporary deactivation).
+- **Settings** (central, in DB) – **enforcement** (require only approved media), **console access whitelist**
+  (users/groups; appsettings = lockout-safe bootstrap), **e-mail** (SMTP relay/Direct Send + test) and
+  **incident alerts** (interval), AD sync / DB / build info.
+- **Documentation** – hub + **printable HTML** pages (render `.md` via Markdig, no external links).
 
-Footer: live clock + build commit hash.
+Footer (service line per standard): **live clock + clickable commit hash + DB health + © Milan Trnka**.
+Contract **`GET /api/version`**.
 
-**Authorization:** Windows Auth; access only for members of `Authorization:AdminGroups` or accounts
-in `Authorization:AllowedUsers`. For silent SSO use the hostname, not the IP.
+**Authorization:** Windows Auth; access only for `Authorization:AdminGroups` / `Authorization:AllowedUsers`
+(appsettings) **or** the DB list from Settings. For silent SSO use the hostname, not the IP.
 
 ### AD sync
 
-A background service (also on demand via a button) reads computers from Active Directory and writes
-them into the `Computers` table. The key is the **hostname** (not the IP – stations have dynamic
-addresses). The domain is taken automatically from the server (`new DirectoryEntry()`, nothing
-hardcoded). Reconciliation: *in AD ⨯ reporting an agent* → the list of stations missing the agent.
+A background service (also on demand via a button) reads computers from Active Directory and writes them
+into `Computers`. Keyed by **hostname** (not IP – stations have dynamic addresses). Domain taken
+automatically from the server (`new DirectoryEntry()`, nothing hardcoded). Reconciliation: *in AD ⨯
+reporting an agent* → list of stations missing the agent.
 
 ## Agent local admin console
 
-Optional (off by default), `localConsole.enabled` in `agent.config.local.json`. `HttpListener`
-on `127.0.0.1`, **admin-only, read-only** – live agent state (whitelist, WMI, queue, connected
-media) for functional verification and offline diagnostics. Uses `HttpListener` (not Kestrel) so
-the agent does not need the ASP.NET Core runtime.
+Optional (off by default), `localConsole.enabled` in `agent.config.local.json`. `HttpListener` on
+`127.0.0.1`, **admin-only, read-only** – live agent state. Uses `HttpListener` (not Kestrel) so the agent
+needs no ASP.NET Core runtime.
+
+## Encrypted agent ↔ API comms (self-contained TLS)
+
+NIS2 requires encrypted transport. Solved **without any CA / external cert dependency**:
+
+- **API** generates/persists its **own self-signed cert** at startup (`SelfCert.cs`,
+  `C:\ProgramData\USBGuardian\api-tls.pfx`), Kestrel binds it on `:5443`. The key is **`MachineKeySet`**
+  (works under gMSA; usable by Schannel). It logs the thumbprint (PIN) and `GET /api/cert-info` returns it.
+- **Agent** does not pin via a CA but via the **thumbprint** (`tls.pinnedThumbprint` in config,
+  `TlsClient.cs`) → encrypted **and** authenticated, no CA. Without a pin you can use
+  `validateServerCertificate=false` (dev only) or CA validation.
+
+Agent prod config: `whitelist.syncUrl = https://SERVER:5443` + `tls.pinnedThumbprint = <thumbprint from /api/cert-info>`.
 
 ## Configuration
 
-Company-specific values live **only** in `*.local.json` (gitignored). Templates with placeholders
-are in the repo.
+Company-specific values live **only** in `*.local.json` (gitignored). Central operational settings
+(enforcement, access, e-mail) live in the **DB** (`AppSettings`), managed from Settings.
 
 | Component | Template (in repo) | Real (gitignored) |
 |-----------|------------------|---------------------|
 | Agent | `agent/USBGuardian/Config/agent.config.json` | `agent.config.local.json` |
 | API | `server/USBGuardian.Api/appsettings.json` | `appsettings.local.json` |
 | Console | `server/USBGuardian.Admin/appsettings.local.json.example` | `appsettings.local.json` |
-
-### Console – `appsettings.local.json`
-
-```json
-{
-  "ConnectionStrings": { "DefaultConnection": "Server=tcp:SQL-SERVER,1433;Database=USBGuardian;Integrated Security=true;TrustServerCertificate=true;" },
-  "Authorization": {
-    "AdminGroups": [ "DOMAIN\\USB-Guardian-Admins" ],
-    "AllowedUsers": [ "DOMAIN\\admin.name" ],
-    "DevAllowAll": false
-  },
-  "Kestrel": { "Endpoints": { "Http": { "Url": "http://0.0.0.0:4200" } } },
-  "AdSync": { "Enabled": true, "IntervalMinutes": 60, "SearchBase": "", "IncludeDisabled": false }
-}
-```
 
 ## Database
 
@@ -128,72 +132,39 @@ SQL scripts in `database/` (run in order):
 | `03_add_sourcefile.sql` | SourceFile + DisconnectedAt |
 | `04_adsync_columns.sql` | LastSeen nullable + OperatingSystem / InActiveDirectory / AdSyncedAt |
 | `05_adpath.sql` | AdPath (AD path) |
-
-## Quick start (dev)
-
-```powershell
-# Agent (as Administrator for block mode)
-cd agent\USBGuardian
-dotnet run -- --console
-
-# API
-cd server\USBGuardian.Api
-dotnet run
-
-# Admin console
-cd server\USBGuardian.Admin
-dotnet run
-```
+| `06_appsettings.sql` | AppSettings (central settings: enforcement, access, e-mail) + grant |
 
 ## Deploying the console to the app server (.213)
 
 ```powershell
-# Build (self-contained – the target server needs no .NET)
 dotnet publish server\USBGuardian.Admin -c Release -r win-x64 --self-contained -o D:\deploy\USBGuardianConsole
-
-# Copy over SMB + service via remote sc.exe (no WinRM needed)
 robocopy D:\deploy\USBGuardianConsole \\10.8.2.213\C$\Apps\USBGuardianConsole /E /XF appsettings.local.json
-# create \\10.8.2.213\C$\Apps\USBGuardianConsole\appsettings.local.json (see .example)
+# create appsettings.local.json (see .example)
 sc.exe \\10.8.2.213 create USBGuardianConsole binPath= "C:\Apps\USBGuardianConsole\USBGuardian.Admin.exe" start= auto
 sc.exe \\10.8.2.213 start USBGuardianConsole
-```
-
-Least-privilege SQL grant for the console account on SQL-04:
-
-```sql
-CREATE LOGIN [DOMAIN\B-S-W-MIKOS$] FROM WINDOWS;
-USE USBGuardian;
-CREATE USER [DOMAIN\B-S-W-MIKOS$] FOR LOGIN [DOMAIN\B-S-W-MIKOS$];
-ALTER ROLE db_datareader ADD MEMBER [DOMAIN\B-S-W-MIKOS$];
-GRANT INSERT, UPDATE, DELETE ON dbo.Computers TO [DOMAIN\B-S-W-MIKOS$];
-GRANT INSERT, UPDATE ON dbo.WhitelistDevices TO [DOMAIN\B-S-W-MIKOS$];
-GRANT INSERT, UPDATE ON dbo.WhitelistVersions TO [DOMAIN\B-S-W-MIKOS$];
 ```
 
 ## Security
 
 - RSA-4096 signed whitelist – the agent rejects a forged whitelist (private key **never on the server**).
-- TLS validation of the server certificate (can be disabled for dev).
-- Windows Auth (Kerberos) – agents via machine account; console via admin group / whitelist.
+- Encrypted agent↔API via self-signed cert + **thumbprint pinning** (no CA).
+- Windows Auth (Kerberos) – agents via machine account; console via admin group / whitelist (DB-managed too).
 - gMSA for SQL – no password in configuration.
-- Least-privilege SQL grant for the console (read everything, write only Computers + whitelist).
+- Least-privilege SQL grant for the console.
 - `*.local.json` gitignored.
-- Both the agent and server consoles: loopback / admin-only / read-only per their role.
 
 ## Repo structure
 
 ```
 usb-guardian/
 ├── agent/USBGuardian/        # .NET 8 Windows Service agent
-│   ├── LocalConsole/         # local admin console (HttpListener)
-│   ├── Config/ Models/ Security/
+│   ├── LocalConsole/  Security/ (TlsClient) Config/ Models/
 ├── server/
-│   ├── USBGuardian.Api/      # ASP.NET Core API (incident ingestion, whitelist)
+│   ├── USBGuardian.Api/      # ASP.NET Core API (ingestion, whitelist, SelfCert TLS)
 │   └── USBGuardian.Admin/    # Blazor Server admin console (.213)
-│       ├── Components/        # Pages (Home, Computers, Settings, Docs), Layout
-│       ├── AdSync/            # AdSyncRunner + AdSyncService
+│       ├── Components/ (Pages, Layout)  AdSync/  Security/  Notifications/
 │       └── appsettings.local.json.example
-├── database/                 # 01–05 SQL scripts
+├── database/                 # 01–06 SQL scripts
 ├── scripts/                  # certificates, watchdog, ToastHelper
 ├── docs/architecture.md
 ├── README.md / README.en.md
