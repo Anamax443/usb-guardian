@@ -2,7 +2,8 @@
 // SelfCert.cs
 // Self-contained TLS: API si vygeneruje a persistne vlastní
 // self-signed certifikát (bez CA, bez cert store, bez ACL).
-// Klíč drží v paměti (EphemeralKeySet) → běží i pod gMSA.
+// Klíč v machine key store (MachineKeySet) – gMSA ho umí vytvořit i bez admina;
+// žije po dobu běhu procesu (žádné hromadění). Schannel/Kestrel ho použije.
 // Persistence .pfx → stabilní otisk přes restarty (kvůli pinningu agentů).
 // ============================================================
 
@@ -21,7 +22,7 @@ public static class SelfCert
             try
             {
                 return new X509Certificate2(File.ReadAllBytes(pfxPath), (string?)null,
-                    X509KeyStorageFlags.EphemeralKeySet);
+                    X509KeyStorageFlags.MachineKeySet);
             }
             catch { /* poškozený → přegeneruj */ }
         }
@@ -55,6 +56,6 @@ public static class SelfCert
         }
         catch { /* když nejde zapsat, poběží z paměti (otisk se ale po restartu změní) */ }
 
-        return new X509Certificate2(pfx, (string?)null, X509KeyStorageFlags.EphemeralKeySet);
+        return new X509Certificate2(pfx, (string?)null, X509KeyStorageFlags.MachineKeySet);
     }
 }
