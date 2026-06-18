@@ -64,6 +64,7 @@ h2 { font-size:16px; margin:26px 0 12px; }
 .chip.active { background:var(--accent); color:#fff; border-color:var(--accent); }
 .searchform { display:flex; gap:6px; margin:0; }
 .searchform .inp { min-width:280px; }
+tr.rowoff td { opacity:.45; }
 
 /* ── tabulky ── */
 table { width:100%; border-collapse:collapse; background:var(--surface); border:1px solid var(--border); border-radius:8px; overflow:hidden; }

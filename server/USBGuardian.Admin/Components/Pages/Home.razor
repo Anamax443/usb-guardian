@@ -21,7 +21,7 @@ else
         <a class="card tile" href="whitelist">
             <div class="num">@_wlActive</div><div class="lbl">Schválených médií</div></a>
         <a class="card tile @(_wlPending > 0 ? "warn" : "")" href="whitelist">
-            <div class="num">@_wlPending</div><div class="lbl">Čeká na publikaci</div></a>
+            <div class="num">@_wlPending</div><div class="lbl">Deaktivovaných médií</div></a>
         <a class="card tile @(_action is null ? "active" : "")" href="@Url(action: "")">
             <div class="num">@_total</div><div class="lbl">Incidentů (@WindowLabel)</div></a>
         <a class="card tile @(_blocked > 0 ? "bad" : "") @(_action == "Blocked" ? "active" : "")" href="@Url(action: "Blocked")">

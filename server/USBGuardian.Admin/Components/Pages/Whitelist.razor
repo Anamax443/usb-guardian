@@ -5,8 +5,8 @@
 <h1>Whitelist — schválená média</h1>
 
 <p class="intro">Stačí zadat <strong>sériové číslo</strong> — i dopředu, než se médium poprvé připojí.
-VID/PID a název si konzole <strong>dotáhne sama</strong>, jakmile se médium objeví na síti (z incidentu).
-Nová média jsou <em>čeká na výskyt</em> → <em>čeká na publikaci</em> → <em>aktivní</em>.</p>
+VID/PID a název si konzole <strong>dotáhne sama</strong>, jakmile se médium objeví na síti.
+Položka jde kdykoli <strong>dočasně deaktivovat</strong> (checkbox „Aktivní") bez mazání.</p>
 
 @if (_error is not null)
 {
@@ -15,8 +15,8 @@ Nová média jsou <em>čeká na výskyt</em> → <em>čeká na publikaci</em> �
 else
 {
     <div class="cards">
-        <div class="card"><div class="num">@_active</div><div class="lbl">Aktivních médií</div></div>
-        <div class="card @(_pending > 0 ? "warn" : "")"><div class="num">@_pending</div><div class="lbl">Čeká na publikaci/výskyt</div></div>
+        <div class="card"><div class="num">@_active</div><div class="lbl">Aktivních (schválených)</div></div>
+        <div class="card @(_disabled > 0 ? "warn" : "")"><div class="num">@_disabled</div><div class="lbl">Deaktivovaných</div></div>
         <div class="card"><div class="num mono">@(_ver?.Version ?? "—")</div><div class="lbl">Aktivní verze</div></div>
         <div class="card @(_signed ? "" : "warn")"><div class="num">@(_signed ? "podepsáno" : "—")</div><div class="lbl">Stav podpisu</div></div>
     </div>
@@ -38,15 +38,6 @@ else
         <div class="banner @(_msgBad ? "bad" : "ok")">@_msg</div>
     }
 
-    @if (_pending > 0)
-    {
-        <div class="banner warn" data-no-print>
-            <strong>@_pending médií čeká.</strong> Aby je agenti přijali, musí se vydat nová
-            <strong>podepsaná</strong> verze whitelistu (privátní RSA klíč nikdy na serveru → podpis je
-            samostatný krok). Dokud nejsou aktivní, agentům se neservírují a běžící whitelist je nedotčený.
-        </div>
-    }
-
     <h2>Katalog (@_devices.Count)</h2>
     @if (_devices.Count == 0)
     {
@@ -56,7 +47,7 @@ else
     {
         <table>
             <thead>
-                <tr><th>VID</th><th>PID</th><th>Sériové číslo</th><th>Popis</th><th>Schválil</th><th>Stav</th><th></th></tr>
+                <tr><th>VID</th><th>PID</th><th>Sériové číslo</th><th>Popis</th><th>Schválil</th><th>Aktivní</th><th></th></tr>
             </thead>
             <tbody>
                 @foreach (var d in _devices)
@@ -78,26 +69,30 @@ else
                     }
                     else
                     {
-                        <tr>
+                        <tr class="@(d.IsActive ? "" : "rowoff")">
                             <td class="mono">@(string.IsNullOrEmpty(d.VendorId) ? "—" : d.VendorId)</td>
                             <td class="mono">@(string.IsNullOrEmpty(d.ProductId) ? "—" : d.ProductId)</td>
                             <td class="mono">@(string.IsNullOrEmpty(d.SerialNumber) ? "—" : d.SerialNumber)</td>
-                            <td>@(string.IsNullOrEmpty(d.Description) ? "—" : d.Description)</td>
+                            <td>
+                                @(string.IsNullOrEmpty(d.Description) ? "—" : d.Description)
+                                @if (string.IsNullOrEmpty(d.VendorId)) { <span class="pill warn">čeká na výskyt</span> }
+                            </td>
                             <td class="muted">@d.ApprovedBy</td>
                             <td>
-                                @if (d.IsActive) { <span class="pill ok">aktivní</span> }
-                                else if (!string.IsNullOrEmpty(d.VendorId)) { <span class="pill warn">čeká na publikaci</span> }
-                                else { <span class="pill warn">čeká na výskyt</span> }
+                                <input type="checkbox" checked="@d.IsActive" @onchange="() => ToggleActive(d)" disabled="@_busy"
+                                       title="@(d.IsActive ? "Deaktivovat (zakázat)" : "Aktivovat (schválit)")" />
                             </td>
                             <td>
                                 <button class="iconbtn" @onclick="() => StartEdit(d)" title="Upravit">✎</button>
-                                <button class="iconbtn" @onclick="() => Remove(d.Id)" title="Odebrat">✕</button>
+                                <button class="iconbtn" @onclick="() => Remove(d.Id)" title="Smazat">✕</button>
                             </td>
                         </tr>
                     }
                 }
             </tbody>
         </table>
+        <p class="muted" data-no-print>Změny v katalogu se k agentům dostanou po vydání nové <strong>podepsané</strong>
+        verze whitelistu (podpisový workflow — privátní klíč nikdy na serveru).</p>
     }
 }
 
@@ -113,7 +108,10 @@ else
     private List<WhitelistDevice> _devices = new();
     private WhitelistVersion? _ver;
     private bool _signed;
-    private int _active, _pending;
+    private int _active, _disabled;
+
+    private int? _editId;
+    private string _eVid = "", _ePid = "", _eSerial = "", _eDesc = "";
 
     protected override async Task OnInitializedAsync()
     {
@@ -132,50 +130,41 @@ else
             await using var db = await DbFactory.CreateDbContextAsync();
             await Backfill(db);
 
-            _devices = await db.WhitelistDevices.OrderByDescending(d => d.ApprovedAt).ToListAsync();
-            _ver = await db.WhitelistVersions.Where(v => v.IsActive)
+            _devices  = await db.WhitelistDevices.OrderByDescending(d => d.ApprovedAt).ToListAsync();
+            _ver      = await db.WhitelistVersions.Where(v => v.IsActive)
                 .OrderByDescending(v => v.IssuedAt).FirstOrDefaultAsync();
-            _signed  = _ver != null && !string.IsNullOrWhiteSpace(_ver.Signature);
-            _active  = _devices.Count(d => d.IsActive);
-            _pending = _devices.Count(d => !d.IsActive);
+            _signed   = _ver != null && !string.IsNullOrWhiteSpace(_ver.Signature);
+            _active   = _devices.Count(d => d.IsActive);
+            _disabled = _devices.Count(d => !d.IsActive);
             _error = null;
         }
         catch (Exception ex) { _error = ex.Message; }
     }
 
-    // Doplní VID/PID/popis u záznamů, které mají jen sériové číslo a médium se mezitím objevilo
     private static async Task Backfill(AppDbContext db)
     {
-        var need = await db.WhitelistDevices
-            .Where(d => d.VendorId == "" && d.SerialNumber != "").ToListAsync();
+        var need = await db.WhitelistDevices.Where(d => d.VendorId == "" && d.SerialNumber != "").ToListAsync();
         if (need.Count == 0) return;
-
         var changed = false;
         foreach (var d in need)
         {
-            var inc = await db.Incidents
-                .Where(i => i.SerialNumber == d.SerialNumber && i.VendorId != "")
+            var inc = await db.Incidents.Where(i => i.SerialNumber == d.SerialNumber && i.VendorId != "")
                 .OrderByDescending(i => i.Timestamp).FirstOrDefaultAsync();
             if (inc is null) continue;
-            d.VendorId  = inc.VendorId;
-            d.ProductId = inc.ProductId;
+            d.VendorId = inc.VendorId; d.ProductId = inc.ProductId;
             if (string.IsNullOrEmpty(d.Description)) d.Description = inc.FriendlyName;
             changed = true;
         }
         if (changed) await db.SaveChangesAsync();
     }
 
-    private async Task OnKey(KeyboardEventArgs e)
-    {
-        if (e.Key == "Enter") await AddOne();
-    }
+    private async Task OnKey(KeyboardEventArgs e) { if (e.Key == "Enter") await AddOne(); }
 
     private async Task AddOne()
     {
         _msg = null;
         var serial = (_serial ?? "").Trim();
         if (serial.Length == 0) { Msg("Zadej sériové číslo.", true); return; }
-
         _busy = true;
         try
         {
@@ -190,13 +179,13 @@ else
             {
                 VendorId = inc?.VendorId ?? "", ProductId = inc?.ProductId ?? "", SerialNumber = serial,
                 Description = inc?.FriendlyName ?? "", ApprovedBy = _user, ApprovedAt = DateTime.UtcNow,
-                IsActive = false
+                IsActive = true
             });
             await db.SaveChangesAsync();
             _serial = "";
             Msg(inc != null
-                ? $"Přidáno: {inc.VendorId}:{inc.ProductId}:{serial} — {inc.FriendlyName} (čeká na publikaci)"
-                : $"Přidáno: {serial} — VID/PID se dotáhnou, až se médium objeví na síti (čeká na výskyt)", false);
+                ? $"Přidáno a aktivní: {inc.VendorId}:{inc.ProductId}:{serial} — {inc.FriendlyName}"
+                : $"Přidáno a aktivní: {serial} — VID/PID se dotáhnou, až se médium objeví na síti", false);
             await Load();
         }
         catch (Exception ex) { Msg("Chyba: " + ex.Message, true); }
@@ -209,7 +198,6 @@ else
             .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Select(s => s.Trim()).Where(s => s.Length > 0).Distinct().ToList();
         if (serials.Count == 0) { Msg("Vlož sériová čísla (jedno na řádek).", true); return; }
-
         _busy = true;
         int added = 0, dup = 0;
         try
@@ -223,21 +211,32 @@ else
                 db.WhitelistDevices.Add(new WhitelistDevice
                 {
                     VendorId = inc?.VendorId ?? "", ProductId = inc?.ProductId ?? "", SerialNumber = serial,
-                    Description = inc?.FriendlyName ?? "", ApprovedBy = _user, ApprovedAt = DateTime.UtcNow, IsActive = false
+                    Description = inc?.FriendlyName ?? "", ApprovedBy = _user, ApprovedAt = DateTime.UtcNow, IsActive = true
                 });
                 added++;
             }
             await db.SaveChangesAsync();
             _bulk = "";
-            Msg($"Import: +{added} přidáno, {dup} už v katalogu. VID/PID se dotáhnou, až se média objeví na síti.", false);
+            Msg($"Import: +{added} přidáno (aktivní), {dup} už v katalogu.", false);
             await Load();
         }
         catch (Exception ex) { Msg("Chyba importu: " + ex.Message, true); }
         finally { _busy = false; }
     }
 
-    private int? _editId;
-    private string _eVid = "", _ePid = "", _eSerial = "", _eDesc = "";
+    private async Task ToggleActive(WhitelistDevice d)
+    {
+        _busy = true;
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var e = await db.WhitelistDevices.FindAsync(d.Id);
+            if (e is not null) { e.IsActive = !e.IsActive; await db.SaveChangesAsync(); }
+            await Load();
+        }
+        catch (Exception ex) { Msg("Chyba: " + ex.Message, true); }
+        finally { _busy = false; }
+    }
 
     private void StartEdit(WhitelistDevice d)
     {
@@ -256,10 +255,8 @@ else
             var d = await db.WhitelistDevices.FindAsync(_editId.Value);
             if (d is not null)
             {
-                d.VendorId = (_eVid ?? "").Trim();
-                d.ProductId = (_ePid ?? "").Trim();
-                d.SerialNumber = (_eSerial ?? "").Trim();
-                d.Description = (_eDesc ?? "").Trim();
+                d.VendorId = (_eVid ?? "").Trim(); d.ProductId = (_ePid ?? "").Trim();
+                d.SerialNumber = (_eSerial ?? "").Trim(); d.Description = (_eDesc ?? "").Trim();
                 await db.SaveChangesAsync();
             }
             _editId = null;
@@ -271,6 +268,7 @@ else
 
     private async Task Remove(int id)
     {
+        _busy = true;
         try
         {
             await using var db = await DbFactory.CreateDbContextAsync();
@@ -278,6 +276,7 @@ else
             if (d is not null) { db.WhitelistDevices.Remove(d); await db.SaveChangesAsync(); await Load(); }
         }
         catch (Exception ex) { Msg("Chyba: " + ex.Message, true); }
+        finally { _busy = false; }
     }
 
     private void Msg(string text, bool bad) { _msg = text; _msgBad = bad; }

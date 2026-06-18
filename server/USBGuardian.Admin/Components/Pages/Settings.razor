@@ -1,5 +1,6 @@
 @page "/nastaveni"
 @rendermode @(new InteractiveServerRenderMode(prerender: false))
+@using System.Net.Mail
 @inject IConfiguration Config
 @inject IDbContextFactory<AppDbContext> DbFactory
 @inject USBGuardian.Admin.Security.AccessCache Access
@@ -58,6 +59,24 @@
     @if (_groups.Count == 0) { <li class="muted">— žádné —</li> }
 </ul>
 
+<h2>E-mailové notifikace</h2>
+<p class="muted">SMTP relay (např. M365 Direct Send: MX firmy, port 25, bez přihlášení). Vše v configu — portabilní.</p>
+<dl class="cfg">
+    <dt>Zapnuto</dt><dd><input type="checkbox" @bind="_emailEnabled" /></dd>
+    <dt>SMTP host (relay / MX)</dt><dd><input class="inp" @bind="_emailHost" placeholder="firma-cz.mail.protection.outlook.com" /></dd>
+    <dt>Port</dt><dd><input class="inp" style="min-width:90px" @bind="_emailPort" /></dd>
+    <dt>STARTTLS</dt><dd><input type="checkbox" @bind="_emailStarttls" /></dd>
+    <dt>Odesílatel (From)</dt><dd><input class="inp" @bind="_emailFrom" placeholder="robot@firma.cz" /></dd>
+    <dt>Příjemci (čárkou)</dt><dd><input class="inp" @bind="_emailRecipients" placeholder="it@firma.cz, admin@firma.cz" /></dd>
+</dl>
+<div class="toolbar">
+    <button class="btn" @onclick="SaveEmail" disabled="@_busy">Uložit e-mail</button>
+    <button class="btn" @onclick="TestEmail" disabled="@_busy">Poslat test</button>
+</div>
+@if (_emailMsg is not null) { <div class="banner @(_emailBad ? "bad" : "ok")">@_emailMsg</div> }
+<p class="muted">Pozn.: nastavení + test odeslání. Spouštění notifikací nad incidenty (alert při blokaci /
+denní souhrn) je další krok.</p>
+
 <h2>AD sync</h2>
 <dl class="cfg">
     <dt>Zapnuto</dt><dd>@(Config.GetValue<bool>("AdSync:Enabled") ? "ano" : "ne")</dd>
@@ -80,6 +99,10 @@
     private List<string> _users = new(), _groups = new();
     private string _sqlServer = "—", _sqlDb = "—";
 
+    private bool _emailEnabled, _emailStarttls = true, _emailBad;
+    private string _emailHost = "", _emailPort = "25", _emailFrom = "", _emailRecipients = "";
+    private string? _emailMsg;
+
     protected override async Task OnInitializedAsync()
     {
         ParseConnection();
@@ -94,6 +117,14 @@
             _enforce = string.Equals(await Get(db, "policy.enforce"), "true", StringComparison.OrdinalIgnoreCase);
             _users   = SplitList(await Get(db, "access.users"));
             _groups  = SplitList(await Get(db, "access.groups"));
+
+            _emailEnabled    = string.Equals(await Get(db, "email.enabled"), "true", StringComparison.OrdinalIgnoreCase);
+            _emailHost       = await Get(db, "email.host");
+            var port         = await Get(db, "email.port"); _emailPort = string.IsNullOrEmpty(port) ? "25" : port;
+            _emailFrom       = await Get(db, "email.from");
+            _emailRecipients = await Get(db, "email.recipients");
+            _emailStarttls   = !string.Equals(await Get(db, "email.starttls"), "false", StringComparison.OrdinalIgnoreCase);
+
             _dbError = null;
         }
         catch (Exception ex) { _dbError = ex.Message; }
@@ -109,6 +140,53 @@
             await Load();
         }
         catch (Exception ex) { _dbError = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task SaveEmail()
+    {
+        _busy = true;
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            await Set(db, "email.enabled",    _emailEnabled.ToString().ToLowerInvariant());
+            await Set(db, "email.host",       (_emailHost ?? "").Trim());
+            await Set(db, "email.port",       (_emailPort ?? "25").Trim());
+            await Set(db, "email.from",       (_emailFrom ?? "").Trim());
+            await Set(db, "email.recipients", (_emailRecipients ?? "").Trim());
+            await Set(db, "email.starttls",   _emailStarttls.ToString().ToLowerInvariant());
+            _emailMsg = "Uloženo."; _emailBad = false;
+        }
+        catch (Exception ex) { _emailMsg = "Chyba: " + ex.Message; _emailBad = true; }
+        finally { _busy = false; }
+    }
+
+    private async Task TestEmail()
+    {
+        _emailMsg = null;
+        var to = SplitList(_emailRecipients);
+        if (string.IsNullOrWhiteSpace(_emailHost) || string.IsNullOrWhiteSpace(_emailFrom) || to.Count == 0)
+        { _emailMsg = "Vyplň host, odesílatele a aspoň jednoho příjemce."; _emailBad = true; return; }
+
+        _busy = true;
+        try
+        {
+            var port = int.TryParse(_emailPort, out var p) ? p : 25;
+#pragma warning disable SYSLIB0014
+            using var client = new SmtpClient(_emailHost.Trim(), port)
+            { EnableSsl = _emailStarttls, DeliveryMethod = SmtpDeliveryMethod.Network };
+#pragma warning restore SYSLIB0014
+            using var msg = new MailMessage
+            {
+                From = new MailAddress(_emailFrom.Trim()),
+                Subject = "USB Guardian – test",
+                Body = "Testovací e-mail z USB Guardian konzole."
+            };
+            foreach (var r in to) msg.To.Add(r);
+            await client.SendMailAsync(msg);
+            _emailMsg = "Test odeslán na: " + string.Join(", ", to); _emailBad = false;
+        }
+        catch (Exception ex) { _emailMsg = "Chyba odeslání: " + ex.Message; _emailBad = true; }
         finally { _busy = false; }
     }
 
