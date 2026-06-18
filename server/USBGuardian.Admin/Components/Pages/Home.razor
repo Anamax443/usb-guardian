@@ -4,102 +4,214 @@
 <h1>Přehled</h1>
 
 <p class="intro"><strong>USB Guardian</strong> sleduje paměťová média (USB / SD / disky) na firemních
-stanicích — každé médium musí být schváleno IT a zapsáno do whitelistu, jinak je uživatel varován
-nebo médium zablokováno. Níže incidenty za posledních 30 dní a poslední události vč. identifikátorů
-(VID / PID / sériové číslo) pro whitelist. Inventář stanic a kde chybí agent → <a href="stanice">Stanice</a>.</p>
+stanicích — neschválené médium je varováno nebo zablokováno. Incidenty lze filtrovat a kumulovat.
+Inventář stanic → <a href="stanice">Stanice</a>, schvalování → <a href="whitelist">Whitelist</a>.</p>
 
 @if (_error is not null)
 {
     <div class="banner bad">Nelze načíst data z databáze: @_error</div>
 }
-else if (_loading)
-{
-    <p>Načítám…</p>
-}
 else
 {
     <div class="cards">
-        <div class="card"><div class="num">@_total</div><div class="lbl">Incidentů (30 dní)</div></div>
-        <div class="card bad"><div class="num">@_blocked</div><div class="lbl">Blokováno</div></div>
-        <div class="card warn"><div class="num">@_warned</div><div class="lbl">Varování</div></div>
-        <div class="card"><div class="num">@_computers</div><div class="lbl">Stanic</div></div>
+        <a class="card tile" href="stanice">
+            <div class="num">@_compTotal</div><div class="lbl">Stanic v AD</div></a>
+        <a class="card tile @(_compMissing > 0 ? "bad" : "")" href="stanice?stav=chybi">
+            <div class="num">@_compMissing</div><div class="lbl">Chybí agent</div></a>
+        <a class="card tile" href="whitelist">
+            <div class="num">@_wlActive</div><div class="lbl">Schválených médií</div></a>
+        <a class="card tile @(_wlPending > 0 ? "warn" : "")" href="whitelist">
+            <div class="num">@_wlPending</div><div class="lbl">Čeká na publikaci</div></a>
+        <a class="card tile @(_action is null ? "active" : "")" href="@Url(action: "")">
+            <div class="num">@_total</div><div class="lbl">Incidentů (@WindowLabel)</div></a>
+        <a class="card tile @(_blocked > 0 ? "bad" : "") @(_action == "Blocked" ? "active" : "")" href="@Url(action: "Blocked")">
+            <div class="num">@_blocked</div><div class="lbl">Blokováno</div></a>
+        <a class="card tile @(_warned > 0 ? "warn" : "") @(_action == "Warned" ? "active" : "")" href="@Url(action: "Warned")">
+            <div class="num">@_warned</div><div class="lbl">Varování</div></a>
     </div>
 
-    <h2>Poslední incidenty</h2>
-    @if (_recent.Count == 0)
+    <div class="filterbar">
+        <span class="muted">Období:</span>
+        @foreach (var (d, lbl) in new[] { (30, "30 dní"), (90, "90 dní"), (365, "rok"), (0, "vše") })
+        {
+            <a class="chip @(_days == d ? "active" : "")" href="@Url(days: d)">@lbl</a>
+        }
+        <span class="sep"></span>
+        <a class="chip @(_group ? "active" : "")" href="@Url(group: !_group)">@(_group ? "kumulováno" : "detailně")</a>
+        <form method="get" class="searchform">
+            @if (_action is not null) { <input type="hidden" name="action" value="@_action" /> }
+            @if (_days != 30) { <input type="hidden" name="days" value="@_days" /> }
+            @if (!_group) { <input type="hidden" name="group" value="0" /> }
+            <input class="inp" name="q" value="@_q" placeholder="hledat stanice / uživatel / médium / S/N" />
+            <button class="btn" type="submit">Hledat</button>
+        </form>
+        @if (_action is not null || !string.IsNullOrEmpty(_q) || _days != 30 || !_group)
+        {
+            <a class="chip" href="">✕ zrušit filtry</a>
+        }
+    </div>
+
+    @if (_group)
     {
-        <p class="muted">Žádné incidenty.</p>
+        <h2>Kumulované (@_agg.Count)</h2>
+        @if (_agg.Count == 0) { <p class="muted">Žádné incidenty za zvolené období.</p> }
+        else
+        {
+            <table>
+                <thead>
+                    <tr><th>Médium</th><th>VID</th><th>PID</th><th>Sériové číslo</th><th>Stanice</th><th>Uživatel</th><th>Počet</th><th>Stav</th><th>Poslední</th></tr>
+                </thead>
+                <tbody>
+                    @foreach (var g in _agg)
+                    {
+                        <tr>
+                            <td>@g.Name</td>
+                            <td class="mono">@g.Vendor</td>
+                            <td class="mono">@g.Product</td>
+                            <td class="mono">@(string.IsNullOrEmpty(g.Serial) ? "—" : g.Serial)</td>
+                            <td>@g.Hostname</td>
+                            <td>@g.Username</td>
+                            <td><strong>@g.Count×</strong></td>
+                            <td>
+                                @if (g.Blocked > 0) { <span class="pill bad">Blokováno @g.Blocked×</span> }
+                                else if (g.Warned > 0) { <span class="pill warn">Varování @g.Warned×</span> }
+                                else { <span class="pill ok">Povoleno</span> }
+                            </td>
+                            <td class="mono">@g.Last.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
     }
     else
     {
-        <table>
-            <thead>
-                <tr>
-                    <th>Čas</th><th>Stanice</th><th>Uživatel</th><th>Médium</th>
-                    <th>VID</th><th>PID</th><th>Sériové číslo</th><th>Velikost</th><th>Akce</th>
-                </tr>
-            </thead>
-            <tbody>
-                @foreach (var i in _recent)
-                {
-                    <tr>
-                        <td>@i.Timestamp.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</td>
-                        <td>@i.Hostname</td>
-                        <td>@i.Username</td>
-                        <td>@i.FriendlyName</td>
-                        <td class="mono">@i.VendorId</td>
-                        <td class="mono">@i.ProductId</td>
-                        <td class="mono">@i.SerialNumber</td>
-                        <td class="muted">@FormatSize(i.SizeBytes)</td>
-                        <td><span class="pill @PillClass(i.Action)">@i.Action</span></td>
-                    </tr>
-                }
-            </tbody>
-        </table>
+        <h2>Detailně (@_recent.Count)</h2>
+        @if (_recent.Count == 0) { <p class="muted">Žádné incidenty za zvolené období.</p> }
+        else
+        {
+            <table>
+                <thead>
+                    <tr><th>Čas</th><th>Stanice</th><th>Uživatel</th><th>Médium</th><th>VID</th><th>PID</th><th>Sériové číslo</th><th>Velikost</th><th>Akce</th></tr>
+                </thead>
+                <tbody>
+                    @foreach (var i in _recent)
+                    {
+                        <tr>
+                            <td class="mono">@i.Timestamp.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</td>
+                            <td>@i.Hostname</td>
+                            <td>@i.Username</td>
+                            <td>@i.FriendlyName</td>
+                            <td class="mono">@i.VendorId</td>
+                            <td class="mono">@i.ProductId</td>
+                            <td class="mono">@i.SerialNumber</td>
+                            <td class="muted">@FormatSize(i.SizeBytes)</td>
+                            <td><span class="pill @PillClass(i.Action)">@i.Action</span></td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
     }
 }
 
 @code {
-    private bool _loading = true;
+    [SupplyParameterFromQuery(Name = "action")] public string? ActionParam { get; set; }
+    [SupplyParameterFromQuery(Name = "days")]   public int? DaysParam { get; set; }
+    [SupplyParameterFromQuery(Name = "q")]      public string? QParam { get; set; }
+    [SupplyParameterFromQuery(Name = "group")]  public int? GroupParam { get; set; }
+
+    private string? _action;
+    private int _days;
+    private string? _q;
+    private bool _group;
+
     private string? _error;
-    private int _total, _blocked, _warned, _computers;
+    private int _total, _blocked, _warned;
+    private int _compTotal, _compMissing, _wlActive, _wlPending;
+    private List<Agg> _agg = new();
     private List<Incident> _recent = new();
+
+    private string WindowLabel => _days == 0 ? "vše" : _days == 365 ? "rok" : $"{_days} dní";
+
+    private record Agg(string Name, string Vendor, string Product, string Serial,
+                       string Hostname, string Username, int Count, int Blocked, int Warned, DateTime Last);
 
     protected override async Task OnInitializedAsync()
     {
+        _action = string.IsNullOrWhiteSpace(ActionParam) ? null : ActionParam;
+        _days   = DaysParam ?? 30;
+        _q      = string.IsNullOrWhiteSpace(QParam) ? null : QParam.Trim();
+        _group  = (GroupParam ?? 1) == 1;
+
         try
         {
             await using var db = await DbFactory.CreateDbContextAsync();
-            var from = DateTime.UtcNow.AddDays(-30);
-            var window = db.Incidents.Where(i => i.Timestamp >= from);
+            var from = _days == 0 ? DateTime.MinValue : DateTime.UtcNow.AddDays(-_days);
 
-            _total     = await window.CountAsync();
-            _blocked   = await window.CountAsync(i => i.Action == "Blocked");
-            _warned    = await window.CountAsync(i => i.Action == "Warned");
-            _computers = await window.Select(i => i.Hostname).Distinct().CountAsync();
+            var baseq = db.Incidents.Where(i => i.Timestamp >= from);
+            if (_action is not null) baseq = baseq.Where(i => i.Action == _action);
+            if (_q is not null)
+                baseq = baseq.Where(i =>
+                    i.Hostname.Contains(_q) || i.Username.Contains(_q) ||
+                    i.FriendlyName.Contains(_q) || i.SerialNumber.Contains(_q));
 
-            _recent = await db.Incidents
-                .OrderByDescending(i => i.Timestamp)
-                .Take(25)
-                .ToListAsync();
+            // dlaždice počítají přes okno (bez action filtru, ale s hledáním)
+            var win = db.Incidents.Where(i => i.Timestamp >= from);
+            if (_q is not null)
+                win = win.Where(i => i.Hostname.Contains(_q) || i.Username.Contains(_q) ||
+                                     i.FriendlyName.Contains(_q) || i.SerialNumber.Contains(_q));
+            _total     = await win.CountAsync();
+            _blocked   = await win.CountAsync(i => i.Action == "Blocked");
+            _warned    = await win.CountAsync(i => i.Action == "Warned");
+
+            // souhrnné dlaždice z ostatních listů (dlaždicový přehled)
+            _compTotal   = await db.Computers.CountAsync();
+            _compMissing = await db.Computers.CountAsync(c => c.InActiveDirectory && c.AgentVersion == "" && c.LastSeen == null);
+            _wlActive    = await db.WhitelistDevices.CountAsync(d => d.IsActive);
+            _wlPending   = await db.WhitelistDevices.CountAsync(d => !d.IsActive);
+
+            if (_group)
+            {
+                _agg = await baseq
+                    .GroupBy(i => new { i.SerialNumber, i.Hostname, i.Username })
+                    .Select(g => new Agg(
+                        g.Max(x => x.FriendlyName) ?? "", g.Max(x => x.VendorId) ?? "", g.Max(x => x.ProductId) ?? "",
+                        g.Key.SerialNumber, g.Key.Hostname, g.Key.Username,
+                        g.Count(),
+                        g.Count(x => x.Action == "Blocked"),
+                        g.Count(x => x.Action == "Warned"),
+                        g.Max(x => x.Timestamp)))
+                    .OrderByDescending(g => g.Last)
+                    .Take(300)
+                    .ToListAsync();
+            }
+            else
+            {
+                _recent = await baseq.OrderByDescending(i => i.Timestamp).Take(200).ToListAsync();
+            }
         }
-        catch (Exception ex)
-        {
-            _error = ex.Message;
-        }
-        finally
-        {
-            _loading = false;
-        }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+
+    // sestaví query string se zachováním ostatních filtrů
+    private string Url(string? action = "_keep", int? days = null, bool? group = null)
+    {
+        var a = action == "_keep" ? _action : (string.IsNullOrEmpty(action) ? null : action);
+        var d = days ?? _days;
+        var g = group ?? _group;
+        var parts = new List<string>();
+        if (a is not null) parts.Add($"action={a}");
+        if (d != 30) parts.Add($"days={d}");
+        if (_q is not null) parts.Add($"q={Uri.EscapeDataString(_q)}");
+        if (!g) parts.Add("group=0");
+        return parts.Count > 0 ? "?" + string.Join("&", parts) : "";
     }
 
     private static string PillClass(string action) => action switch
     {
-        "Blocked" => "bad",
-        "Warned"  => "warn",
-        _         => "ok"
+        "Blocked" => "bad", "Warned" => "warn", _ => "ok"
     };
 
-    private static string FormatSize(long bytes) =>
-        bytes > 0 ? $"{bytes / 1_073_741_824.0:F1} GB" : "—";
+    private static string FormatSize(long bytes) => bytes > 0 ? $"{bytes / 1_073_741_824.0:F1} GB" : "—";
 }

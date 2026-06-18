@@ -57,6 +57,13 @@ h2 { font-size:16px; margin:26px 0 12px; }
 .inp { background:var(--bg); color:var(--text); border:1px solid var(--border); border-radius:6px; padding:7px 10px; font-size:13px; min-width:240px; }
 .ta { width:100%; max-width:520px; background:var(--bg); color:var(--text); border:1px solid var(--border); border-radius:6px; padding:8px 10px; margin:8px 0; }
 .import { margin:6px 0 4px; } .import summary { cursor:pointer; color:var(--text-dim); font-size:13px; }
+.filterbar { display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin:18px 0 6px; }
+.filterbar .sep { width:1px; height:18px; background:var(--border); margin:0 4px; }
+.chip { display:inline-block; padding:4px 11px; border:1px solid var(--border); border-radius:14px; font-size:12px; color:var(--text-dim); text-decoration:none; cursor:pointer; }
+.chip:hover { background:var(--surface-hover); color:var(--text); }
+.chip.active { background:var(--accent); color:#fff; border-color:var(--accent); }
+.searchform { display:flex; gap:6px; margin:0; }
+.searchform .inp { min-width:280px; }
 
 /* ── tabulky ── */
 table { width:100%; border-collapse:collapse; background:var(--surface); border:1px solid var(--border); border-radius:8px; overflow:hidden; }
