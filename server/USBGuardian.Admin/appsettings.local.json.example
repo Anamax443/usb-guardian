@@ -30,5 +30,8 @@
     "IntervalMinutes": 60,
     "SearchBase": "",           // prázdné = celá doména serveru; jinak DN konkrétní OU
     "IncludeDisabled": false    // zahrnout i disabled účty počítačů
-  }
+  },
+
+  // Odkaz na repozitář – commit v patičce je klikací na /commit/<sha>. Prázdné = neklikací.
+  "RepoUrl": "https://github.com/Anamax443/usb-guardian"
 }

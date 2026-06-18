@@ -8,6 +8,15 @@
     médií na firemních stanicích (NIS2 / ISO 27001). Agreguje data ze všech agentů a spravuje
     inventář stanic.</p>
 
+    <h2>Rozcestník dokumentace</h2>
+    <ul class="linklist">
+        <li><a href="@Repo("README.md")" target="_blank" rel="noopener">README</a> — funkční přehled, komponenty, konfigurace, nasazení</li>
+        <li><a href="@Repo("HANDOFF.md")" target="_blank" rel="noopener">HANDOFF</a> — předávka projektu + živý stav</li>
+        <li><a href="@Repo("docs/architecture.md")" target="_blank" rel="noopener">Architektura</a> — datový tok, komponenty, bezpečnostní vrstvy</li>
+        <li><a href="@Repo("README.en.md")" target="_blank" rel="noopener">English docs</a> — README.en.md / HANDOFF.en.md</li>
+        <li>In-app nápověda → níže na této stránce (tisknutelná ve světlém režimu)</li>
+    </ul>
+
     <h2>Přístup</h2>
     <ul>
         <li>Autentizace <strong>Windows (Kerberos)</strong>. Dovnitř jen členové AD skupin
@@ -54,6 +63,12 @@
 @code {
     private string _sql = "—";
     private string _db  = "—";
+
+    private string Repo(string path)
+    {
+        var baseUrl = Config["RepoUrl"];
+        return string.IsNullOrEmpty(baseUrl) ? "#" : $"{baseUrl}/blob/main/{path}";
+    }
 
     protected override void OnInitialized()
     {

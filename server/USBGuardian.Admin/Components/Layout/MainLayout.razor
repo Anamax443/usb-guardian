@@ -1,4 +1,6 @@
 @inherits LayoutComponentBase
+@inject IConfiguration Config
+@inject IDbContextFactory<AppDbContext> DbFactory
 
 <div class="page">
     <header class="topbar">
@@ -9,27 +11,59 @@
             <NavLink href="nastaveni">Nastavení</NavLink>
             <NavLink href="dokumentace">Dokumentace</NavLink>
         </nav>
-        <AuthorizeView>
-            <Authorized>
-                <div class="user">@context.User.Identity?.Name</div>
-            </Authorized>
-        </AuthorizeView>
+        <div class="right">
+            <AuthorizeView>
+                <Authorized><span class="muted">@context.User.Identity?.Name</span></Authorized>
+            </AuthorizeView>
+            <button class="iconbtn" onclick="aximaToggleTheme()" title="Přepnout téma (dark/light)">🌓</button>
+        </div>
     </header>
+
     <main class="content">
         @Body
     </main>
+
     <footer class="foot">
         <span id="liveclock">—</span>
-        <span class="muted">USB Guardian konzole · commit @AppInfo.Commit</span>
+        @if (!string.IsNullOrEmpty(_repoUrl))
+        {
+            <a href="@($"{_repoUrl}/commit/{AppInfo.Commit}")" target="_blank" rel="noopener"
+               title="commit @AppInfo.Commit">commit @AppInfo.Commit</a>
+        }
+        else
+        {
+            <span class="mono">commit @AppInfo.Commit</span>
+        }
+        <span title="Dostupnost databáze"><span class="dot @(_dbOk ? "ok" : "bad")"></span>DB</span>
+        <span class="right">© @DateTime.Now.Year Milan Trnka</span>
     </footer>
 </div>
 
 <script>
+  function aximaToggleTheme() {
+    var h = document.documentElement;
+    var t = h.dataset.theme === 'light' ? 'dark' : 'light';
+    h.dataset.theme = t;
+    try { localStorage.setItem('axima.theme', t); } catch (e) {}
+  }
   (function () {
-    function tick() {
-      var e = document.getElementById('liveclock');
-      if (e) e.textContent = new Date().toLocaleString('cs-CZ');
-    }
+    function tick() { var e = document.getElementById('liveclock'); if (e) e.textContent = new Date().toLocaleString('cs-CZ'); }
     tick(); setInterval(tick, 1000);
   })();
 </script>
+
+@code {
+    private string? _repoUrl;
+    private bool _dbOk;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _repoUrl = Config["RepoUrl"];
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            _dbOk = await db.Database.CanConnectAsync();
+        }
+        catch { _dbOk = false; }
+    }
+}

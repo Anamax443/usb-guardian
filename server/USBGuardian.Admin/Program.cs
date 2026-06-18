@@ -98,6 +98,14 @@ app.UseAuthentication();
 app.UseAuthorization();
 app.UseAntiforgery();
 
+// ── Kontrakt /api/version (AXIMA UI standard 2.4) ────────────
+var startedAt = DateTime.UtcNow;
+app.MapGet("/api/version", () => Results.Json(new
+{
+    commit    = USBGuardian.Admin.AppInfo.Commit,
+    startedAt
+})).AllowAnonymous();
+
 app.MapRazorComponents<App>()
    .AddInteractiveServerRenderMode();
 
