@@ -17,9 +17,6 @@
     <!-- WMI pro detekci USB zařízení -->
     <PackageReference Include="System.Management" Version="8.0.0" />
 
-    <!-- SQLite pro lokální log incidentů -->
-    <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.0" />
-
     <!-- JSON konfigurace -->
     <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="8.0.0" />
 

@@ -82,8 +82,9 @@ Firewall `:4200` byl vytvořen přes DCOM/CIM. Konfigurace na serveru:
 - **E-mailové alerty**: konfigurace + odesílání hotové (`IncidentAlertService`); fungují, jakmile dorazí nové incidenty.
 - **Hardening:** gMSA místo LocalSystem pro konzoli, dedikovaná `USB-Guardian-Admins` místo `SQL Admins2`,
   HTTPS pro konzoli, přesun API z SQL-04 na .213 (dvouvrstvý princip).
-- **Úklid:** nepoužitý `Microsoft.Data.Sqlite` v agentu; stray složka `server/USBGuardianAPI/`;
-  vadný GUID format `:N[..8]` v `NotificationService.ShowWarning`.
+- **Úklid:** ~~nepoužitý `Microsoft.Data.Sqlite` v agentu~~ (hotovo); ~~vadný GUID format `:N[..8]` v
+  `NotificationService.ShowWarning`~~ (hotovo); zbývá stray (untracked) složka `server/USBGuardianAPI/`
+  (duplikát vedle `USBGuardian.Api/` – ke smazání).
 
 ## 6. Mapa dokumentace
 

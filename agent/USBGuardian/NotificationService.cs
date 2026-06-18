@@ -62,7 +62,7 @@ public class NotificationService
             };
 
             // Unikátní název souboru – timestamp + náhodný suffix (bez kolizí)
-            var fileName = $"toast_{DateTime.UtcNow:yyyyMMdd_HHmmss_fff}_{Guid.NewGuid():N[..8]}.json";
+            var fileName = $"toast_{DateTime.UtcNow:yyyyMMdd_HHmmss_fff}_{Guid.NewGuid().ToString("N")[..8]}.json";
             var filePath = Path.Combine(_queuePath, fileName);
 
             var json = JsonSerializer.Serialize(toastMsg,
