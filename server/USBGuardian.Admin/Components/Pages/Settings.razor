@@ -38,6 +38,28 @@
 <p class="muted">Hranice pro tečku komunikace i dlaždici „Zmlklo agentů" na Stanicích. Stanice, která dřív
     hlásila agenta a déle se neozvala, se počítá jako zmlklá (možný výpadek / tamper). Default 180 min.</p>
 
+<h2>Auto-enrollment agenta</h2>
+<p class="muted">Konzole sama nasadí agenta na stanice z AD <strong>bez agenta</strong> (24/7). Default <strong>VYPNUTO + dry-run</strong>.
+    Ostrý běh vyžaduje, aby <strong>účet konzole měl lokální admin na klientech</strong> (dedikovaný deploy účet) — viz HANDOFF.</p>
+<dl class="cfg">
+    <dt>Zapnuto (master)</dt>
+    <dd>
+        @if (_deployEnabled) { <span class="pill bad">ZAPNUTO</span> } else { <span class="pill warn">vypnuto</span> }
+        &nbsp;<button class="btn" @onclick="ToggleDeploy" disabled="@_busy">@(_deployEnabled ? "Vypnout" : "Zapnout")</button>
+    </dd>
+    <dt>Jen dry-run (report, nic nemění)</dt><dd><input type="checkbox" @bind="_deployDryRun" /></dd>
+    <dt>Interval (min)</dt><dd><input class="inp" style="min-width:90px" @bind="_deployInterval" /></dd>
+    <dt>Max stanic / běh</dt><dd><input class="inp" style="min-width:90px" @bind="_deployMaxPerRun" /></dd>
+    <dt>Allowlist hostů (čárkou; prázdné = vše bez agenta)</dt><dd><input class="inp" @bind="_deployAllow" placeholder="PC01, PC02 …" /></dd>
+    <dt>Source path (publish agenta na .213)</dt><dd><input class="inp" @bind="_deploySource" placeholder="C:\Apps\USBGuardianAgentPublish" /></dd>
+    <dt>Script path (Deploy-AgentFleet.ps1)</dt><dd><input class="inp" @bind="_deployScript" placeholder="C:\Apps\USBGuardianConsole\scripts\Deploy-AgentFleet.ps1" /></dd>
+    <dt>Poslední běh</dt><dd class="mono">@(string.IsNullOrEmpty(_deployLastRun) ? "—" : _deployLastRun)</dd>
+</dl>
+<div class="toolbar">
+    <button class="btn" @onclick="SaveDeploy" disabled="@_busy">Uložit nastavení deploye</button>
+</div>
+@if (_deployMsg is not null) { <div class="banner @(_deployBad ? "bad" : "ok")">@_deployMsg</div> }
+
 <h2>Přístup do konzole</h2>
 <p class="muted">Bootstrap z <code>appsettings.local.json</code> (nelze vyřadit — ochrana proti lockoutu)
 + DB seznam spravovaný zde. Pro tiché SSO choď přes hostname, ne IP.</p>
@@ -122,6 +144,11 @@ denní souhrn) je další krok.</p>
     private string _silentAfter = "180";
     private string? _commMsg;
 
+    private bool _deployEnabled, _deployDryRun = true, _deployBad;
+    private string _deployInterval = "30", _deployMaxPerRun = "10",
+                   _deployAllow = "", _deploySource = "", _deployScript = "", _deployLastRun = "";
+    private string? _deployMsg;
+
     protected override async Task OnInitializedAsync()
     {
         ParseConnection();
@@ -146,6 +173,15 @@ denní souhrn) je další krok.</p>
             _emailRecipients = await Get(db, "email.recipients");
             _emailStarttls   = !string.Equals(await Get(db, "email.starttls"), "false", StringComparison.OrdinalIgnoreCase);
             var ai = await Get(db, "email.alertIntervalMinutes"); _emailInterval = string.IsNullOrEmpty(ai) ? "15" : ai;
+
+            _deployEnabled  = string.Equals(await Get(db, "deploy.enabled"), "true", StringComparison.OrdinalIgnoreCase);
+            _deployDryRun   = !string.Equals(await Get(db, "deploy.dryRun"), "false", StringComparison.OrdinalIgnoreCase);
+            var dmi = await Get(db, "deploy.intervalMinutes"); _deployInterval  = string.IsNullOrEmpty(dmi) ? "30" : dmi;
+            var dmp = await Get(db, "deploy.maxPerRun");       _deployMaxPerRun = string.IsNullOrEmpty(dmp) ? "10" : dmp;
+            _deployAllow    = await Get(db, "deploy.allowHosts");
+            _deploySource   = await Get(db, "deploy.sourcePath");
+            _deployScript   = await Get(db, "deploy.scriptPath");
+            _deployLastRun  = await Get(db, "deploy.lastRun");
 
             _dbError = null;
         }
@@ -180,6 +216,43 @@ denní souhrn) je další krok.</p>
             _commMsg = "Uloženo.";
         }
         catch (Exception ex) { _commMsg = "Chyba: " + ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task ToggleDeploy()
+    {
+        _busy = true;
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            await Set(db, "deploy.enabled", (!_deployEnabled).ToString().ToLowerInvariant());
+            await Load();
+        }
+        catch (Exception ex) { _dbError = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task SaveDeploy()
+    {
+        _deployMsg = null;
+        if (!int.TryParse(_deployInterval?.Trim(), out var iv) || iv <= 0)
+        { _deployMsg = "Interval musí být kladné číslo."; _deployBad = true; return; }
+        if (!int.TryParse(_deployMaxPerRun?.Trim(), out var mp) || mp <= 0)
+        { _deployMsg = "Max stanic musí být kladné číslo."; _deployBad = true; return; }
+
+        _busy = true;
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            await Set(db, "deploy.dryRun",          _deployDryRun.ToString().ToLowerInvariant());
+            await Set(db, "deploy.intervalMinutes", iv.ToString());
+            await Set(db, "deploy.maxPerRun",       mp.ToString());
+            await Set(db, "deploy.allowHosts",      (_deployAllow ?? "").Trim());
+            await Set(db, "deploy.sourcePath",      (_deploySource ?? "").Trim());
+            await Set(db, "deploy.scriptPath",      (_deployScript ?? "").Trim());
+            _deployMsg = "Uloženo."; _deployBad = false;
+        }
+        catch (Exception ex) { _deployMsg = "Chyba: " + ex.Message; _deployBad = true; }
         finally { _busy = false; }
     }
 

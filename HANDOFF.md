@@ -78,6 +78,15 @@ Firewall `:4200` byl vytvořen přes DCOM/CIM. Konfigurace na serveru:
   (vytvoří službu „USB Guardian" + recovery + watchdog, zachová per-machine `agent.config.local.json`),
   `scripts\Uninstall-Agent.ps1`. Zbývá **vzdálený** kanál přes WinRM (`Enable-PSRemoting` na klientech), bez
   uložených admin creds, audit, just-in-time; nejdřív prototypovat na `TRNKAMW11N`.
+- **Auto-enrollment agenta (konzole .213 nasazuje sama)** — `AgentDeployService` (hosted service)
+  + `scripts\Deploy-AgentFleet.ps1` + Nastavení „Auto-enrollment agenta". Konzole po AD syncu najde
+  stanice bez agenta a nasadí je (C$ + CIM service create + watchdog). **Default VYPNUTO + dry-run.**
+  - **Rozhodnuto: dedikovaný deploy účet** (vytvořit nový – gMSA doporučeno) s **lokálním adminem na klientech**
+    (GPO Restricted Groups). Konzole musí běžet pod ním (dnes LocalSystem `B-S-W-MIKOS$`).
+  - **Ops prereq (čeká):** (1) vytvořit deploy účet + GPO workstation-admin; (2) přepnout službu konzole
+    na tento účet (`sc.exe \\10.8.2.213 config "USB Guardian Console" obj= …`); (3) nasadit na .213
+    publish agenta (`deploy.sourcePath`) + `Deploy-AgentFleet.ps1`/`Watch-USBGuardian.ps1` (`deploy.scriptPath`);
+    (4) v Nastavení zapnout (nejdřív dry-run → ověřit → vypnout dry-run). Pilot: `.181`, pak `.180`.
 - **Podpisový/publikační workflow** whitelistu (staging → offline podpis → publikace) → odemkne whitelist,
   **vynucování** i **blocklist** „naostro" k agentům (potřebují podepsanou distribuci + propagaci přes heartbeat).
 - **Per-serial blocklist** (zákaz konkrétního média, near-real-time k agentům – přednost před whitelistem).

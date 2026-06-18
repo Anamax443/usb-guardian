@@ -104,6 +104,9 @@ if (bool.Parse(builder.Configuration["AdSync:Enabled"] ?? "false"))
 // ── E-mailové alerty nad incidenty (běží, jen když je e-mail zapnutý) ──
 builder.Services.AddHostedService<USBGuardian.Admin.Notifications.IncidentAlertService>();
 
+// ── Auto-enrollment agenta (běží, jen když deploy.enabled=true; default dry-run) ──
+builder.Services.AddHostedService<USBGuardian.Admin.Deploy.AgentDeployService>();
+
 // ── Blazor Server ─────────────────────────────────────────────
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
