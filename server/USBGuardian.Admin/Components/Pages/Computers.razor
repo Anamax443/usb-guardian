@@ -11,11 +11,11 @@
 else
 {
     <div class="cards">
-        <a class="card tile @(Stav is null ? "active" : "")" href="stanice">
+        <a class="card tile @(Stav is null ? "active" : "")" href="@Url(stav: "")">
             <div class="num">@_all.Count</div><div class="lbl">Stanic v AD</div></a>
-        <a class="card tile @(Stav == "hlasi" ? "active" : "")" href="stanice?stav=hlasi">
+        <a class="card tile @(Stav == "hlasi" ? "active" : "")" href="@Url(stav: "hlasi")">
             <div class="num">@_reporting</div><div class="lbl">Hlásí agenta</div></a>
-        <a class="card tile bad @(Stav == "chybi" ? "active" : "")" href="stanice?stav=chybi">
+        <a class="card tile bad @(Stav == "chybi" ? "active" : "")" href="@Url(stav: "chybi")">
             <div class="num">@_missing</div><div class="lbl">Chybí agent</div></a>
     </div>
 
@@ -26,11 +26,20 @@ else
         <span class="muted">AD sync: @AdSync.LastSummary@(AdSync.LastRunUtc is { } t ? $" ({t.ToLocalTime():HH:mm:ss})" : "")</span>
     </div>
 
+    <div class="filterbar">
+        <form method="get" class="searchform">
+            @if (Stav is not null) { <input type="hidden" name="stav" value="@Stav" /> }
+            <input class="inp" name="q" value="@Q" placeholder="hledat hostname / OS / cesta / doména" />
+            <button class="btn" type="submit">Hledat</button>
+        </form>
+        @if (Stav is not null || !string.IsNullOrEmpty(Q)) { <a class="chip" href="stanice">✕ zrušit filtry</a> }
+    </div>
+
     <h2>Inventář (@Filtered().Count())</h2>
     <table>
         <thead>
             <tr>
-                <th>Hostname</th><th>Cesta v AD</th><th>OS</th><th>Doména</th>
+                <th>Kom.</th><th>Hostname</th><th>Cesta v AD</th><th>OS</th><th>Doména</th>
                 <th>Stav</th><th>Agent verze</th><th>Poslední kontakt</th>
             </tr>
         </thead>
@@ -38,6 +47,7 @@ else
             @foreach (var c in Filtered())
             {
                 <tr>
+                    <td><span class="dot @CommClass(c)" title="@CommTitle(c)"></span></td>
                     <td>@c.Hostname</td>
                     <td class="muted">@(string.IsNullOrEmpty(c.AdPath) ? "—" : c.AdPath)</td>
                     <td>@c.OperatingSystem</td>
@@ -53,10 +63,15 @@ else
             }
         </tbody>
     </table>
+    <p class="muted" data-no-print>Komunikace: <span class="dot ok"></span> komunikuje (≤ 60 min) ·
+        <span class="dot warn"></span> mlčí (starší) · <span class="dot off"></span> žádný kontakt</p>
 }
 
 @code {
     [SupplyParameterFromQuery(Name = "stav")] public string? Stav { get; set; }
+    [SupplyParameterFromQuery(Name = "q")]    public string? Q { get; set; }
+
+    private const int OnlineMinutes = 60;
 
     private string? _error;
     private List<Computer> _all = new();
@@ -66,12 +81,45 @@ else
 
     private static bool Reports(Computer c) => !string.IsNullOrEmpty(c.AgentVersion) || c.LastSeen is not null;
 
-    private IEnumerable<Computer> Filtered() => Stav switch
+    private string CommClass(Computer c)
     {
-        "hlasi" => _all.Where(Reports),
-        "chybi" => _all.Where(c => c.InActiveDirectory && !Reports(c)),
-        _       => _all
-    };
+        if (c.LastSeen is null) return "off";
+        return (DateTime.UtcNow - c.LastSeen.Value).TotalMinutes <= OnlineMinutes ? "ok" : "warn";
+    }
+
+    private string CommTitle(Computer c) => c.LastSeen is null
+        ? "Žádný kontakt s agentem"
+        : (DateTime.UtcNow - c.LastSeen.Value).TotalMinutes <= OnlineMinutes
+            ? $"Komunikuje – naposledy {c.LastSeen.Value.ToLocalTime():dd.MM.yyyy HH:mm}"
+            : $"Mlčí – naposledy {c.LastSeen.Value.ToLocalTime():dd.MM.yyyy HH:mm}";
+
+    private IEnumerable<Computer> Filtered()
+    {
+        IEnumerable<Computer> q = Stav switch
+        {
+            "hlasi" => _all.Where(Reports),
+            "chybi" => _all.Where(c => c.InActiveDirectory && !Reports(c)),
+            _       => _all
+        };
+        if (!string.IsNullOrWhiteSpace(Q))
+        {
+            var s = Q.Trim();
+            q = q.Where(c =>
+                (c.Hostname ?? "").Contains(s, StringComparison.OrdinalIgnoreCase) ||
+                (c.OperatingSystem ?? "").Contains(s, StringComparison.OrdinalIgnoreCase) ||
+                (c.AdPath ?? "").Contains(s, StringComparison.OrdinalIgnoreCase) ||
+                (c.Domain ?? "").Contains(s, StringComparison.OrdinalIgnoreCase));
+        }
+        return q;
+    }
+
+    private string Url(string stav)
+    {
+        var parts = new List<string>();
+        if (!string.IsNullOrEmpty(stav)) parts.Add($"stav={stav}");
+        if (!string.IsNullOrEmpty(Q)) parts.Add($"q={Uri.EscapeDataString(Q)}");
+        return parts.Count > 0 ? "stanice?" + string.Join("&", parts) : "stanice";
+    }
 
     protected override async Task OnInitializedAsync() => await Load();
 
@@ -85,10 +133,7 @@ else
             _missing   = _all.Count(c => c.InActiveDirectory && !Reports(c));
             _error = null;
         }
-        catch (Exception ex)
-        {
-            _error = ex.Message;
-        }
+        catch (Exception ex) { _error = ex.Message; }
     }
 
     private async Task UpdateAd()
