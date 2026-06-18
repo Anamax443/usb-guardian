@@ -59,7 +59,7 @@ else
         {
             <table>
                 <thead>
-                    <tr><th>Médium</th><th>VID</th><th>PID</th><th>Sériové číslo</th><th>Stanice</th><th>Uživatel</th><th>Počet</th><th>Stav</th><th>Poslední</th></tr>
+                    <tr><th>Médium</th><th>VID</th><th>PID</th><th>Sériové číslo</th><th>Stanice</th><th>Uživatel</th><th>Počet</th><th>Stav</th><th>Schváleno</th><th>Poslední</th></tr>
                 </thead>
                 <tbody>
                     @foreach (var g in _agg)
@@ -77,6 +77,10 @@ else
                                 else if (g.Warned > 0) { <span class="pill warn">Varování @g.Warned×</span> }
                                 else { <span class="pill ok">Povoleno</span> }
                             </td>
+                            <td>
+                                @if (Approved(g.Serial)) { <span class="pill ok">ano</span> }
+                                else { <span class="pill bad">ne</span> }
+                            </td>
                             <td class="mono">@g.Last.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</td>
                         </tr>
                     }
@@ -92,7 +96,7 @@ else
         {
             <table>
                 <thead>
-                    <tr><th>Čas</th><th>Stanice</th><th>Uživatel</th><th>Médium</th><th>VID</th><th>PID</th><th>Sériové číslo</th><th>Velikost</th><th>Akce</th></tr>
+                    <tr><th>Čas</th><th>Stanice</th><th>Uživatel</th><th>Médium</th><th>VID</th><th>PID</th><th>Sériové číslo</th><th>Velikost</th><th>Akce</th><th>Schváleno</th></tr>
                 </thead>
                 <tbody>
                     @foreach (var i in _recent)
@@ -107,6 +111,10 @@ else
                             <td class="mono">@i.SerialNumber</td>
                             <td class="muted">@FormatSize(i.SizeBytes)</td>
                             <td><span class="pill @PillClass(i.Action)">@i.Action</span></td>
+                            <td>
+                                @if (Approved(i.SerialNumber)) { <span class="pill ok">ano</span> }
+                                else { <span class="pill bad">ne</span> }
+                            </td>
                         </tr>
                     }
                 </tbody>
@@ -131,6 +139,10 @@ else
     private int _compTotal, _compMissing, _wlActive, _wlPending;
     private List<Agg> _agg = new();
     private List<Incident> _recent = new();
+    private HashSet<string> _approvedSerials = new(StringComparer.OrdinalIgnoreCase);
+
+    // Aktuálně schváleno = aktivní položka whitelistu se stejným sériovým číslem
+    private bool Approved(string serial) => !string.IsNullOrEmpty(serial) && _approvedSerials.Contains(serial);
 
     private string WindowLabel => _days == 0 ? "vše" : _days == 365 ? "rok" : $"{_days} dní";
 
@@ -170,6 +182,12 @@ else
             _compMissing = await db.Computers.CountAsync(c => c.InActiveDirectory && c.AgentVersion == "" && c.LastSeen == null);
             _wlActive    = await db.WhitelistDevices.CountAsync(d => d.IsActive);
             _wlPending   = await db.WhitelistDevices.CountAsync(d => !d.IsActive);
+
+            // aktuálně schválená sériová čísla (z aktivního whitelistu)
+            _approvedSerials = new HashSet<string>(
+                await db.WhitelistDevices.Where(d => d.IsActive && d.SerialNumber != "")
+                    .Select(d => d.SerialNumber).ToListAsync(),
+                StringComparer.OrdinalIgnoreCase);
 
             if (_group)
             {
