@@ -48,7 +48,7 @@
 
 | Komponenta | Popis |
 |-----------|-------|
-| `DeviceMonitor` | WMI subscriber – Win32_DiskDrive connect/disconnect eventy |
+| `DeviceMonitor` | WMI subscriber – Win32_DiskDrive connect/disconnect eventy + **startovní sken** už-připojených médií (watchers chytají jen nová připojení) |
 | `WhitelistChecker` | Čte lokální `whitelist.json`, ověřuje RSA-4096 podpis |
 | `PolicyEnforcer` | Rozhoduje o akci dle `policy.mode` (warn / block) |
 | `NotificationService` | Windows Toast notifikace pro přihlášeného uživatele |

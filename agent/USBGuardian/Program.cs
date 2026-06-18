@@ -44,8 +44,9 @@ builder.Services.AddSingleton(sp =>
 {
     var config  = builder.Configuration;
     var logger  = sp.GetRequiredService<ILogger<SignatureVerifier>>();
-    var keyPath = config["signing:publicKeyPath"]
-                  ?? Path.Combine(exeDir, "Config", "whitelist_public.pem");
+    var keyCfg  = config["signing:publicKeyPath"] ?? Path.Combine("Config", "whitelist_public.pem");
+    // Relativní cestu bereme vůči složce exe (ne vůči CWD – služba má CWD System32!).
+    var keyPath = Path.IsPathRooted(keyCfg) ? keyCfg : Path.Combine(exeDir, keyCfg);
     return new SignatureVerifier(logger, keyPath);
 });
 

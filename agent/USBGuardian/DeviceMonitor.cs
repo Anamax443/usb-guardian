@@ -99,6 +99,10 @@ public class DeviceMonitor : BackgroundService
         StartDisconnectWatcher();
         StartWatchdog();
 
+        // Watchers chytají jen NOVÉ připojení (__InstanceCreationEvent). Média připojená
+        // PŘED startem agenta by zůstala neviděna → projdeme je jednorázově při startu.
+        ScanConnectedDevices();
+
         try
         {
             await Task.Delay(Timeout.Infinite, stoppingToken);
@@ -407,6 +411,72 @@ public class DeviceMonitor : BackgroundService
         {
             _logger.LogError(ex, "Chyba při zpracování DiskDrive disconnect události");
         }
+    }
+
+    // --------------------------------------------------------
+    // Startovní sken – už-připojená média při startu agenta.
+    // Watchers chytají jen __InstanceCreationEvent (nové připojení);
+    // tohle pokryje média připojená před startem (i blokace „naostro").
+    // --------------------------------------------------------
+    private void ScanConnectedDevices()
+    {
+        try
+        {
+            using var searcher = new ManagementObjectSearcher(
+                "root\\cimv2",
+                "SELECT * FROM Win32_DiskDrive WHERE InterfaceType='USB' OR InterfaceType='SD'");
+
+            var found = 0;
+            foreach (ManagementBaseObject wmi in searcher.Get())
+            {
+                if (!IsRemovableMedia(wmi)) continue;
+
+                var device = ParseDeviceFromWmi(wmi);
+                foreach (var dl in GetDriveLettersForDisk(wmi["DeviceID"]?.ToString() ?? string.Empty))
+                    device.DriveLetters.Add(dl);
+
+                // Pokud watcher mezitím médium už zaregistroval, nepřidávat dvakrát.
+                if (!string.IsNullOrEmpty(device.PnpDeviceId) && _activeConnections.ContainsKey(device.PnpDeviceId))
+                    continue;
+
+                _logger.LogInformation("Startovní sken – připojené médium: {Device}", device);
+                ProcessDevice(device);
+                found++;
+            }
+
+            _logger.LogInformation("Startovní sken dokončen – zpracováno {Count} připojených médií", found);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Startovní sken připojených médií selhal");
+        }
+    }
+
+    // Drive letters fyzického disku: DiskDrive → DiskPartition → LogicalDisk
+    private List<string> GetDriveLettersForDisk(string diskDeviceId)
+    {
+        var letters = new List<string>();
+        if (string.IsNullOrEmpty(diskDeviceId)) return letters;
+        try
+        {
+            var escaped = diskDeviceId.Replace("\\", "\\\\");
+            using var partSearcher = new ManagementObjectSearcher("root\\cimv2",
+                $"ASSOCIATORS OF {{Win32_DiskDrive.DeviceID='{escaped}'}} WHERE AssocClass=Win32_DiskDriveToDiskPartition");
+            foreach (ManagementBaseObject part in partSearcher.Get())
+            {
+                var partId = part["DeviceID"]?.ToString();
+                if (string.IsNullOrEmpty(partId)) continue;
+                using var ldSearcher = new ManagementObjectSearcher("root\\cimv2",
+                    $"ASSOCIATORS OF {{Win32_DiskPartition.DeviceID='{partId}'}} WHERE AssocClass=Win32_LogicalDiskToPartition");
+                foreach (ManagementBaseObject ld in ldSearcher.Get())
+                {
+                    var letter = ld["DeviceID"]?.ToString()?.Replace(":", "").Trim();
+                    if (!string.IsNullOrEmpty(letter)) letters.Add(letter);
+                }
+            }
+        }
+        catch (Exception ex) { _logger.LogDebug(ex, "Drive letter resolve selhal pro {Id}", diskDeviceId); }
+        return letters;
     }
 
     // --------------------------------------------------------
