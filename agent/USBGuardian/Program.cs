@@ -105,6 +105,9 @@ builder.Services.AddSingleton(sp =>
 builder.Services.AddSingleton<DeviceMonitor>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<DeviceMonitor>());
 
+// Sdílený flush signál: heartbeat (WhitelistSync) → okamžitý sync incidentů (IncidentSync)
+builder.Services.AddSingleton<SyncSignals>();
+
 // ── Lokální admin konzole (loopback, read-only) ──────────────
 // Výchozí VYPNUTO – minimální attack surface (NIS2). Zapnout přes
 // agent.config.local.json: { "localConsole": { "enabled": true } }
@@ -142,8 +145,9 @@ if (!string.IsNullOrEmpty(syncUrl))
         var logger   = sp.GetRequiredService<ILogger<WhitelistSync>>();
         var wlPath   = config["whitelist:localPath"]
                        ?? @"C:\ProgramData\USBGuardian\whitelist\whitelist.json";
-        var interval = int.Parse(config["sync:whitelistSyncIntervalMinutes"] ?? "15");
-        return new WhitelistSync(logger, syncUrl, wlPath, interval, validateTls, pinnedThumbprint);
+        var interval = int.Parse(config["sync:whitelistSyncIntervalMinutes"] ?? "2");
+        var signals  = sp.GetRequiredService<SyncSignals>();
+        return new WhitelistSync(logger, syncUrl, wlPath, interval, validateTls, pinnedThumbprint, signals);
     });
 
     builder.Services.AddHostedService(sp =>
@@ -152,7 +156,8 @@ if (!string.IsNullOrEmpty(syncUrl))
         var logger   = sp.GetRequiredService<ILogger<IncidentSync>>();
         var iLogger  = sp.GetRequiredService<IncidentLogger>();
         var interval = int.Parse(config["sync:incidentSyncIntervalMinutes"] ?? "1");
-        return new IncidentSync(logger, syncUrl, iLogger, interval, validateTls, pinnedThumbprint);
+        var signals  = sp.GetRequiredService<SyncSignals>();
+        return new IncidentSync(logger, syncUrl, iLogger, interval, validateTls, pinnedThumbprint, signals);
     });
 
     Console.WriteLine($"Sync aktivní → {syncUrl}");

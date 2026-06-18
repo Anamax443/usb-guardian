@@ -32,6 +32,7 @@ public class IncidentSync : BackgroundService
     private readonly IncidentLogger _incidentLogger;
     private readonly HttpClient _httpClient;
     private readonly int _syncIntervalMinutes;
+    private readonly SyncSignals? _signals;
 
     // Jitter – náhodné zpoždění při startu (0–60 sekund)
     private static readonly Random _rng = new();
@@ -47,12 +48,14 @@ public class IncidentSync : BackgroundService
         IncidentLogger incidentLogger,
         int syncIntervalMinutes = 1,
         bool validateServerCertificate = true,
-        string pinnedThumbprint = "")
+        string pinnedThumbprint = "",
+        SyncSignals? signals = null)
     {
         _logger              = logger;
         _syncUrl             = syncUrl;
         _incidentLogger      = incidentLogger;
         _syncIntervalMinutes = syncIntervalMinutes;
+        _signals             = signals;
 
         // TLS: pinning (otisk API certu) / vývojové vypnutí / výchozí validace
         _httpClient = USBGuardian.Security.TlsClient.Create(validateServerCertificate, pinnedThumbprint, 60);
@@ -77,7 +80,23 @@ public class IncidentSync : BackgroundService
         while (!stoppingToken.IsCancellationRequested)
         {
             await TrySyncFiles();
-            await Task.Delay(TimeSpan.FromMinutes(_syncIntervalMinutes), stoppingToken);
+
+            // Čekáme interval, ale probudíme se dřív, pokud konzole vyžádala data (ReportNow).
+            try
+            {
+                if (_signals is not null)
+                {
+                    var woken = await _signals.WaitForFlushOrInterval(
+                        TimeSpan.FromMinutes(_syncIntervalMinutes), stoppingToken);
+                    if (woken)
+                        _logger.LogInformation("IncidentSync: vyžádán okamžitý flush (ReportNow) – odesílám frontu");
+                }
+                else
+                {
+                    await Task.Delay(TimeSpan.FromMinutes(_syncIntervalMinutes), stoppingToken);
+                }
+            }
+            catch (OperationCanceledException) { break; }
         }
     }
 

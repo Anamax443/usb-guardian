@@ -42,6 +42,8 @@ else
             @if (_action is not null) { <input type="hidden" name="action" value="@_action" /> }
             @if (_days != 30) { <input type="hidden" name="days" value="@_days" /> }
             @if (!_group) { <input type="hidden" name="group" value="0" /> }
+            @if (_sort != "time") { <input type="hidden" name="sort" value="@_sort" /> }
+            @if (!_desc) { <input type="hidden" name="dir" value="asc" /> }
             <input class="inp" name="q" value="@_q" placeholder="hledat stanice / uživatel / médium / S/N" />
             <button class="btn" type="submit">Hledat</button>
         </form>
@@ -96,7 +98,18 @@ else
         {
             <table>
                 <thead>
-                    <tr><th>Čas</th><th>Stanice</th><th>Uživatel</th><th>Médium</th><th>VID</th><th>PID</th><th>Sériové číslo</th><th>Velikost</th><th>Akce</th><th>Schváleno</th></tr>
+                    <tr>
+                        <th><a class="sortlink" href="@SortUrl("time")">Čas@SortArrow("time")</a></th>
+                        <th><a class="sortlink" href="@SortUrl("host")">Stanice@SortArrow("host")</a></th>
+                        <th><a class="sortlink" href="@SortUrl("user")">Uživatel@SortArrow("user")</a></th>
+                        <th><a class="sortlink" href="@SortUrl("media")">Médium@SortArrow("media")</a></th>
+                        <th><a class="sortlink" href="@SortUrl("vid")">VID@SortArrow("vid")</a></th>
+                        <th><a class="sortlink" href="@SortUrl("pid")">PID@SortArrow("pid")</a></th>
+                        <th><a class="sortlink" href="@SortUrl("serial")">Sériové číslo@SortArrow("serial")</a></th>
+                        <th><a class="sortlink" href="@SortUrl("size")">Velikost@SortArrow("size")</a></th>
+                        <th><a class="sortlink" href="@SortUrl("action")">Akce@SortArrow("action")</a></th>
+                        <th>Schváleno</th>
+                    </tr>
                 </thead>
                 <tbody>
                     @foreach (var i in _recent)
@@ -128,11 +141,15 @@ else
     [SupplyParameterFromQuery(Name = "days")]   public int? DaysParam { get; set; }
     [SupplyParameterFromQuery(Name = "q")]      public string? QParam { get; set; }
     [SupplyParameterFromQuery(Name = "group")]  public int? GroupParam { get; set; }
+    [SupplyParameterFromQuery(Name = "sort")]   public string? SortParam { get; set; }
+    [SupplyParameterFromQuery(Name = "dir")]    public string? DirParam { get; set; }
 
     private string? _action;
     private int _days;
     private string? _q;
     private bool _group;
+    private string _sort = "time";
+    private bool _desc = true;
 
     private string? _error;
     private int _total, _blocked, _warned;
@@ -155,6 +172,8 @@ else
         _days   = DaysParam ?? 30;
         _q      = string.IsNullOrWhiteSpace(QParam) ? null : QParam.Trim();
         _group  = (GroupParam ?? 1) == 1;
+        _sort   = string.IsNullOrWhiteSpace(SortParam) ? "time" : SortParam.Trim().ToLowerInvariant();
+        _desc   = !string.Equals(DirParam, "asc", StringComparison.OrdinalIgnoreCase);
 
         try
         {
@@ -214,7 +233,7 @@ else
             }
             else
             {
-                _recent = await baseq.OrderByDescending(i => i.Timestamp).Take(200).ToListAsync();
+                _recent = await SortDetail(baseq).Take(200).ToListAsync();
             }
         }
         catch (Exception ex) { _error = ex.Message; }
@@ -231,7 +250,42 @@ else
         if (d != 30) parts.Add($"days={d}");
         if (_q is not null) parts.Add($"q={Uri.EscapeDataString(_q)}");
         if (!g) parts.Add("group=0");
+        if (_sort != "time") parts.Add($"sort={_sort}");
+        if (!_desc) parts.Add("dir=asc");
         return parts.Count > 0 ? "?" + string.Join("&", parts) : "";
+    }
+
+    // Klik na hlavičku: toggluje směr na aktivním sloupci, nový sloupec → sestupně.
+    private string SortUrl(string key)
+    {
+        var desc = _sort == key ? !_desc : true;
+        var parts = new List<string>();
+        if (_action is not null) parts.Add($"action={_action}");
+        if (_days != 30) parts.Add($"days={_days}");
+        if (_q is not null) parts.Add($"q={Uri.EscapeDataString(_q)}");
+        if (!_group) parts.Add("group=0");
+        if (key != "time") parts.Add($"sort={key}");
+        if (!desc) parts.Add("dir=asc");
+        return parts.Count > 0 ? "?" + string.Join("&", parts) : "";
+    }
+
+    private string SortArrow(string key) => _sort == key ? (_desc ? " ▼" : " ▲") : "";
+
+    private IQueryable<Incident> SortDetail(IQueryable<Incident> q)
+    {
+        var d = _desc;
+        return _sort switch
+        {
+            "host"   => d ? q.OrderByDescending(i => i.Hostname)     : q.OrderBy(i => i.Hostname),
+            "user"   => d ? q.OrderByDescending(i => i.Username)     : q.OrderBy(i => i.Username),
+            "media"  => d ? q.OrderByDescending(i => i.FriendlyName) : q.OrderBy(i => i.FriendlyName),
+            "vid"    => d ? q.OrderByDescending(i => i.VendorId)     : q.OrderBy(i => i.VendorId),
+            "pid"    => d ? q.OrderByDescending(i => i.ProductId)    : q.OrderBy(i => i.ProductId),
+            "serial" => d ? q.OrderByDescending(i => i.SerialNumber) : q.OrderBy(i => i.SerialNumber),
+            "size"   => d ? q.OrderByDescending(i => i.SizeBytes)    : q.OrderBy(i => i.SizeBytes),
+            "action" => d ? q.OrderByDescending(i => i.Action)       : q.OrderBy(i => i.Action),
+            _        => d ? q.OrderByDescending(i => i.Timestamp)    : q.OrderBy(i => i.Timestamp),
+        };
     }
 
     private static string PillClass(string action) => action switch

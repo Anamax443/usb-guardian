@@ -30,8 +30,24 @@ public class HeartbeatController : ControllerBase
         var computer = await _db.Computers
             .FirstOrDefaultAsync(c => c.Hostname == hostname);
 
+        // Vyžádání dat z konzole: klíč cmd.report.<HOST> v AppSettings nese čas požadavku (UTC ISO).
+        // Jednorázovost bez zápisu z API: ReportNow=true jen když je požadavek novější než PŘEDCHOZÍ
+        // kontakt. Jakmile tento heartbeat posune LastSeen na teď, příští heartbeaty už ReportNow nevrátí.
+        var reportNow = false;
         if (computer != null)
         {
+            var prevSeen = computer.LastSeen;
+
+            var key = "cmd.report." + (hostname ?? string.Empty).ToUpperInvariant();
+            var cmdRow = await _db.AppSettings.FirstOrDefaultAsync(s => s.Key == key);
+            if (cmdRow != null
+                && DateTime.TryParse(cmdRow.Value, null,
+                       System.Globalization.DateTimeStyles.RoundtripKind | System.Globalization.DateTimeStyles.AdjustToUniversal,
+                       out var requestedAt))
+            {
+                reportNow = prevSeen is null || requestedAt > prevSeen.Value;
+            }
+
             computer.LastSeen     = DateTime.UtcNow;
             computer.AgentVersion = agentVersion ?? computer.AgentVersion;
             await _db.SaveChangesAsync();
@@ -48,6 +64,7 @@ public class HeartbeatController : ControllerBase
         {
             CurrentWhitelistVersion  = currentVersion,
             WhitelistUpdateAvailable = currentVersion != whitelistVersion,
+            ReportNow                = reportNow,
             ServerTime               = DateTime.UtcNow
         });
     }

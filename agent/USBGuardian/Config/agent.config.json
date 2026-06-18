@@ -39,7 +39,7 @@
   },
 
   "sync": {
-    "whitelistSyncIntervalMinutes": 15,
+    "whitelistSyncIntervalMinutes": 2,
     "incidentSyncIntervalMinutes": 1
   },
 

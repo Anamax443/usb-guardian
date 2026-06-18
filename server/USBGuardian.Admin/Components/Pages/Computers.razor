@@ -25,6 +25,9 @@ else
         <EditForm FormName="adsync-run" Model="_form" OnValidSubmit="UpdateAd">
             <button class="btn" type="submit">↻ Aktualizovat z AD</button>
         </EditForm>
+        <EditForm FormName="req-all" Model="_form" OnValidSubmit="RequestReportAll">
+            <button class="btn" type="submit" title="Vyžádat data od všech stanic, které hlásí agenta">⟳ Vyžádat data od všech</button>
+        </EditForm>
         <span class="muted">AD sync: @AdSync.LastSummary@(AdSync.LastRunUtc is { } t ? $" ({t.ToLocalTime():HH:mm:ss})" : "")</span>
     </div>
 
@@ -42,7 +45,7 @@ else
         <thead>
             <tr>
                 <th>Kom.</th><th>Hostname</th><th>Cesta v AD</th><th>OS</th><th>Doména</th>
-                <th>Stav</th><th>Agent verze</th><th>Poslední kontakt</th>
+                <th>Stav</th><th>Agent verze</th><th>Poslední kontakt</th><th data-no-print>Data</th>
             </tr>
         </thead>
         <tbody>
@@ -61,6 +64,19 @@ else
                     </td>
                     <td>@(string.IsNullOrEmpty(c.AgentVersion) ? "—" : c.AgentVersion)</td>
                     <td>@(c.LastSeen is null ? "—" : c.LastSeen.Value.ToLocalTime().ToString("dd.MM.yyyy HH:mm"))</td>
+                    <td data-no-print>
+                        @if (Reports(c))
+                        {
+                            <EditForm FormName="@($"req-{c.Hostname}")" Model="_form" OnValidSubmit="RequestReport">
+                                <input type="hidden" name="ReqHost" value="@c.Hostname" />
+                                <button class="btn" type="submit" title="Vyžádat aktuální data při nejbližším heartbeatu (do ~2 min)">⟳ Vyžádat</button>
+                            </EditForm>
+                            @if (Pending(c))
+                            {
+                                <span class="pill warn" title="Čeká na další heartbeat agenta (do ~2 min)">vyžádáno @_reqMap[c.Hostname].ToLocalTime().ToString("HH:mm")</span>
+                            }
+                        }
+                    </td>
                 </tr>
             }
         </tbody>
@@ -72,6 +88,7 @@ else
 @code {
     [SupplyParameterFromQuery(Name = "stav")] public string? Stav { get; set; }
     [SupplyParameterFromQuery(Name = "q")]    public string? Q { get; set; }
+    [SupplyParameterFromForm]                 public string? ReqHost { get; set; }
 
     private const int DefaultSilentAfterMinutes = 180;
 
@@ -81,6 +98,13 @@ else
     private int _silentAfterMin = DefaultSilentAfterMinutes;
     private readonly FormModel _form = new();
     private sealed class FormModel { }
+
+    // hostname (UPPER) → čas posledního vyžádání dat (z AppSettings cmd.report.*)
+    private Dictionary<string, DateTime> _reqMap = new(StringComparer.OrdinalIgnoreCase);
+
+    // Vyžádáno, ale agent se od té doby ještě neozval (req novější než LastSeen).
+    private bool Pending(Computer c) =>
+        _reqMap.TryGetValue(c.Hostname, out var req) && (c.LastSeen is null || req > c.LastSeen.Value);
 
     private static bool Reports(Computer c) => !string.IsNullOrEmpty(c.AgentVersion) || c.LastSeen is not null;
 
@@ -123,6 +147,57 @@ else
         return q;
     }
 
+    private const string ReqKeyPrefix = "cmd.report.";
+
+    private static async Task<Dictionary<string, DateTime>> LoadReportRequests(AppDbContext db)
+    {
+        var map = new Dictionary<string, DateTime>(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            var rows = await db.AppSettings.Where(s => s.Key.StartsWith(ReqKeyPrefix)).ToListAsync();
+            foreach (var r in rows)
+            {
+                if (DateTime.TryParse(r.Value, null,
+                        System.Globalization.DateTimeStyles.RoundtripKind | System.Globalization.DateTimeStyles.AdjustToUniversal,
+                        out var t))
+                    map[r.Key.Substring(ReqKeyPrefix.Length)] = t;
+            }
+        }
+        catch { /* AppSettings nemusí existovat – funkce degraduje na žádné vyžádání */ }
+        return map;
+    }
+
+    private async Task RequestReport()
+    {
+        if (!string.IsNullOrWhiteSpace(ReqHost))
+            await SetReportRequest(new[] { ReqHost.Trim() });
+        await Load();
+    }
+
+    private async Task RequestReportAll()
+    {
+        await SetReportRequest(_all.Where(Reports).Select(c => c.Hostname));
+        await Load();
+    }
+
+    private async Task SetReportRequest(IEnumerable<string> hosts)
+    {
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var now = DateTime.UtcNow.ToString("o");
+            foreach (var h in hosts.Where(h => !string.IsNullOrWhiteSpace(h)))
+            {
+                var key = ReqKeyPrefix + h.Trim().ToUpperInvariant();
+                var row = await db.AppSettings.FirstOrDefaultAsync(s => s.Key == key);
+                if (row is null) db.AppSettings.Add(new AppSetting { Key = key, Value = now });
+                else            row.Value = now;
+            }
+            await db.SaveChangesAsync();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+
     private static async Task<int> LoadSilentThreshold(AppDbContext db)
     {
         try
@@ -149,6 +224,7 @@ else
         {
             await using var db = await DbFactory.CreateDbContextAsync();
             _silentAfterMin = await LoadSilentThreshold(db);
+            _reqMap = await LoadReportRequests(db);
             _all = await db.Computers.OrderBy(c => c.Hostname).ToListAsync();
             _reporting = _all.Count(Reports);
             _silent    = _all.Count(Silent);

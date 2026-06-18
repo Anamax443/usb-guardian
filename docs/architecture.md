@@ -54,8 +54,9 @@
 | `NotificationService` | Windows Toast notifikace pro přihlášeného uživatele |
 | `IncidentLogger` | Ukládá incidenty do JSON front (`queue/`) |
 | `DeviceBlocker` | Blokuje médium přes DeviceIoControl (IOCTL_STORAGE_EJECT_MEDIA) |
-| `WhitelistSync` | Pravidelně stahuje whitelist ze serveru (interval: 15 min) |
-| `IncidentSync` | Odesílá frontu incidentů na server (interval: 1 min, s jitter) |
+| `WhitelistSync` | Heartbeat + stahování whitelistu (interval: **2 min**, konfig `sync:whitelistSyncIntervalMinutes`). Heartbeat nese verzi/online; při změně whitelistu se stáhne v témž cyklu → nový whitelist na klientech do ~2 min |
+| `IncidentSync` | Odesílá frontu incidentů na server (interval: 1 min, s jitter; probudí se dřív při `ReportNow`) |
+| `SyncSignals` | Sdílený signál: heartbeat (`ReportNow`) → okamžitý flush fronty incidentů |
 | `SignatureVerifier` | Ověřuje RSA-4096 podpis whitelistu – fail-secure |
 
 ## Komponenty serveru
@@ -211,6 +212,22 @@ Bez CA, bez cert store. Agent ho ověří **pinningem otisku** (`TlsClient.cs`, 
 → šifrované i ověřené. Otisk = `GET /api/cert-info` / log API. Přístup k API přes policy
 `USBGuardianClients` (členství v `Authorization:AllowedGroups`).
 
+## Vyžádání dat na klik (ReportNow)
+
+Push model = server nemá zpětný kanál k agentovi. „Vyžádat data" proto jede přes **příkaz přibalený
+do odpovědi na heartbeat** (stejný kanál jako `WhitelistUpdateAvailable`):
+
+```
+Konzole (Stanice) → AppSettings: cmd.report.<HOST> = čas požadavku (UTC)
+Agent heartbeat (≤2 min) → HeartbeatController: ReportNow=true POKUD požadavek novější než PŘEDCHOZÍ LastSeen
+        ↓ (jednorázové – příští heartbeat má LastSeen už za časem požadavku → ReportNow=false; API jen ČTE AppSettings)
+Agent: heartbeat potvrdil online+verzi (LastSeen) + SyncSignals → IncidentSync hned flushne frontu
+Konzole: „vyžádáno HH:mm" dokud se agent neozve (LastSeen ≥ čas požadavku)
+```
+
+Latence ≤ heartbeat interval (~2 min). Hromadně přes „Vyžádat data od všech" (jen stanice hlásící agenta).
+Klíč `cmd.report.<HOST>` v `AppSettings` slouží i jako audit „naposledy vyžádáno".
+
 ## Centrální nastavení a alerty (konzole)
 
 Tabulka `AppSettings` (key/value, migrace 06) spravovaná z Nastavení; `AccessCache` singleton:
@@ -223,9 +240,11 @@ Tabulka `AppSettings` (key/value, migrace 06) spravovaná z Nastavení; `AccessC
 ## Konzole – funkce stránek
 
 - **Přehled** – dlaždicový souhrn napříč listy + filtr (období/akce/fulltext) + kumulace (GroupBy přes
-  anonymní typ → in-memory map) + sloupec „Schváleno" dle aktivního whitelistu.
+  anonymní typ → in-memory map) + sloupec „Schváleno" dle aktivního whitelistu. Tabulka „Detailně" má
+  **řaditelné hlavičky** (řazení v DB přes query-string, před `Take(200)`).
 - **Stanice** – AD inventář, filtr, cesta v AD (OU), ikona komunikace (dle čerstvosti `LastSeen`),
-  dlaždice „Zmlklo agentů" (hlásí agenta, ale `LastSeen` starší než práh `comm.silentAfterMinutes` – možný výpadek/tamper).
+  dlaždice „Zmlklo agentů" (hlásí agenta, ale `LastSeen` starší než práh `comm.silentAfterMinutes` – možný výpadek/tamper),
+  tlačítko „Vyžádat data" (řádek/hromadně) → [ReportNow](#vyžádání-dat-na-klik-reportnow).
 - **Whitelist** – serial-only zadání + backfill VID/PID z incidentů + import + inline edit + `IsActive` checkbox.
 - **Dokumentace** – render `.md` (Markdig) jako tisknutelné HTML, rozcestník.
 

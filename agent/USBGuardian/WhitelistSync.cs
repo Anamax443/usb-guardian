@@ -21,6 +21,7 @@ public class WhitelistSync : BackgroundService
     private readonly string _localWhitelistPath;
     private readonly int _syncIntervalMinutes;
     private readonly HttpClient _httpClient;
+    private readonly SyncSignals? _signals;
 
     // Cesta k .sig souboru (vedle whitelistu)
     private string SignaturePath => _localWhitelistPath + ".sig";
@@ -31,12 +32,14 @@ public class WhitelistSync : BackgroundService
         string localWhitelistPath,
         int syncIntervalMinutes,
         bool validateServerCertificate = true,
-        string pinnedThumbprint = "")
+        string pinnedThumbprint = "",
+        SyncSignals? signals = null)
     {
         _logger              = logger;
         _syncUrl             = syncUrl;
         _localWhitelistPath  = localWhitelistPath;
         _syncIntervalMinutes = syncIntervalMinutes;
+        _signals             = signals;
 
         // TLS: pinning (otisk API certu) / vývojové vypnutí / výchozí validace
         _httpClient = USBGuardian.Security.TlsClient.Create(validateServerCertificate, pinnedThumbprint, 30);
@@ -86,6 +89,14 @@ public class WhitelistSync : BackgroundService
             _logger.LogInformation(
                 "WhitelistSync: heartbeat OK – server: {Server}, lokální: {Local}",
                 heartbeat.CurrentWhitelistVersion, localVersion);
+
+            // Konzole vyžádala okamžité odevzdání dat → probudíme IncidentSync.
+            // Heartbeat sám už potvrdil online + verzi (server posunul LastSeen).
+            if (heartbeat.ReportNow)
+            {
+                _logger.LogInformation("WhitelistSync: konzole vyžádala data (ReportNow) → spouštím flush incidentů");
+                _signals?.RequestFlush();
+            }
 
             if (!heartbeat.WhitelistUpdateAvailable)
             {
@@ -189,5 +200,6 @@ internal class HeartbeatDto
 {
     public string   CurrentWhitelistVersion  { get; set; } = string.Empty;
     public bool     WhitelistUpdateAvailable { get; set; }
+    public bool     ReportNow                { get; set; }
     public DateTime ServerTime               { get; set; }
 }

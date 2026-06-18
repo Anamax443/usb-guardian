@@ -63,6 +63,15 @@ Firewall `:4200` byl vytvořen přes DCOM/CIM. Konfigurace na serveru:
 
 ## 5. Další kroky / pending
 
+> **Nově implementováno (čeká na nasazení API operátorem + rollout agenta):**
+> - **Whitelist na klienty rychleji**: `WhitelistSync` interval **15 → 2 min** (konfig `sync:whitelistSyncIntervalMinutes`).
+>   Nový schválený whitelist je na klientech do ~2 min (heartbeat sám stáhne). Stačí redeploy agenta.
+> - **„Vyžádat data" na klik** (Stanice): příkaz `ReportNow` přibalený do heartbeatu (klíč `cmd.report.<HOST>`
+>   v `AppSettings`; API jen čte, jednorázovost přes porovnání s předchozím `LastSeen`). Agent při něm hned
+>   flushne incidenty. **Vyžaduje deploy API na SQL-04 (operátor)** + redeploy agenta; konzole funguje hned.
+> - **Dlaždice „Zmlklo agentů"** + práh `comm.silentAfterMinutes` (Nastavení); **řaditelné** sloupce „Detailně" (Přehled).
+
+
 - **Zavřít HTTP 5050** na SQL-04 (jen HTTPS) – NIS2. (Potřebuje SQL-04: firewall block, nebo přebindovat API.)
 - **Distribuce + vzdálená instalace agenta** na ~210 stanic bez agenta. Agent config = `syncUrl https://…:5443`
   + `tls.pinnedThumbprint`. Vzdálená instalace přes WinRM (`Enable-PSRemoting` na klientech), bez uložených

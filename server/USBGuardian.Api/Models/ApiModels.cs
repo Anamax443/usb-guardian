@@ -71,6 +71,10 @@ public class HeartbeatResponse
     /// <summary>True pokud agent má zastaralý whitelist</summary>
     public bool WhitelistUpdateAvailable { get; set; }
 
+    /// <summary>True pokud konzole vyžádala okamžité odevzdání dat (operátor klikl „Vyžádat data").
+    /// Agent na to reaguje okamžitým flushem fronty incidentů. Jednorázové (viz HeartbeatController).</summary>
+    public bool ReportNow { get; set; }
+
     /// <summary>Serverový čas pro sync</summary>
     public DateTime ServerTime { get; set; } = DateTime.UtcNow;
 }

@@ -107,6 +107,10 @@ dl.cfg dd { margin:0; font-size:13px; font-weight:500; }
 .dot.ok { background:var(--ok); } .dot.bad { background:var(--critical); }
 .dot.warn { background:var(--warn); } .dot.off { background:var(--text-dim); }
 
+/* ── řaditelné hlavičky tabulky ── */
+th .sortlink, a.sortlink { color:inherit; text-decoration:none; cursor:pointer; white-space:nowrap; display:inline-block; }
+a.sortlink:hover { color:var(--accent); }
+
 /* ── tisk = vždy light ── */
 @media print {
   :root, html[data-theme] {
