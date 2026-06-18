@@ -74,17 +74,16 @@ builder.Services.AddAuthorization(options =>
 });
 builder.Services.AddCascadingAuthenticationState();
 
-// ── AD sync (server natáhne počítače z AD a zapíše do Computers) ─
-// Default vypnuto; zapnout v appsettings.local.json. Vyžaduje write
-// na Computers (účet služby) – viz least-privilege grant.
+// ── AD sync ──────────────────────────────────────────────────
+// Runner je volatelný i z UI ("Aktualizovat z AD"); časovač běží jen
+// když AdSync:Enabled=true. Vyžaduje write na Computers (účet služby).
+builder.Services.AddSingleton<AdSyncRunner>();
 if (bool.Parse(builder.Configuration["AdSync:Enabled"] ?? "false"))
 {
     builder.Services.AddHostedService(sp => new AdSyncService(
+        sp.GetRequiredService<AdSyncRunner>(),
         sp.GetRequiredService<ILogger<AdSyncService>>(),
-        sp.GetRequiredService<IDbContextFactory<AppDbContext>>(),
-        builder.Configuration["AdSync:SearchBase"] ?? string.Empty,
-        int.Parse(builder.Configuration["AdSync:IntervalMinutes"] ?? "60"),
-        bool.Parse(builder.Configuration["AdSync:IncludeDisabled"] ?? "false")));
+        int.Parse(builder.Configuration["AdSync:IntervalMinutes"] ?? "60")));
 }
 
 // ── Blazor Server ─────────────────────────────────────────────

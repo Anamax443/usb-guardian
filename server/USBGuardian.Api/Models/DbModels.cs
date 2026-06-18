@@ -28,6 +28,8 @@ public class Computer
     public bool InActiveDirectory { get; set; }
     /// <summary>Čas posledního AD syncu tohoto záznamu.</summary>
     public DateTime? AdSyncedAt { get; set; }
+    /// <summary>Cesta (OU) v Active Directory, např. "AXIMA / Computers".</summary>
+    public string? AdPath { get; set; }
 }
 
 [Table("WhitelistDevices")]

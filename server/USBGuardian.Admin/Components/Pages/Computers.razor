@@ -1,5 +1,6 @@
 @page "/stanice"
 @inject IDbContextFactory<AppDbContext> DbFactory
+@inject USBGuardian.Admin.AdSync.AdSyncRunner AdSync
 
 <h1>Stanice</h1>
 
@@ -7,37 +8,44 @@
 {
     <div class="banner bad">Nelze načíst data z databáze: @_error</div>
 }
-else if (_loading)
-{
-    <p>Načítám…</p>
-}
 else
 {
     <div class="cards">
-        <div class="card"><div class="num">@_all.Count</div><div class="lbl">Stanic v AD</div></div>
-        <div class="card"><div class="num">@_reporting</div><div class="lbl">Hlásí agenta</div></div>
-        <div class="card bad"><div class="num">@_missing</div><div class="lbl">Chybí agent</div></div>
+        <a class="card tile @(Stav is null ? "active" : "")" href="stanice">
+            <div class="num">@_all.Count</div><div class="lbl">Stanic v AD</div></a>
+        <a class="card tile @(Stav == "hlasi" ? "active" : "")" href="stanice?stav=hlasi">
+            <div class="num">@_reporting</div><div class="lbl">Hlásí agenta</div></a>
+        <a class="card tile bad @(Stav == "chybi" ? "active" : "")" href="stanice?stav=chybi">
+            <div class="num">@_missing</div><div class="lbl">Chybí agent</div></a>
     </div>
 
-    <h2>Inventář (@_all.Count)</h2>
-    <div style="margin-bottom:10px">
-        <label><input type="checkbox" @bind="_onlyMissing" @bind:after="StateHasChanged" /> jen „chybí agent"</label>
+    <div class="toolbar">
+        <EditForm FormName="adsync-run" Model="_form" OnValidSubmit="UpdateAd">
+            <button class="btn" type="submit">↻ Aktualizovat z AD</button>
+        </EditForm>
+        <span class="muted">AD sync: @AdSync.LastSummary@(AdSync.LastRunUtc is { } t ? $" ({t.ToLocalTime():HH:mm:ss})" : "")</span>
     </div>
+
+    <h2>Inventář (@Filtered().Count())</h2>
     <table>
         <thead>
-            <tr><th>Hostname</th><th>OS</th><th>Doména</th><th>Stav</th><th>Agent verze</th><th>Poslední kontakt</th></tr>
+            <tr>
+                <th>Hostname</th><th>Cesta v AD</th><th>OS</th><th>Doména</th>
+                <th>Stav</th><th>Agent verze</th><th>Poslední kontakt</th>
+            </tr>
         </thead>
         <tbody>
             @foreach (var c in Filtered())
             {
                 <tr>
                     <td>@c.Hostname</td>
+                    <td class="muted">@(string.IsNullOrEmpty(c.AdPath) ? "—" : c.AdPath)</td>
                     <td>@c.OperatingSystem</td>
                     <td class="muted">@c.Domain</td>
                     <td>
-                        @if (Reports(c))      { <span class="pill ok">hlásí</span> }
+                        @if (Reports(c)) { <span class="pill ok">hlásí</span> }
                         else if (c.InActiveDirectory) { <span class="pill bad">chybí agent</span> }
-                        else                  { <span class="pill warn">není v AD</span> }
+                        else { <span class="pill warn">není v AD</span> }
                     </td>
                     <td>@(string.IsNullOrEmpty(c.AgentVersion) ? "—" : c.AgentVersion)</td>
                     <td>@(c.LastSeen is null ? "—" : c.LastSeen.Value.ToLocalTime().ToString("dd.MM.yyyy HH:mm"))</td>
@@ -48,18 +56,26 @@ else
 }
 
 @code {
-    private bool _loading = true;
-    private bool _onlyMissing;
+    [SupplyParameterFromQuery(Name = "stav")] public string? Stav { get; set; }
+
     private string? _error;
     private List<Computer> _all = new();
     private int _reporting, _missing;
+    private readonly FormModel _form = new();
+    private sealed class FormModel { }
 
     private static bool Reports(Computer c) => !string.IsNullOrEmpty(c.AgentVersion) || c.LastSeen is not null;
 
-    private IEnumerable<Computer> Filtered() =>
-        _onlyMissing ? _all.Where(c => c.InActiveDirectory && !Reports(c)) : _all;
+    private IEnumerable<Computer> Filtered() => Stav switch
+    {
+        "hlasi" => _all.Where(Reports),
+        "chybi" => _all.Where(c => c.InActiveDirectory && !Reports(c)),
+        _       => _all
+    };
 
-    protected override async Task OnInitializedAsync()
+    protected override async Task OnInitializedAsync() => await Load();
+
+    private async Task Load()
     {
         try
         {
@@ -67,14 +83,17 @@ else
             _all = await db.Computers.OrderBy(c => c.Hostname).ToListAsync();
             _reporting = _all.Count(Reports);
             _missing   = _all.Count(c => c.InActiveDirectory && !Reports(c));
+            _error = null;
         }
         catch (Exception ex)
         {
             _error = ex.Message;
         }
-        finally
-        {
-            _loading = false;
-        }
+    }
+
+    private async Task UpdateAd()
+    {
+        await AdSync.RunOnceAsync();
+        await Load();
     }
 }

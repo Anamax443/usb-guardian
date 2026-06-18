@@ -1,18 +1,34 @@
 {
-  "_comment": "Zkopíruj na 'appsettings.local.json' a doplň reálné hodnoty. Tento soubor je gitignored.",
+  // ============================================================
+  // appsettings.local.json — JEDINÉ místo s firemně specifickými
+  // hodnotami. Zkopíruj na 'appsettings.local.json' a uprav.
+  // Nasazení do jiné firmy = změna tohoto souboru, NE kódu.
+  // Soubor je gitignored (*.local.json).
+  // ============================================================
 
   "ConnectionStrings": {
-    "DefaultConnection": "Server=tcp:B-S-W-SQL-04,1433;Database=USBGuardian;Integrated Security=true;TrustServerCertificate=true;"
+    // SQL Server s databází USBGuardian (Windows auth / gMSA)
+    "DefaultConnection": "Server=tcp:SQL-SERVER,1433;Database=USBGuardian;Integrated Security=true;TrustServerCertificate=true;"
   },
 
   "Authorization": {
-    "AdminGroups": [ "AXINETWORK\\USB-Guardian-Admins" ],
+    // AD skupiny s přístupem do konzole (formát "DOMENA\\Skupina")
+    "AdminGroups": [ "DOMENA\\USB-Guardian-Admins" ],
+    // Volitelně konkrétní účty navíc (whitelist)
+    "AllowedUsers": [ "DOMENA\\jmeno.admina" ],
+    // true POUZE pro lokální vývoj – v produkci VŽDY false
     "DevAllowAll": false
   },
 
   "Kestrel": {
-    "Endpoints": {
-      "Http": { "Url": "http://0.0.0.0:4200" }
-    }
+    // Port konzole (0.0.0.0 = dostupné na síti)
+    "Endpoints": { "Http": { "Url": "http://0.0.0.0:4200" } }
+  },
+
+  "AdSync": {
+    "Enabled": true,            // časovač AD syncu
+    "IntervalMinutes": 60,
+    "SearchBase": "",           // prázdné = celá doména serveru; jinak DN konkrétní OU
+    "IncludeDisabled": false    // zahrnout i disabled účty počítačů
   }
 }
