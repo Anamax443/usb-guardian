@@ -139,11 +139,12 @@ public class PolicyEnforcer
     {
         if (wlStatus == WhitelistStatus.Expired)
         {
+            // Dokumentované hodnoty: warn | block | allow (+ zpětně staré strict_block/block_new).
             return _onExpired switch
             {
-                "strict_block" => IncidentAction.Blocked,
-                "block_new"    => IncidentAction.Blocked,
-                _              => IncidentAction.Warned
+                "block" or "strict_block" or "block_new" => IncidentAction.Blocked,
+                "allow"                                  => IncidentAction.Allowed,
+                _                                        => IncidentAction.Warned
             };
         }
 
