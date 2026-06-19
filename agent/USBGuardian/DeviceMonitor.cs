@@ -544,7 +544,7 @@ public class DeviceMonitor : BackgroundService
         var device = new DeviceInfo
         {
             FriendlyName     = wmi["Caption"]?.ToString() ?? "Neznámé zařízení",
-            SerialNumber     = wmi["SerialNumber"]?.ToString() ?? ExtractSerialFromPnp(pnpId),
+            SerialNumber     = (wmi["SerialNumber"]?.ToString() ?? ExtractSerialFromPnp(pnpId))?.Trim() ?? string.Empty,
             FirmwareRevision = wmi["FirmwareRevision"]?.ToString() ?? string.Empty,
             SizeBytes        = long.TryParse(wmi["Size"]?.ToString(), out var size) ? size : 0,
             PnpDeviceId      = pnpId,

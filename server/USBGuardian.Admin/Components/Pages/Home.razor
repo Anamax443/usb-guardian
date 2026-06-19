@@ -159,7 +159,7 @@ else
     private HashSet<string> _approvedSerials = new(StringComparer.OrdinalIgnoreCase);
 
     // Aktuálně schváleno = aktivní položka whitelistu se stejným sériovým číslem
-    private bool Approved(string serial) => !string.IsNullOrEmpty(serial) && _approvedSerials.Contains(serial);
+    private bool Approved(string serial) => !string.IsNullOrWhiteSpace(serial) && _approvedSerials.Contains(serial.Trim());
 
     private string WindowLabel => _days == 0 ? "vše" : _days == 365 ? "rok" : $"{_days} dní";
 
@@ -203,10 +203,10 @@ else
             _wlPending   = await db.WhitelistDevices.CountAsync(d => !d.IsActive);
 
             // aktuálně schválená sériová čísla (z aktivního whitelistu)
+            var wlSerials = await db.WhitelistDevices.Where(d => d.IsActive && d.SerialNumber != "")
+                    .Select(d => d.SerialNumber).ToListAsync();
             _approvedSerials = new HashSet<string>(
-                await db.WhitelistDevices.Where(d => d.IsActive && d.SerialNumber != "")
-                    .Select(d => d.SerialNumber).ToListAsync(),
-                StringComparer.OrdinalIgnoreCase);
+                wlSerials.Select(s => s.Trim()), StringComparer.OrdinalIgnoreCase);
 
             if (_group)
             {
