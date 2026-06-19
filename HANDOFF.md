@@ -117,6 +117,18 @@ cílů (`deploy.targetsFile`), instalaci dělá **scheduled task na .213 pod gMS
   incidenty zaznamenaly, ale uživatel by varování neviděl.
 - **Rozšíření na fleet:** GPO trust publisheru na klienty (5.4), v Nastavení zapnout (dry-run → ostrý), `.181 → .180 → fleet`.
 
+### 5.3b Publikační/podpisový workflow whitelistu — HOTOVO (klient = 1:1 kopie serveru)
+Odemyká doručení katalogu k agentům (předtím se změny v konzoli k agentům nedostaly – verze se nebumpla + chyběl
+`/api/whitelist/signature`). Tok: konzole **Whitelist → „Vydat verzi"** (snapshot aktivního katalogu → kanonický
+`whitelist.json` blob, nová verze `yyyy-MM-dd-vN`, validita `whitelist.validityDays` default 365) → uloží jako
+**pending** (`WhitelistVersions.Json`, `IsActive=0`) → **stáhnout** `/whitelist/pending.json` → **offline podpis**
+`WhitelistSigner sign whitelist.json` (privátní klíč nikdy na serveru) → **nahrát `.sig`** v konzoli (ověří se
+veřejným klíčem `Whitelist:PublicKeyPath`) → **aktivace**. API `GET /api/whitelist` vrací blob **verbatim** +
+`GET /api/whitelist/signature` → agent stáhne (≤2 min), ověří (fail-secure) a uloží jako JSON soubor. **Byte-exact**
+(podepisuje/servíruje/ověřuje se týž blob, UTF-8 bez BOM). Agent matchuje **Dictionary O(1)** (scale-safe i 10k).
+DB: `database/07_whitelist_publish.sql` (`Json` + `Signature` → `NVARCHAR(MAX)`). **Vyžaduje deploy API + migraci DB
+(SQL-04) + publikaci/podpis (uživatel).** Server = DB (blob), klient = JSON soubor (`C:\ProgramData\USBGuardian\whitelist\`).
+
 ### 5.4 Prostředí pro PS skripty (DŮLEŽITÉ – AXIMA gotchas)
 - **AllSigned (GPO):** každý PS skript co tam běží **musí být podepsaný** prod certem `CN=powershell.axinetwork.loc`
   (`-ExecutionPolicy Bypass` to NEOBEJDE). Podpis přes službu `.213:4100` / share `\\herkules\ITC\UTIL\04-manualy-instalace\PS-scripty`.
@@ -126,9 +138,9 @@ cílů (`deploy.targetsFile`), instalaci dělá **scheduled task na .213 pod gMS
   na .213 i klientech (přidáno na .181+.213; **fleet přes GPO** – cert export `_AXIMA-CodeSign-publisher.cer` na share).
 
 ### 5.5 Roadmapa (pending)
-- **Podpisový/publikační workflow whitelistu** — změny v katalogu se k agentům dostanou až **po vydání podepsané
-  verze** (privátní klíč nikdy na serveru). Bez toho agent dál varuje i schválené médium (Stav podpisu = nepodepsáno).
-  Odemkne i vynucování + **blocklist** „naostro".
+- **Fáze 2 – distribuce `policy.enforce` na agenta** (heartbeat nese efektivní politiku) → agent reálně blokuje dle .213.
+- **Fáze 3 – lokální break-glass override** — lokální admin dočasně vypne blokování (práce mimo síť); vyprší / přepíše
+  se sync; **logováno** jako auditní událost + nahlášeno na .213. Viz model v paměti.
 - **Monitoring expirace podpisového certu** – `CN=powershell.axinetwork.loc` platí do 2028-06-17; alert e-mailem z konzole.
 - **„Vše server na .213":** přesun API runtime z SQL-04 na .213 (konzole+API na .213, DB na SQL-04, agent repoint na
   `https://10.8.2.213:5443`) → .181 fakt netřeba. **Build/deploy artefakty jsou na D:\deploy (lokálně), ne na .181.**

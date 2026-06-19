@@ -61,7 +61,11 @@ public class WhitelistVersion
     public DateTime IssuedAt { get; set; } = DateTime.UtcNow;
     public DateTime ValidUntil { get; set; }
     public string IssuedBy { get; set; } = string.Empty;
+    /// <summary>RSA-4096 podpis blobu (base64, ~684 znaků) – NVARCHAR(MAX). Prázdné = čeká na podpis.</summary>
     public string Signature { get; set; } = string.Empty;
+    /// <summary>Kanonický whitelist.json BLOB, který se podepisuje a servíruje agentům VERBATIM
+    /// (podpis musí sedět bajt na bajt). NVARCHAR(MAX) – pojme i 10k zařízení (~MB).</summary>
+    public string Json { get; set; } = string.Empty;
     public bool IsActive { get; set; } = true;
 }
 

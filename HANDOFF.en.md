@@ -117,6 +117,18 @@ Goal: the console, running 24/7 after AD sync, deploys the agent itself onto sta
   incidents are still recorded, but the user would not see the warning.
 - **Expand to fleet:** GPO publisher trust on clients (5.4), enable in Settings (dry-run → live), `.181 → .180 → fleet`.
 
+### 5.3b Whitelist signing/publishing workflow — DONE (client = a 1:1 copy of the server)
+Unlocks catalog delivery to agents (previously console changes never reached agents – version wasn't bumped +
+`/api/whitelist/signature` was missing). Flow: console **Whitelist → "Publish version"** (snapshot active catalog →
+canonical `whitelist.json` blob, new version `yyyy-MM-dd-vN`, validity `whitelist.validityDays` default 365) → stored as
+**pending** (`WhitelistVersions.Json`, `IsActive=0`) → **download** `/whitelist/pending.json` → **offline sign**
+`WhitelistSigner sign whitelist.json` (private key never on the server) → **upload `.sig`** in the console (verified with
+the public key `Whitelist:PublicKeyPath`) → **activation**. API `GET /api/whitelist` returns the blob **verbatim** +
+`GET /api/whitelist/signature` → the agent downloads (≤2 min), verifies (fail-secure), stores as a JSON file. **Byte-exact**
+(the same blob is signed/served/verified, UTF-8 without BOM). Agent matches via **Dictionary O(1)** (scales to 10k).
+DB: `database/07_whitelist_publish.sql` (`Json` + `Signature` → `NVARCHAR(MAX)`). **Requires API deploy + DB migration
+(SQL-04) + publish/sign (user).** Server = DB (blob), client = JSON file (`C:\ProgramData\USBGuardian\whitelist\`).
+
 ### 5.4 Environment for PS scripts (IMPORTANT – AXIMA gotchas)
 - **AllSigned (GPO):** every PS script that runs there **must be signed** with the prod cert `CN=powershell.axinetwork.loc`
   (`-ExecutionPolicy Bypass` does NOT bypass this). Signing via the `.213:4100` service / share `\\herkules\ITC\UTIL\04-manualy-instalace\PS-scripty`.
@@ -126,9 +138,9 @@ Goal: the console, running 24/7 after AD sync, deploys the agent itself onto sta
   on .213 and clients (added on .181+.213; **fleet via GPO** – cert export `_AXIMA-CodeSign-publisher.cer` on the share).
 
 ### 5.5 Roadmap (pending)
-- **Whitelist signing/publishing workflow** — changes in the catalog only reach the agents **after a signed
-  version is released** (the private key is never on the server). Without it the agent keeps warning even on an approved medium (Signature status = unsigned).
-  It also unlocks enforcement + the **blocklist** "for real".
+- **Phase 2 – distribute `policy.enforce` to the agent** (heartbeat carries the effective policy) → the agent really blocks per .213.
+- **Phase 3 – local break-glass override** — a local admin temporarily disables blocking (off-network work); expires /
+  is overwritten on sync; **logged** as an audit event + reported to .213. See the model in memory.
 - **Monitoring of signing cert expiry** – `CN=powershell.axinetwork.loc` valid until 2028-06-17; alert via e-mail from the console.
 - **"Everything on the server .213":** move the API runtime from SQL-04 to .213 (console+API on .213, DB on SQL-04, agent repoint to
   `https://10.8.2.213:5443`) → .181 really not needed. **Build/deploy artifacts are on D:\deploy (locally), not on .181.**

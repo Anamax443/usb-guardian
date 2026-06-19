@@ -34,8 +34,9 @@ technické opatření pro **NIS2 / zákon 181/2014 Sb. / ISO 27001**.
 | 24 | **Deploy targeting** – default pro nové PC (Nastavení) + per-stanice a hromadné zařazení/vyřazení v Stanicích | ✅ |
 | 25 | **Lokální konzole agenta** ukazuje i seznam schválených zařízení (whitelist) + verzi agenta | ✅ |
 | 26 | **HTML animace** fungování systému (`/how-it-works.html`, 10 kroků datového toku) | ✅ |
+| 27 | **Publikační/podpisový workflow whitelistu** – „Vydat verzi" → offline RSA podpis → aktivace; API servíruje podepsaný blob verbatim → **klient = 1:1 kopie serveru**; agent O(1) match (scale 10k) | ✅ |
 | – | Zavřít nešifrované HTTP 5050 (jen HTTPS) | 🔜 NIS2 |
-| – | **Podpisový/publikační workflow** whitelistu → klient 1:1 kopie serveru → vynucování + blocklist „naostro" + break-glass override | 🔜 další velký krok |
+| – | **Distribuce `enforce` na agenta** (heartbeat) → reálné blokování dle .213 + **break-glass override** (lokální admin, dočasné, logované) | 🔜 Fáze 2–3 |
 | – | Per-serial **blocklist** + blokace už-připojeného média | 🔜 |
 | – | Monitoring expirace podpisového certu | 🔜 |
 
@@ -206,6 +207,7 @@ SQL skripty v `database/` (spustit v pořadí):
 | `04_adsync_columns.sql` | LastSeen nullable + OperatingSystem / InActiveDirectory / AdSyncedAt |
 | `05_adpath.sql` | AdPath (cesta v AD) |
 | `06_appsettings.sql` | AppSettings (centrální nastavení: vynucování, přístup, e-mail, retence, deploy) + grant; `Value` = `NVARCHAR(MAX)` (dlouhé seznamy) |
+| `07_whitelist_publish.sql` | WhitelistVersions: `Json` (podepsaný blob) + `Signature` → `NVARCHAR(MAX)` (publikační workflow) |
 
 ## Rychlý start (vývoj)
 

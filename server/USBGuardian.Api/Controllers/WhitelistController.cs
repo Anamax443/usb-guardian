@@ -34,42 +34,38 @@ public class WhitelistController : ControllerBase
     [HttpGet]
     public async Task<IActionResult> GetWhitelist()
     {
-        // Aktuální aktivní verze
+        // Aktivní = PUBLIKOVANÁ + PODEPSANÁ verze. Servírujeme PŘESNÝ blob (`Json`), který byl offline
+        // podepsán → agent ho uloží verbatim a ověří `.sig` bajt na bajt. NE re-serializovat!
         var version = await _db.WhitelistVersions
             .Where(v => v.IsActive)
             .OrderByDescending(v => v.IssuedAt)
             .FirstOrDefaultAsync();
 
-        if (version == null)
-            return NotFound("Žádný aktivní whitelist nebyl nalezen.");
-
-        // Aktivní zařízení
-        var devices = await _db.WhitelistDevices
-            .Where(d => d.IsActive)
-            .Select(d => new WhitelistDeviceDto
-            {
-                VendorId     = d.VendorId,
-                ProductId    = d.ProductId,
-                SerialNumber = d.SerialNumber,
-                Description  = d.Description,
-                ApprovedAt   = d.ApprovedAt,
-                ApprovedBy   = d.ApprovedBy
-            })
-            .ToListAsync();
-
-        var response = new WhitelistResponse
-        {
-            Version    = version.Version,
-            IssuedAt   = version.IssuedAt,
-            ValidUntil = version.ValidUntil,
-            Signature  = version.Signature,
-            Devices    = devices
-        };
+        if (version == null || string.IsNullOrEmpty(version.Json))
+            return NotFound("Žádný publikovaný (podepsaný) whitelist – vydej verzi v konzoli.");
 
         _logger.LogDebug("Whitelist {Version} stažen od {Ip}",
             version.Version, HttpContext.Connection.RemoteIpAddress);
 
-        return Ok(response);
+        return Content(version.Json, "application/json; charset=utf-8");
+    }
+
+    // --------------------------------------------------------
+    // GET /api/whitelist/signature
+    // Detached RSA podpis aktivního blobu (base64) – agent ukládá jako whitelist.json.sig.
+    // --------------------------------------------------------
+    [HttpGet("signature")]
+    public async Task<IActionResult> GetSignature()
+    {
+        var version = await _db.WhitelistVersions
+            .Where(v => v.IsActive)
+            .OrderByDescending(v => v.IssuedAt)
+            .FirstOrDefaultAsync();
+
+        if (version == null || string.IsNullOrEmpty(version.Signature))
+            return NotFound("Whitelist není podepsaný.");
+
+        return Content(version.Signature, "text/plain; charset=utf-8");
     }
 
     // --------------------------------------------------------

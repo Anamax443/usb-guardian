@@ -134,6 +134,20 @@ app.MapGet("/api/version", () => Results.Json(new
 // ── Export incidentů (CSV + manažerský report) – dědí FallbackPolicy ──
 app.MapExportEndpoints();
 
+// ── Stažení whitelist.json verze čekající na podpis (pro offline WhitelistSigner) ──
+// Vrací PŘESNÝ blob (UTF-8 bez BOM) → admin ho podepíše a nahraje .sig zpět. Dědí FallbackPolicy.
+app.MapGet("/whitelist/pending.json", async (IDbContextFactory<AppDbContext> f) =>
+{
+    await using var db = await f.CreateDbContextAsync();
+    var pending = await db.WhitelistVersions
+        .Where(v => !v.IsActive && v.Signature == "" && v.Json != "")
+        .OrderByDescending(v => v.IssuedAt)
+        .FirstOrDefaultAsync();
+    if (pending is null) return Results.NotFound("Žádná verze nečeká na podpis – nejdřív „Vydat verzi\".");
+    var bytes = System.Text.Encoding.UTF8.GetBytes(pending.Json);   // bez BOM – musí sedět s tím, co servíruje API
+    return Results.File(bytes, "application/json", "whitelist.json");
+});
+
 app.MapRazorComponents<App>()
    .AddInteractiveServerRenderMode();
 

@@ -32,6 +32,10 @@ public class WhitelistChecker
     private DateTime _lastLoaded = DateTime.MinValue;
     private const int CacheMinutes = 5;
 
+    // Indexy pro O(1) lookup (scale-safe i pro 10k+ zařízení) – rebuildují se při (re)načtení whitelistu.
+    private Dictionary<string, WhitelistEntry> _exactIndex = new(StringComparer.OrdinalIgnoreCase);    // VID:PID:SERIAL
+    private Dictionary<string, WhitelistEntry> _wildcardIndex = new(StringComparer.OrdinalIgnoreCase); // VID:PID (prázdný serial)
+
     public WhitelistChecker(
         ILogger<WhitelistChecker> logger,
         string whitelistPath,
@@ -73,18 +77,56 @@ public class WhitelistChecker
         if (whitelist.ValidUntil != DateTime.MinValue && whitelist.ValidUntil < DateTime.UtcNow)
             _logger.LogWarning("Whitelist vypršel {Expired}, pracuji v degraded módu", whitelist.ValidUntil);
 
-        foreach (var entry in whitelist.Devices)
+        // O(1) lookup přes index (scale-safe). Přesná shoda VID:PID:SERIAL.
+        if (_exactIndex.TryGetValue($"{device.VendorId}:{device.ProductId}:{device.SerialNumber}", out var entry)
+            && NotExpired(entry))
         {
-            if (MatchesEntry(device, entry))
-            {
-                _logger.LogDebug("Zařízení {Device} nalezeno na whitelistu: {Description}",
-                    device, entry.Description);
-                return true;
-            }
+            _logger.LogDebug("Zařízení {Device} na whitelistu: {Description}", device, entry.Description);
+            return true;
+        }
+
+        // Wildcard (záznam bez sériáku) – jen když AllowWildcards.
+        if (_allowWildcards
+            && _wildcardIndex.TryGetValue($"{device.VendorId}:{device.ProductId}", out var wc)
+            && NotExpired(wc))
+        {
+            _logger.LogDebug("Wildcard shoda: {VID}/{PID}", wc.VendorId, wc.ProductId);
+            return true;
         }
 
         _logger.LogInformation("Zařízení {Device} NENÍ na whitelistu", device);
         return false;
+    }
+
+    // Per-záznam expirace (NULL = trvalé schválení).
+    private bool NotExpired(WhitelistEntry e)
+    {
+        if (e.ValidUntil.HasValue && e.ValidUntil.Value < DateTime.UtcNow)
+        {
+            _logger.LogWarning("Záznam {VID}/{PID}/{SN} expiroval: {Exp}",
+                e.VendorId, e.ProductId, e.SerialNumber, e.ValidUntil.Value);
+            return false;
+        }
+        return true;
+    }
+
+    // Přestavění indexů z načteného whitelistu (volá LoadWhitelist po (re)načtení).
+    private void RebuildIndex(WhitelistFile wl)
+    {
+        var exact    = new Dictionary<string, WhitelistEntry>(StringComparer.OrdinalIgnoreCase);
+        var wildcard = new Dictionary<string, WhitelistEntry>(StringComparer.OrdinalIgnoreCase);
+        foreach (var e in wl.Devices)
+        {
+            if (string.IsNullOrEmpty(e.SerialNumber))
+                wildcard[$"{e.VendorId}:{e.ProductId}"] = e;
+            else
+                exact[$"{e.VendorId}:{e.ProductId}:{e.SerialNumber}"] = e;
+        }
+        _exactIndex    = exact;
+        _wildcardIndex = wildcard;
+
+        if (wildcard.Count > 0 && !_allowWildcards)
+            _logger.LogWarning("Whitelist má {N} záznamů bez sériáku, ale AllowWildcards=false – ignorovány.", wildcard.Count);
     }
 
     public string GetVersion()  => LoadWhitelist()?.Version ?? "unknown";
@@ -157,6 +199,8 @@ public class WhitelistChecker
                 new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
             _lastLoaded = DateTime.UtcNow;
 
+            if (_cachedWhitelist != null) RebuildIndex(_cachedWhitelist);
+
             _logger.LogInformation("Whitelist načten: verze {Version}, zařízení: {Count}",
                 _cachedWhitelist?.Version, _cachedWhitelist?.Devices.Count);
 
@@ -169,43 +213,6 @@ public class WhitelistChecker
         }
     }
 
-    private bool MatchesEntry(DeviceInfo device, WhitelistEntry entry)
-    {
-        if (!string.Equals(device.VendorId, entry.VendorId, StringComparison.OrdinalIgnoreCase))
-            return false;
-
-        if (!string.Equals(device.ProductId, entry.ProductId, StringComparison.OrdinalIgnoreCase))
-            return false;
-
-        if (string.IsNullOrEmpty(entry.SerialNumber))
-        {
-            if (!_allowWildcards)
-            {
-                _logger.LogWarning(
-                    "Whitelist záznam {VID}/{PID} nemá sériové číslo " +
-                    "a AllowWildcards=false – médium ZAMÍTNUTO.",
-                    entry.VendorId, entry.ProductId);
-                return false;
-            }
-            _logger.LogDebug("Wildcard shoda: {VID}/{PID}", entry.VendorId, entry.ProductId);
-        }
-        else
-        {
-            if (!string.Equals(device.SerialNumber, entry.SerialNumber,
-                StringComparison.OrdinalIgnoreCase))
-                return false;
-        }
-
-        if (entry.ValidUntil.HasValue && entry.ValidUntil.Value < DateTime.UtcNow)
-        {
-            _logger.LogWarning(
-                "Zařízení {Device} bylo na whitelistu ale platnost vypršela: {Expired}",
-                device.FriendlyName, entry.ValidUntil.Value);
-            return false;
-        }
-
-        return true;
-    }
 }
 
 public enum WhitelistStatus { Valid, Expired, Missing }

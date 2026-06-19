@@ -56,7 +56,8 @@ BEGIN
         IssuedAt      DATETIME2     NOT NULL DEFAULT GETUTCDATE(),
         ValidUntil    DATETIME2     NOT NULL,               -- expirace
         IssuedBy      NVARCHAR(100) NOT NULL,               -- kdo vydal
-        Signature     NVARCHAR(500) NOT NULL DEFAULT '',    -- RSA podpis (Fáze 4)
+        Signature     NVARCHAR(MAX) NOT NULL CONSTRAINT DF_WhitelistVersions_Signature DEFAULT '',  -- RSA-4096 podpis (base64)
+        [Json]        NVARCHAR(MAX) NOT NULL CONSTRAINT DF_WhitelistVersions_Json DEFAULT '',        -- podepsaný blob (servíruje se agentům verbatim)
         IsActive      BIT           NOT NULL DEFAULT 1,     -- aktuální verze
 
         CONSTRAINT UQ_WhitelistVersions_Version UNIQUE (Version)

@@ -331,14 +331,36 @@ Konzole má na `AppSettings` jen write (ne delete na `Incidents`), proto je enfo
 | Položka | Popis |
 |---------|-------|
 | Zavřít HTTP 5050 | NIS2 – jen HTTPS (firewall block / přebindovat API na SQL-04) |
-| Vzdálená instalace agenta | Na stanice bez agenta (seznam z AD sync); WinRM, just-in-time creds, audit, žádné uložené creds |
-| Podpisový/publikační workflow | Whitelist staging → offline podpis → publikace; odemkne vynucování + blocklist „naostro" k agentům |
+| Distribuce `policy.enforce` na agenta | Heartbeat nese efektivní politiku → agent reálně blokuje dle .213 (Fáze 2) |
+| Lokální break-glass override | Lokální admin dočasně vypne blokování (offline práce); vyprší / přepíše se sync; **logováno** + nahlášeno na .213 (Fáze 3) |
 | Per-serial blocklist | Zákaz konkrétního média, near-real-time k agentům (přednost před whitelistem) |
 | Hardening konzole | gMSA místo LocalSystem; dedikovaná `USB-Guardian-Admins`; HTTPS konzole; přesun API na .213 |
 | Toast Privilege Separation | Helper process v user session – jednosměrné Pipes SYSTEM → user |
 
 > Hotovo (dřív pending): Admin UI (Blazor konzole + AD sync), **šifrovaná komunikace agent↔API**
-> (self-cert + pinning), centrální nastavení (vynucování/přístup/e-mail + alerty).
+> (self-cert + pinning), centrální nastavení (vynucování/přístup/e-mail + alerty), **publikační/podpisový
+> workflow whitelistu** (klient = 1:1 kopie serveru, viz níže).
+
+## Publikační/podpisový workflow whitelistu (klient = 1:1 kopie serveru)
+
+Agent dostává **jen podepsanou verzi**; privátní RSA klíč **nikdy na serveru** (offline). Server drží v DB
+**přesný podepsaný blob** (`WhitelistVersions.Json`, `NVARCHAR(MAX)`) + podpis (`Signature`, `NVARCHAR(MAX)`),
+API ho servíruje **verbatim** (podpis musí sedět bajt na bajt). Klient nemá DB → ukládá jako **JSON soubor**.
+
+```
+Konzole „Vydat verzi" → snapshot aktivního katalogu → kanonický whitelist.json blob (nová verze yyyy-MM-dd-vN,
+        čerstvá platnost) → uložen jako PENDING (IsActive=0, Signature='')
+   ↓ admin stáhne /whitelist/pending.json (UTF-8 bez BOM = přesné bajty)
+WhitelistSigner sign whitelist.json (offline, privátní klíč) → whitelist.json.sig (RSA-4096 / SHA-256 / Pkcs1)
+   ↓ admin nahraje .sig v konzoli → ověření veřejným klíčem (Whitelist:PublicKeyPath) → AKTIVACE (IsActive=1)
+API: GET /api/whitelist = blob verbatim · GET /api/whitelist/signature = base64 podpis
+   ↓ heartbeat hlásí novou verzi (≤2 min)
+Agent: stáhne blob+podpis → SignatureVerifier ověří (fail-secure) → uloží whitelist.json (+.sig)
+        → WhitelistChecker indexuje (Dictionary VID:PID:SERIAL, O(1) – scale-safe i pro 10k zařízení)
+```
+
+Bajt-exact řetězec: stejný blob string se **podepisuje** (download), **servíruje** (`/api/whitelist`) i **ověřuje**
+(konzole i agent) — vše UTF-8 bez BOM, takže RSA podpis sedí. Validita verze: `whitelist.validityDays` (default 365).
 
 ## Watchdog – Task Scheduler
 
