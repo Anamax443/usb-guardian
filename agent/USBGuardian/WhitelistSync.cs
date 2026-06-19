@@ -23,6 +23,8 @@ public class WhitelistSync : BackgroundService
     private readonly HttpClient _httpClient;
     private readonly SyncSignals? _signals;
     private readonly PolicyState? _policyState;
+    private readonly WhitelistChecker? _whitelistChecker;
+    private readonly DeviceBlocker? _blocker;
 
     // Cesta k .sig souboru (vedle whitelistu)
     private string SignaturePath => _localWhitelistPath + ".sig";
@@ -35,7 +37,9 @@ public class WhitelistSync : BackgroundService
         bool validateServerCertificate = true,
         string pinnedThumbprint = "",
         SyncSignals? signals = null,
-        PolicyState? policyState = null)
+        PolicyState? policyState = null,
+        WhitelistChecker? whitelistChecker = null,
+        DeviceBlocker? blocker = null)
     {
         _logger              = logger;
         _syncUrl             = syncUrl;
@@ -43,6 +47,8 @@ public class WhitelistSync : BackgroundService
         _syncIntervalMinutes = syncIntervalMinutes;
         _signals             = signals;
         _policyState         = policyState;
+        _whitelistChecker    = whitelistChecker;
+        _blocker             = blocker;
 
         // TLS: pinning (otisk API certu) / vývojové vypnutí / výchozí validace
         _httpClient = USBGuardian.Security.TlsClient.Create(validateServerCertificate, pinnedThumbprint, 30);
@@ -59,8 +65,34 @@ public class WhitelistSync : BackgroundService
         while (!stoppingToken.IsCancellationRequested)
         {
             await TrySyncWhitelist();
+            ReconcileBlocked();   // vrátit média schválená mezitím / když je blokování vypnuté
             await Task.Delay(TimeSpan.FromMinutes(_syncIntervalMinutes), stoppingToken);
         }
+    }
+
+    // --------------------------------------------------------
+    // Reconciliace zablokovaných médií s aktuálním whitelistem + stavem vynucování:
+    //   - blokování vypnuté (break-glass / enforce=false) → vrátit VŠE, co agent zakázal,
+    //   - blokování zapnuté → vrátit ta, která jsou MEZITÍM na whitelistu (schválená),
+    //   - jinak nechat zablokované.
+    // (Pamatuje si jen to, co zakázal agent sám – disky zakázané jinde nevrací.)
+    // --------------------------------------------------------
+    private void ReconcileBlocked()
+    {
+        try
+        {
+            if (_blocker == null || _whitelistChecker == null || _policyState == null) return;
+            var blocked = _blocker.GetBlocked();
+            if (blocked.Count == 0) return;
+
+            var blocking = _policyState.EffectiveMode("warn") == "block";
+            foreach (var kv in blocked)
+            {
+                if (!blocking || _whitelistChecker.IsAllowedKey(kv.Value))
+                    _blocker.UnblockDevice(kv.Key);
+            }
+        }
+        catch (Exception ex) { _logger.LogWarning(ex, "Reconciliace zablokovaných médií selhala"); }
     }
 
     private async Task TrySyncWhitelist()

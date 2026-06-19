@@ -121,7 +121,8 @@ public class PolicyEnforcer
             return;
         }
 
-        var result = _deviceBlocker.BlockDevice(device.PnpDeviceId);
+        var result = _deviceBlocker.BlockDevice(device.PnpDeviceId,
+            $"{device.VendorId}:{device.ProductId}:{device.SerialNumber}");
 
         if (result.IsSuccess)
         {

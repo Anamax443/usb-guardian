@@ -21,17 +21,25 @@ namespace USBGuardian;
 public class DeviceBlocker
 {
     private readonly ILogger<DeviceBlocker> _logger;
+    private readonly string _blockedPath;
+    private readonly object _lock = new();
+    // Co agent SÁM zakázal (perzistované): PnpDeviceID → klíč VID:PID:SN (pro reconciliaci s whitelistem).
+    // Jen tato média vrací reconcile, ne disky zakázané někým jiným.
+    private readonly Dictionary<string, string> _blocked = new(StringComparer.OrdinalIgnoreCase);
 
-    public DeviceBlocker(ILogger<DeviceBlocker> logger)
+    public DeviceBlocker(ILogger<DeviceBlocker> logger,
+        string blockedPath = @"C:\ProgramData\USBGuardian\blocked.json")
     {
-        _logger = logger;
+        _logger      = logger;
+        _blockedPath = blockedPath;
+        LoadBlocked();
     }
 
     // --------------------------------------------------------
     // Zablokuje zařízení přes PNPDeviceID
     // Příklad: USBSTOR\DISK&VEN_SANDISK&PROD_CRUZER_FORCE\4C530000...
     // --------------------------------------------------------
-    public BlockResult BlockDevice(string pnpDeviceId)
+    public BlockResult BlockDevice(string pnpDeviceId, string deviceKey = "")
     {
         if (string.IsNullOrEmpty(pnpDeviceId))
         {
@@ -59,6 +67,7 @@ public class DeviceBlocker
         if (result.Contains("BLOCKED"))
         {
             _logger.LogWarning("Zařízení DEAKTIVOVÁNO: {PnpId}", pnpDeviceId);
+            TrackBlocked(pnpDeviceId, deviceKey);   // zapamatovat (+ klíč pro reconciliaci s whitelistem)
             return BlockResult.Success(pnpDeviceId);
         }
         else if (result.Contains("NOT_FOUND"))
@@ -92,11 +101,69 @@ public class DeviceBlocker
         var success = result.Contains("ENABLED");
 
         if (success)
+        {
             _logger.LogInformation("Zařízení POVOLENO: {PnpId}", pnpDeviceId);
+            Untrack(pnpDeviceId);
+        }
         else
             _logger.LogWarning("Nelze povolit zařízení: {PnpId}", pnpDeviceId);
 
         return success;
+    }
+
+    // --------------------------------------------------------
+    // Vrátí VŠECHNA média, která agent sám zakázal (při vypnutí blokování / break-glass / enforce=false).
+    // Idempotentní: po vrácení je seznam prázdný → další volání nic nedělají.
+    // --------------------------------------------------------
+    public int UnblockAll()
+    {
+        string[] ids;
+        lock (_lock) { ids = _blocked.Keys.ToArray(); }
+        if (ids.Length == 0) return 0;
+
+        _logger.LogWarning("Vypnuté blokování → vracím {Count} dříve zablokovaných médií", ids.Length);
+        var done = 0;
+        foreach (var id in ids)
+            if (UnblockDevice(id)) done++;   // UnblockDevice si sám odebere z _blocked
+        return done;
+    }
+
+    /// <summary>Snapshot zablokovaných (PnpDeviceID → klíč VID:PID:SN) pro reconciliaci s whitelistem.</summary>
+    public IReadOnlyDictionary<string, string> GetBlocked()
+    {
+        lock (_lock) { return new Dictionary<string, string>(_blocked, StringComparer.OrdinalIgnoreCase); }
+    }
+
+    private void TrackBlocked(string pnpId, string deviceKey)
+    {
+        lock (_lock) { _blocked[pnpId] = deviceKey ?? string.Empty; SaveBlocked(); }
+    }
+
+    private void Untrack(string pnpId)
+    {
+        lock (_lock) { if (_blocked.Remove(pnpId)) SaveBlocked(); }
+    }
+
+    private void LoadBlocked()
+    {
+        try
+        {
+            if (!File.Exists(_blockedPath)) return;
+            var map = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string>>(File.ReadAllText(_blockedPath));
+            if (map != null) foreach (var kv in map) _blocked[kv.Key] = kv.Value;
+        }
+        catch (Exception ex) { _logger.LogWarning(ex, "Nelze načíst seznam zablokovaných médií"); }
+    }
+
+    private void SaveBlocked()
+    {
+        try
+        {
+            var dir = Path.GetDirectoryName(_blockedPath);
+            if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+            File.WriteAllText(_blockedPath, System.Text.Json.JsonSerializer.Serialize(_blocked));
+        }
+        catch (Exception ex) { _logger.LogWarning(ex, "Nelze uložit seznam zablokovaných médií"); }
     }
 
     // --------------------------------------------------------

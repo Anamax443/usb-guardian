@@ -125,6 +125,7 @@ if (bool.Parse(builder.Configuration["localConsole:enabled"] ?? "false"))
         sp.GetRequiredService<WhitelistChecker>(),
         sp.GetRequiredService<IncidentLogger>(),
         sp.GetRequiredService<PolicyState>(),
+        sp.GetRequiredService<DeviceBlocker>(),
         builder.Configuration["policy:mode"] ?? "warn",
         int.Parse(builder.Configuration["localConsole:port"] ?? "5080")));
 
@@ -155,7 +156,9 @@ if (!string.IsNullOrEmpty(syncUrl))
         var interval = int.Parse(config["sync:whitelistSyncIntervalMinutes"] ?? "2");
         var signals  = sp.GetRequiredService<SyncSignals>();
         return new WhitelistSync(logger, syncUrl, wlPath, interval, validateTls, pinnedThumbprint, signals,
-            sp.GetRequiredService<PolicyState>());
+            sp.GetRequiredService<PolicyState>(),
+            sp.GetRequiredService<WhitelistChecker>(),
+            sp.GetRequiredService<DeviceBlocker>());
     });
 
     builder.Services.AddHostedService(sp =>

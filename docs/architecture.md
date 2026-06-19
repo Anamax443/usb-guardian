@@ -371,6 +371,12 @@ pravdy). Agent (`WhitelistSync`) ho při každém heartbeatu předá do `PolicyS
 lokálního `policy.mode` použije **efektivní režim** (`PolicyState.EffectiveMode`): server enforce=true → `block`,
 false → `warn`. Před prvním heartbeatem fallback na lokální config.
 
+**Auto-re-enable / reconciliace (vypnuté blokování = připoj cokoli):** agent si pamatuje, co **sám** zakázal
+(`DeviceBlocker`, perzistně `blocked.json`: PnpDeviceID → klíč VID:PID:SN). `WhitelistSync` po každém cyklu
+**reconciliuje**: blokování vypnuté (break-glass/`enforce=false`) → vrátí (`Enable-PnpDevice`) **vše**, co zakázal;
+blokování zapnuté → vrátí média, která jsou **mezitím na whitelistu** (schválená); jinak nechá blokované.
+Break-glass vrací média **okamžitě**. Vrací jen disky zakázané agentem (ne ručně zakázané jinde).
+
 **Fáze 3 – lokální break-glass (offline):** lokální **admin** stanice může v lokální konzoli (`127.0.0.1:5080`,
 admin-only, loopback) **dočasně vypnout blokování** (`POST /api/override?hours=N`, strop 72 h) — pro práci, když
 stanice nedosáhne na .213. Override je **perzistovaný** (`C:\ProgramData\USBGuardian\override.json` → přežije restart),

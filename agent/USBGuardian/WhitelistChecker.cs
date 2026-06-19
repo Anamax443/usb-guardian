@@ -131,6 +131,14 @@ public class WhitelistChecker
 
     public string GetVersion()  => LoadWhitelist()?.Version ?? "unknown";
 
+    /// <summary>Je klíč VID:PID:SN aktuálně na whitelistu? (Pro reconciliaci zablokovaných médií.)</summary>
+    public bool IsAllowedKey(string deviceKey)
+    {
+        LoadWhitelist();   // obnovit index z aktuálního souboru
+        return !string.IsNullOrEmpty(deviceKey)
+            && _exactIndex.TryGetValue(deviceKey, out var e) && NotExpired(e);
+    }
+
     /// <summary>Read-only snapshot pro lokální konzoli.</summary>
     public record WhitelistSnapshot(string Version, WhitelistStatus Status, int DeviceCount, DateTime ValidUntil);
 

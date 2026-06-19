@@ -37,6 +37,7 @@ public class LocalConsoleService : BackgroundService
     private readonly WhitelistChecker _whitelist;
     private readonly IncidentLogger _incidents;
     private readonly PolicyState _policy;
+    private readonly DeviceBlocker _blocker;
     private readonly string _policyMode;
     private readonly int _port;
 
@@ -48,6 +49,7 @@ public class LocalConsoleService : BackgroundService
         WhitelistChecker whitelist,
         IncidentLogger incidents,
         PolicyState policy,
+        DeviceBlocker blocker,
         string policyMode,
         int port)
     {
@@ -56,6 +58,7 @@ public class LocalConsoleService : BackgroundService
         _whitelist  = whitelist;
         _incidents  = incidents;
         _policy     = policy;
+        _blocker    = blocker;
         _policyMode = policyMode;
         _port       = port;
     }
@@ -171,6 +174,10 @@ public class LocalConsoleService : BackgroundService
         _logger.LogWarning(
             "Break-glass: {By} VYPNUL blokování na {H} h (do {Until} UTC) – offline výjimka, zruší se po spojení se serverem.",
             by, hours, until);
+
+        // Hned vrátit média, která agent sám zakázal → admin může okamžitě připojit cokoli.
+        var restored = _blocker.UnblockAll();
+        if (restored > 0) _logger.LogWarning("Break-glass: vráceno {Count} dříve zablokovaných médií.", restored);
 
         // Auditní incident → fronta → server (NIS2 stopa kdo/kdy/jak dlouho).
         try
