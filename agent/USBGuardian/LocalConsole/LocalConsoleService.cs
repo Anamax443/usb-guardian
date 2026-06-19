@@ -141,6 +141,10 @@ public class LocalConsoleService : BackgroundService
                 _logger.LogWarning("Break-glass: override ručně zrušen ({By}).", ctx.User?.Identity?.Name ?? "?");
                 WriteJson(ctx, BuildStatus());
             }
+            else if (method == "POST" && path.Equals("/api/restart", StringComparison.OrdinalIgnoreCase))
+            {
+                HandleRestart(ctx);
+            }
             else if (path.Equals("/api/status", StringComparison.OrdinalIgnoreCase))
             {
                 WriteJson(ctx, BuildStatus());
@@ -193,6 +197,31 @@ public class LocalConsoleService : BackgroundService
         catch (Exception ex) { _logger.LogError(ex, "Nelze zalogovat break-glass incident"); }
 
         WriteJson(ctx, BuildStatus());
+    }
+
+    // --------------------------------------------------------
+    // Restart klientské služby na vyžádání lokálního admina. Agent běží jako SYSTEM → má lokální právo
+    // restartovat vlastní službu. Spustí ODDĚLENÝ cmd (přežije zastavení služby): sc stop → pauza → sc start.
+    // --------------------------------------------------------
+    private void HandleRestart(HttpListenerContext ctx)
+    {
+        var by = ctx.User?.Identity?.Name ?? "lokální admin";
+        _logger.LogWarning("Restart služby vyžádán z lokální konzole ({By}).", by);
+
+        // odpovědět JEŠTĚ před restartem, ať klient dostane potvrzení
+        WriteJson(ctx, new { restarting = true, by });
+
+        try
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName        = "cmd.exe",
+                Arguments       = "/c sc stop \"USB Guardian\" & ping -n 4 127.0.0.1 >nul & sc start \"USB Guardian\"",
+                UseShellExecute = false,
+                CreateNoWindow  = true
+            });
+        }
+        catch (Exception ex) { _logger.LogError(ex, "Restart služby selhal"); }
     }
 
     // --------------------------------------------------------
@@ -391,6 +420,12 @@ public class LocalConsoleService : BackgroundService
               try{ await fetch('/api/override/clear', {method:'POST'}); }catch(e){}
               refresh();
             }
+            async function restartSvc(){
+              if(!confirm('Restartovat klientskou službu USB Guardian? Konzole se na pár sekund odmlčí.')) return;
+              try{ await fetch('/api/restart', {method:'POST'}); }catch(e){}
+              document.getElementById('app').innerHTML = '<div class="empty">restartuji službu…</div>';
+              setTimeout(refresh, 9000);
+            }
 
             async function refresh(){
               try{
@@ -457,6 +492,12 @@ public class LocalConsoleService : BackgroundService
                   ${enf.overrideActive
                     ? '<button class="btn ok" onclick="clearOv()">Zapnout blokování zpět</button>'
                     : '<button class="btn warn" onclick="setOv(4)">Vypnout blokování 4 h (offline)</button>'}
+                </div>
+                <div class="card">
+                  <h2>Služba</h2>
+                  <div class="row"><span>Agent</span><span>${esc(d.agentCommit||'?')}</span></div>
+                  <div class="row"><span>Stav</span><span>běží</span></div>
+                  <button class="btn" onclick="restartSvc()">↻ Restart služby</button>
                 </div>
                 <div class="card full">
                   <h2>Schválená zařízení – whitelist (${(wl.devices||[]).length})</h2>

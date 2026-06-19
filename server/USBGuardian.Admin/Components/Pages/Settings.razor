@@ -147,6 +147,16 @@ denní souhrn) je další krok.</p>
 </div>
 @if (_retentionMsg is not null) { <div class="banner @(_retentionBad ? "bad" : "ok")">@_retentionMsg</div> }
 
+<h2>Údržba</h2>
+<dl class="cfg">
+    <dt>Aktualizovat nastavení</dt>
+    <dd>
+        <button class="btn" @onclick="ReloadSettings" disabled="@_busy">↻ Načíst z DB</button>
+        @if (_reloadMsg is not null) { <span class="muted">&nbsp;@_reloadMsg</span> }
+        <div class="muted">Znovu načte centrální nastavení a whitelist přístupů z DB (po ruční změně v databázi) bez restartu.</div>
+    </dd>
+</dl>
+
 <h2>Databáze / síť</h2>
 <dl class="cfg">
     <dt>SQL Server</dt><dd class="mono">@_sqlServer</dd>
@@ -177,6 +187,8 @@ denní souhrn) je další krok.</p>
     private bool _retentionEnabled, _retentionBad;
     private string _retentionDays = "365", _retentionLastRun = "";
     private string? _retentionMsg;
+
+    private string? _reloadMsg;
 
     protected override async Task OnInitializedAsync()
     {
@@ -262,6 +274,19 @@ denní souhrn) je další krok.</p>
             await Load();
         }
         catch (Exception ex) { _dbError = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task ReloadSettings()
+    {
+        _reloadMsg = null; _busy = true;
+        try
+        {
+            await Access.ReloadAsync();
+            await Load();
+            _reloadMsg = $"Načteno z DB ({DateTime.Now:HH:mm:ss}).";
+        }
+        catch (Exception ex) { _reloadMsg = "Chyba: " + ex.Message; }
         finally { _busy = false; }
     }
 

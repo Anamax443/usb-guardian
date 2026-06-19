@@ -111,7 +111,10 @@ port `localConsole.port`). Admin-only (`WindowsPrincipal.IsInRole(Administrator)
 agenta: **seznam schválených zařízení (whitelist)** vč. VID/PID/sériák/popis/schválil/platnost, stav+verze
 whitelistu, **verze agenta (commit)**, WMI watchdog, fronta incidentů, právě připojená média a poslední události.
 `HttpListener` schválně místo Kestrelu – agent (`Sdk.Worker`) nepotřebuje ASP.NET Core runtime; loopback → plain
-HTTP akceptovatelné. Endpointy: `GET /` (HTML dashboard, auto-refresh 3 s) · `GET /api/status` (JSON).
+HTTP akceptovatelné. Endpointy: `GET /` (HTML dashboard, auto-refresh 3 s) · `GET /api/status` (JSON) · zapisující
+(admin-only): `POST /api/override[/clear]` (break-glass) · `POST /api/restart` (**restart klientské služby** – agent
+jako SYSTEM si lokálně restartne vlastní službu odděleným `cmd: sc stop → pauza → sc start`; lokální admin to spustí
+z dashboardu, žádný server/admin na klientech netřeba).
 
 ## Identifikace zařízení
 
