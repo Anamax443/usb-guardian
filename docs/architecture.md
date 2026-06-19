@@ -270,8 +270,10 @@ Klíč `cmd.report.<HOST>` v `AppSettings` slouží i jako audit „naposledy vy
 Tabulka `AppSettings` (key/value, migrace 06) spravovaná z Nastavení; `AccessCache` singleton:
 - `policy.enforce` – vynucovat jen schválená média (agent začne respektovat po heartbeat distribuci – pending).
 - `comm.silentAfterMinutes` – práh „zmlklého agenta" (default 180); hranice pro tečku komunikace i dlaždici na Stanicích.
-- `deploy.*` – auto-enrollment (viz níže): `enabled`/`dryRun`/`intervalMinutes`/`maxPerRun`/`allowHosts`/`excludeHosts`/`targetsFile`/`lastRun`.
-  `excludeHosts` = per-stanice vyřazení z nasazování, spravované **přímo v Stanicích** (sloupec „Nasazení") – pohodlnější než čárkový seznam.
+- `deploy.*` – auto-enrollment (viz níže): `enabled`/`dryRun`/`defaultEnroll`/`intervalMinutes`/`maxPerRun`/`allowHosts`/`includeHosts`/`excludeHosts`/`targetsFile`/`lastRun`.
+  **Model default + výjimky:** `defaultEnroll` (Nastavení) = výchozí pro nově objevené PC (nasazovat/ne). Per-stanice výjimky
+  se dělají **přímo v Stanicích** (sloupec „Nasazení", + hromadně „Vyřadit/Zařadit vše"); ukládají se jako `includeHosts`
+  (vynutit ON) / `excludeHosts` (vynutit OFF). Efektivní stav = include ? ON : exclude ? OFF : `defaultEnroll`.
 - `access.users` / `access.groups` – whitelist přístupu do konzole (`appsettings` = lockout-safe bootstrap).
 - `email.*` – SMTP relay (M365 Direct Send) + `IncidentAlertService` (background notifier: souhrn nových
   neschválených incidentů, baseline při 1. běhu, interval/throttle; `EmailSender`).
@@ -302,7 +304,7 @@ Nastavení: [auto-deploy-setup.md](auto-deploy-setup.md).
 - **Stanice** – AD inventář, filtr, cesta v AD (OU), ikona komunikace (dle čerstvosti `LastSeen`),
   dlaždice „Zmlklo agentů" (hlásí agenta, ale `LastSeen` starší než práh `comm.silentAfterMinutes` – možný výpadek/tamper),
   tlačítko „Vyžádat data" (řádek/hromadně) → [ReportNow](#vyžádání-dat-na-klik-reportnow). Sloupec **„Nasazení"** u stanic
-  bez agenta = přepínač vyřazení z auto-enrollmentu (zapisuje `deploy.excludeHosts`; deploy služba je přeskočí).
+  bez agenta = přepínač zařadit/vyřadit z auto-enrollmentu (výjimka proti `deploy.defaultEnroll`); hromadně „Vyřadit/Zařadit vše".
 - **Whitelist** – serial-only zadání + backfill VID/PID z incidentů + import + inline edit + `IsActive` checkbox.
   **Kapacita** média se dotahuje z incidentů (max `SizeBytes` dle sériáku, display-only – na whitelistu se nedrží).
 - **Databáze** – read-only přehled obsahu DB: počty záznamů v tabulkách, rozsah incidentů (kontrola retence),

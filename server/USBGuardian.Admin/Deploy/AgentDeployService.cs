@@ -65,9 +65,12 @@ public class AgentDeployService : BackgroundService
         if (cfg.AllowHosts.Count > 0)
             targets = targets.Where(h => cfg.AllowHosts.Contains(h, StringComparer.OrdinalIgnoreCase)).ToList();
 
-        // Per-stanice vyřazení (spravované v seznamu Stanic – deploy.excludeHosts).
-        if (cfg.ExcludeHosts.Count > 0)
-            targets = targets.Where(h => !cfg.ExcludeHosts.Contains(h, StringComparer.OrdinalIgnoreCase)).ToList();
+        // Default (deploy.defaultEnroll pro nové PC) + per-stanice výjimky (spravované v Stanicích):
+        // include => nasadit, exclude => nenasadit, jinak default.
+        targets = targets.Where(h =>
+            cfg.IncludeHosts.Contains(h, StringComparer.OrdinalIgnoreCase) ? true :
+            cfg.ExcludeHosts.Contains(h, StringComparer.OrdinalIgnoreCase) ? false :
+            cfg.DefaultEnroll).ToList();
 
         targets = targets.Take(Math.Max(1, cfg.MaxPerRun)).ToList();
 
@@ -144,7 +147,9 @@ public class AgentDeployService : BackgroundService
         public int  IntervalMinutes = 30;
         public int  MaxPerRun = 10;
         public string TargetsFile = "";
+        public bool DefaultEnroll = true;        // deploy.defaultEnroll – výchozí pro nové PC
         public List<string> AllowHosts = new();
+        public List<string> IncludeHosts = new();
         public List<string> ExcludeHosts = new();
 
         public static async Task<DeployConfig> LoadAsync(AppDbContext db)
@@ -154,18 +159,22 @@ public class AgentDeployService : BackgroundService
 
             var c = new DeployConfig
             {
-                Enabled     = string.Equals(await Get("deploy.enabled"), "true", StringComparison.OrdinalIgnoreCase),
-                DryRun      = !string.Equals(await Get("deploy.dryRun"),  "false", StringComparison.OrdinalIgnoreCase),
-                TargetsFile = await Get("deploy.targetsFile"),
+                Enabled       = string.Equals(await Get("deploy.enabled"), "true", StringComparison.OrdinalIgnoreCase),
+                DryRun        = !string.Equals(await Get("deploy.dryRun"),  "false", StringComparison.OrdinalIgnoreCase),
+                DefaultEnroll = !string.Equals(await Get("deploy.defaultEnroll"), "false", StringComparison.OrdinalIgnoreCase), // default ON
+                TargetsFile   = await Get("deploy.targetsFile"),
             };
             if (int.TryParse(await Get("deploy.intervalMinutes"), out var iv) && iv > 0) c.IntervalMinutes = iv;
             if (int.TryParse(await Get("deploy.maxPerRun"), out var mp) && mp > 0)       c.MaxPerRun = mp;
+
+            static List<string> Split(string v) => v.Split(new[] { ',', ';', '\n', '\r' },
+                StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
             var allow = await Get("deploy.allowHosts");
-            if (!string.IsNullOrWhiteSpace(allow))
-                c.AllowHosts = allow.Split(new[] { ',', ';', '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+            if (!string.IsNullOrWhiteSpace(allow)) c.AllowHosts = Split(allow);
+            var incl = await Get("deploy.includeHosts");
+            if (!string.IsNullOrWhiteSpace(incl)) c.IncludeHosts = Split(incl);
             var excl = await Get("deploy.excludeHosts");
-            if (!string.IsNullOrWhiteSpace(excl))
-                c.ExcludeHosts = excl.Split(new[] { ',', ';', '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+            if (!string.IsNullOrWhiteSpace(excl)) c.ExcludeHosts = Split(excl);
             return c;
         }
     }

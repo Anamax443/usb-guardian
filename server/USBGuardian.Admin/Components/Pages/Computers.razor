@@ -30,6 +30,12 @@ else
         <EditForm FormName="req-all" Model="_form" OnValidSubmit="RequestReportAll">
             <button class="btn" type="submit" title="Vyžádat data od všech stanic, které hlásí agenta">⟳ Vyžádat data od všech</button>
         </EditForm>
+        <EditForm FormName="excl-all" Model="_form" OnValidSubmit="ExcludeAll">
+            <button class="btn" type="submit" title="Vyřadit z auto-nasazení VŠECHNY stanice bez agenta">⊘ Vyřadit vše z nasazení</button>
+        </EditForm>
+        <EditForm FormName="incl-all" Model="_form" OnValidSubmit="IncludeAll">
+            <button class="btn" type="submit" title="Zrušit všechna vyřazení – zařadit vše zpět do auto-nasazení">✓ Zařadit vše</button>
+        </EditForm>
         <span class="muted">AD sync: @AdSync.LastSummary@(AdSync.LastRunUtc is { } t ? $" ({t.ToLocalTime():HH:mm:ss})" : "")</span>
     </div>
 
@@ -69,17 +75,17 @@ else
                     <td data-no-print>
                         @if (c.InActiveDirectory && !Reports(c))
                         {
-                            <EditForm FormName="@($"excl-{c.Hostname}")" Model="_form" OnValidSubmit="ToggleDeployExclude">
+                            <EditForm FormName="@($"excl-{c.Hostname}")" Model="_form" OnValidSubmit="ToggleHostDeploy">
                                 <input type="hidden" name="ExclHost" value="@c.Hostname" />
-                                @if (_excluded.Contains(c.Hostname))
+                                @if (EffectiveDeploy(c.Hostname))
                                 {
-                                    <span class="pill warn" title="Auto-nasazení agenta je pro tuto stanici vypnuté">vyřazeno</span>
-                                    <button class="btn" type="submit" title="Znovu zařadit do auto-nasazení">Zařadit</button>
+                                    <span class="pill ok" title="Agent se na tuto stanici nasadí (auto-enrollment)">nasadí se</span>
+                                    <button class="btn" type="submit" title="Vyřadit stanici z auto-nasazení agenta">Vyřadit</button>
                                 }
                                 else
                                 {
-                                    <span class="pill ok">nasadí se</span>
-                                    <button class="btn" type="submit" title="Vyřadit stanici z auto-nasazení agenta">Vyřadit</button>
+                                    <span class="pill warn" title="Auto-nasazení agenta je pro tuto stanici vypnuté">vyřazeno</span>
+                                    <button class="btn" type="submit" title="Znovu zařadit do auto-nasazení">Zařadit</button>
                                 }
                             </EditForm>
                         }
@@ -132,9 +138,17 @@ else
     private Dictionary<string, DateTime> _reqMap = new(StringComparer.OrdinalIgnoreCase);
     private string? _reqError;   // chyba zápisu vyžádání (Load() ho nevynuluje)
 
-    // stanice vyřazené z auto-nasazení agenta (AppSettings deploy.excludeHosts)
-    private HashSet<string> _excluded = new(StringComparer.OrdinalIgnoreCase);
+    // Nasazování: default (deploy.defaultEnroll – pro nové PC, nastavuje se v Nastavení) + výjimky.
+    // Efektivní stav = include ? ON : exclude ? OFF : default. Výjimky jdou jen ty, co se liší od defaultu.
+    private bool _defaultEnroll = true;
+    private HashSet<string> _include = new(StringComparer.OrdinalIgnoreCase);
+    private HashSet<string> _exclude = new(StringComparer.OrdinalIgnoreCase);
+    private const string DefaultEnrollKey = "deploy.defaultEnroll";
+    private const string IncludeKey = "deploy.includeHosts";
     private const string ExcludeKey = "deploy.excludeHosts";
+
+    private bool EffectiveDeploy(string host) =>
+        _include.Contains(host) ? true : _exclude.Contains(host) ? false : _defaultEnroll;
 
     private static bool Reports(Computer c) => !string.IsNullOrEmpty(c.AgentVersion) || c.LastSeen is not null;
 
@@ -230,12 +244,12 @@ else
 
     private static readonly char[] ListSep = { ',', ';', '\n', '\r' };
 
-    private static async Task<HashSet<string>> LoadExcluded(AppDbContext db)
+    private static async Task<HashSet<string>> LoadList(AppDbContext db, string key)
     {
         var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         try
         {
-            var row = await db.AppSettings.FirstOrDefaultAsync(s => s.Key == ExcludeKey);
+            var row = await db.AppSettings.FirstOrDefaultAsync(s => s.Key == key);
             if (!string.IsNullOrWhiteSpace(row?.Value))
                 foreach (var h in row.Value.Split(ListSep, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
                     set.Add(h);
@@ -244,27 +258,50 @@ else
         return set;
     }
 
-    private async Task ToggleDeployExclude()
+    private static async Task SaveList(AppDbContext db, string key, HashSet<string> set)
     {
-        var host = ExclHost?.Trim();
-        if (!string.IsNullOrEmpty(host))
+        var value = string.Join(",", set.OrderBy(x => x, StringComparer.OrdinalIgnoreCase));
+        var row = await db.AppSettings.FirstOrDefaultAsync(s => s.Key == key);
+        if (row is null) db.AppSettings.Add(new AppSetting { Key = key, Value = value });
+        else            row.Value = value;
+    }
+
+    // Nastaví efektivní nasazení daných hostů na target; výjimku drží jen když se liší od defaultu.
+    private async Task SetHostsDeploy(IEnumerable<string> hosts, bool target)
+    {
+        var list = hosts.Where(h => !string.IsNullOrWhiteSpace(h)).Select(h => h.Trim()).ToList();
+        if (list.Count == 0) { await Load(); return; }
+        try
         {
-            try
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var inc = await LoadList(db, IncludeKey);
+            var exc = await LoadList(db, ExcludeKey);
+            foreach (var h in list)
             {
-                await using var db = await DbFactory.CreateDbContextAsync();
-                var set = await LoadExcluded(db);
-                if (!set.Add(host)) set.Remove(host);   // toggle
-                var value = string.Join(",", set.OrderBy(x => x, StringComparer.OrdinalIgnoreCase));
-                var row = await db.AppSettings.FirstOrDefaultAsync(s => s.Key == ExcludeKey);
-                if (row is null) db.AppSettings.Add(new AppSetting { Key = ExcludeKey, Value = value });
-                else            row.Value = value;
-                await db.SaveChangesAsync();
-                _reqError = null;
+                inc.Remove(h); exc.Remove(h);
+                if (target != _defaultEnroll) (target ? inc : exc).Add(h);
             }
-            catch (Exception ex) { _reqError = "Změnu nasazení se nepodařilo uložit: " + ex.Message; }
+            await SaveList(db, IncludeKey, inc);
+            await SaveList(db, ExcludeKey, exc);
+            await db.SaveChangesAsync();
+            _reqError = null;
         }
+        catch (Exception ex) { _reqError = "Změnu nasazení se nepodařilo uložit: " + ex.Message; }
         await Load();
     }
+
+    private async Task ToggleHostDeploy()
+    {
+        var host = ExclHost?.Trim();
+        if (!string.IsNullOrEmpty(host)) await SetHostsDeploy(new[] { host }, !EffectiveDeploy(host));
+        else await Load();
+    }
+
+    private List<string> DeployCandidates() =>
+        _all.Where(c => c.InActiveDirectory && !Reports(c)).Select(c => c.Hostname).ToList();
+
+    private Task ExcludeAll() => SetHostsDeploy(DeployCandidates(), target: false);
+    private Task IncludeAll() => SetHostsDeploy(DeployCandidates(), target: true);
 
     private static async Task<int> LoadSilentThreshold(AppDbContext db)
     {
@@ -293,7 +330,10 @@ else
             await using var db = await DbFactory.CreateDbContextAsync();
             _silentAfterMin = await LoadSilentThreshold(db);
             _reqMap = await LoadReportRequests(db);
-            _excluded = await LoadExcluded(db);
+            var defRow = await db.AppSettings.FirstOrDefaultAsync(s => s.Key == DefaultEnrollKey);
+            _defaultEnroll = !string.Equals(defRow?.Value, "false", StringComparison.OrdinalIgnoreCase); // default ON
+            _include = await LoadList(db, IncludeKey);
+            _exclude = await LoadList(db, ExcludeKey);
             _all = await db.Computers.OrderBy(c => c.Hostname).ToListAsync();
             _reporting = _all.Count(Reports);
             _silent    = _all.Count(Silent);

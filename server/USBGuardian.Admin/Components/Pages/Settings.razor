@@ -48,6 +48,12 @@
         &nbsp;<button class="btn" @onclick="ToggleDeploy" disabled="@_busy">@(_deployEnabled ? "Vypnout" : "Zapnout")</button>
     </dd>
     <dt>Jen dry-run (report, nic nemění)</dt><dd><input type="checkbox" @bind="_deployDryRun" /></dd>
+    <dt>Nové stanice – výchozí</dt>
+    <dd>
+        @if (_deployDefaultEnroll) { <span class="pill ok">nasazovat</span> } else { <span class="pill warn">nenasazovat</span> }
+        &nbsp;<button class="btn" @onclick="ToggleDefaultEnroll" disabled="@_busy">@(_deployDefaultEnroll ? "Přepnout na nenasazovat" : "Přepnout na nasazovat")</button>
+        <span class="muted">&nbsp;výchozí pro nově objevené PC; výjimky se dělají v <a href="stanice">Stanicích</a></span>
+    </dd>
     <dt>Interval (min)</dt><dd><input class="inp" style="min-width:90px" @bind="_deployInterval" /></dd>
     <dt>Max stanic / běh</dt><dd><input class="inp" style="min-width:90px" @bind="_deployMaxPerRun" /></dd>
     <dt>Allowlist hostů (čárkou; prázdné = vše bez agenta)</dt><dd><input class="inp" @bind="_deployAllow" placeholder="PC01, PC02 …" /></dd>
@@ -163,7 +169,7 @@ denní souhrn) je další krok.</p>
     private string _silentAfter = "180";
     private string? _commMsg;
 
-    private bool _deployEnabled, _deployDryRun = true, _deployBad;
+    private bool _deployEnabled, _deployDryRun = true, _deployDefaultEnroll = true, _deployBad;
     private string _deployInterval = "30", _deployMaxPerRun = "10",
                    _deployAllow = "", _deployTargets = "", _deployLastRun = "";
     private string? _deployMsg;
@@ -199,6 +205,7 @@ denní souhrn) je další krok.</p>
 
             _deployEnabled  = string.Equals(await Get(db, "deploy.enabled"), "true", StringComparison.OrdinalIgnoreCase);
             _deployDryRun   = !string.Equals(await Get(db, "deploy.dryRun"), "false", StringComparison.OrdinalIgnoreCase);
+            _deployDefaultEnroll = !string.Equals(await Get(db, "deploy.defaultEnroll"), "false", StringComparison.OrdinalIgnoreCase);
             var dmi = await Get(db, "deploy.intervalMinutes"); _deployInterval  = string.IsNullOrEmpty(dmi) ? "30" : dmi;
             var dmp = await Get(db, "deploy.maxPerRun");       _deployMaxPerRun = string.IsNullOrEmpty(dmp) ? "10" : dmp;
             _deployAllow    = await Get(db, "deploy.allowHosts");
@@ -252,6 +259,19 @@ denní souhrn) je další krok.</p>
         {
             await using var db = await DbFactory.CreateDbContextAsync();
             await Set(db, "deploy.enabled", (!_deployEnabled).ToString().ToLowerInvariant());
+            await Load();
+        }
+        catch (Exception ex) { _dbError = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task ToggleDefaultEnroll()
+    {
+        _busy = true;
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            await Set(db, "deploy.defaultEnroll", (!_deployDefaultEnroll).ToString().ToLowerInvariant());
             await Load();
         }
         catch (Exception ex) { _dbError = ex.Message; }
