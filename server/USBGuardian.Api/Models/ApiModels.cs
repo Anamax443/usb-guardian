@@ -75,6 +75,10 @@ public class HeartbeatResponse
     /// Agent na to reaguje okamžitým flushem fronty incidentů. Jednorázové (viz HeartbeatController).</summary>
     public bool ReportNow { get; set; }
 
+    /// <summary>Vynucování (centrální politika .213, AppSettings policy.enforce): true = agent blokuje
+    /// neschválená média, false = jen varuje. Agent ho aplikuje přes PolicyState (Fáze 2).</summary>
+    public bool Enforce { get; set; }
+
     /// <summary>Serverový čas pro sync</summary>
     public DateTime ServerTime { get; set; } = DateTime.UtcNow;
 }

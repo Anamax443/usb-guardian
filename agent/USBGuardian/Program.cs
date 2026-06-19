@@ -89,6 +89,10 @@ builder.Services.AddSingleton(sp =>
     return new DeviceBlocker(logger);
 });
 
+// Sdílený stav vynucování: server enforce (heartbeat) + lokální break-glass override (perzistovaný).
+builder.Services.AddSingleton(sp => new PolicyState(
+    builder.Configuration["policy:overridePath"] ?? @"C:\ProgramData\USBGuardian\override.json"));
+
 builder.Services.AddSingleton(sp =>
 {
     var config  = builder.Configuration;
@@ -96,10 +100,11 @@ builder.Services.AddSingleton(sp =>
     var notif   = sp.GetRequiredService<NotificationService>();
     var iLogger = sp.GetRequiredService<IncidentLogger>();
     var blocker = sp.GetRequiredService<DeviceBlocker>();
+    var policy  = sp.GetRequiredService<PolicyState>();
     var mode    = config["policy:mode"] ?? "warn";
     var expired = config["policy:onExpiredWhitelist"] ?? "warn";
     var contact = config["notifications:toast:contactMessage"] ?? "Kontaktujte IT oddeleni";
-    return new PolicyEnforcer(logger, notif, iLogger, blocker, mode, expired, contact);
+    return new PolicyEnforcer(logger, notif, iLogger, blocker, policy, mode, expired, contact);
 });
 
 // DeviceMonitor jako singleton + hosted service (sdílený stav čte lokální konzole)
@@ -119,6 +124,7 @@ if (bool.Parse(builder.Configuration["localConsole:enabled"] ?? "false"))
         sp.GetRequiredService<DeviceMonitor>(),
         sp.GetRequiredService<WhitelistChecker>(),
         sp.GetRequiredService<IncidentLogger>(),
+        sp.GetRequiredService<PolicyState>(),
         builder.Configuration["policy:mode"] ?? "warn",
         int.Parse(builder.Configuration["localConsole:port"] ?? "5080")));
 
@@ -148,7 +154,8 @@ if (!string.IsNullOrEmpty(syncUrl))
                        ?? @"C:\ProgramData\USBGuardian\whitelist\whitelist.json";
         var interval = int.Parse(config["sync:whitelistSyncIntervalMinutes"] ?? "2");
         var signals  = sp.GetRequiredService<SyncSignals>();
-        return new WhitelistSync(logger, syncUrl, wlPath, interval, validateTls, pinnedThumbprint, signals);
+        return new WhitelistSync(logger, syncUrl, wlPath, interval, validateTls, pinnedThumbprint, signals,
+            sp.GetRequiredService<PolicyState>());
     });
 
     builder.Services.AddHostedService(sp =>

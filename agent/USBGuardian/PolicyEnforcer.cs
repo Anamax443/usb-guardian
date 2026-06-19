@@ -18,7 +18,8 @@ public class PolicyEnforcer
     private readonly NotificationService _notification;
     private readonly IncidentLogger _incidentLogger;
     private readonly DeviceBlocker _deviceBlocker;
-    private readonly string _mode;       // "warn" nebo "block"
+    private readonly PolicyState _policyState;
+    private readonly string _mode;       // lokální default ("warn"/"block") – fallback před heartbeatem
     private readonly string _onExpired;  // chování po expiraci whitelistu
     private readonly string _contactMessage;
 
@@ -27,6 +28,7 @@ public class PolicyEnforcer
         NotificationService notification,
         IncidentLogger incidentLogger,
         DeviceBlocker deviceBlocker,
+        PolicyState policyState,
         string mode,
         string onExpired,
         string contactMessage)
@@ -35,6 +37,7 @@ public class PolicyEnforcer
         _notification   = notification;
         _incidentLogger = incidentLogger;
         _deviceBlocker  = deviceBlocker;
+        _policyState    = policyState;
         _mode           = mode.ToLower();
         _onExpired      = onExpired.ToLower();
         _contactMessage = contactMessage;
@@ -152,7 +155,10 @@ public class PolicyEnforcer
             };
         }
 
-        return _mode switch
+        // Efektivní režim řídí PolicyState: lokální break-glass override → warn; jinak server enforce
+        // (.213 = zdroj pravdy); před prvním heartbeatem fallback na lokální _mode.
+        var effective = _policyState.EffectiveMode(_mode);
+        return effective switch
         {
             "block" => IncidentAction.Blocked,
             _       => IncidentAction.Warned

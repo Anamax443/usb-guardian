@@ -52,5 +52,8 @@ public enum IncidentAction
     Blocked,
 
     /// <summary>Dočasně povoleno override kódem od IT (Fáze 3)</summary>
-    TemporarilyAllowed
+    TemporarilyAllowed,
+
+    /// <summary>Lokální admin dočasně VYPNUL blokování (break-glass, offline). Auditní událost → server.</summary>
+    OverrideDisabled
 }

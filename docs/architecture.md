@@ -331,8 +331,6 @@ Konzole má na `AppSettings` jen write (ne delete na `Incidents`), proto je enfo
 | Položka | Popis |
 |---------|-------|
 | Zavřít HTTP 5050 | NIS2 – jen HTTPS (firewall block / přebindovat API na SQL-04) |
-| Distribuce `policy.enforce` na agenta | Heartbeat nese efektivní politiku → agent reálně blokuje dle .213 (Fáze 2) |
-| Lokální break-glass override | Lokální admin dočasně vypne blokování (offline práce); vyprší / přepíše se sync; **logováno** + nahlášeno na .213 (Fáze 3) |
 | Per-serial blocklist | Zákaz konkrétního média, near-real-time k agentům (přednost před whitelistem) |
 | Hardening konzole | gMSA místo LocalSystem; dedikovaná `USB-Guardian-Admins`; HTTPS konzole; přesun API na .213 |
 | Toast Privilege Separation | Helper process v user session – jednosměrné Pipes SYSTEM → user |
@@ -365,6 +363,20 @@ Bajt-exact: stejný blob string se **podepisuje** i **servíruje** (`/api/whitel
 bez BOM (SHA-256 / Pkcs1), takže RSA podpis sedí. **Trade-off (vědomě zvolený):** privátní klíč je na serveru `.213`
 (chránit ACL/DPAPI) výměnou za **plnou automatizaci** (žádný ruční offline krok). Offline `WhitelistSigner` zůstává
 jako nástroj pro generování klíčů / ruční ověření.
+
+## Vynucování: server → agent + lokální break-glass (Fáze 2+3)
+
+**Fáze 2 – distribuce politiky:** `HeartbeatController` vrací `Enforce` (z `AppSettings policy.enforce`, .213 = zdroj
+pravdy). Agent (`WhitelistSync`) ho při každém heartbeatu předá do `PolicyState`; `PolicyEnforcer` pak místo fixního
+lokálního `policy.mode` použije **efektivní režim** (`PolicyState.EffectiveMode`): server enforce=true → `block`,
+false → `warn`. Před prvním heartbeatem fallback na lokální config.
+
+**Fáze 3 – lokální break-glass (offline):** lokální **admin** stanice může v lokální konzoli (`127.0.0.1:5080`,
+admin-only, loopback) **dočasně vypnout blokování** (`POST /api/override?hours=N`, strop 72 h) — pro práci, když
+stanice nedosáhne na .213. Override je **perzistovaný** (`C:\ProgramData\USBGuardian\override.json` → přežije restart),
+**logovaný** jako auditní incident (`Action=OverrideDisabled`, kdo/jak dlouho) a nahlášený na .213. **Při příštím
+spojení se serverem se override ZRUŠÍ** (úspěšný heartbeat → `PolicyState.OnServerHeartbeat` → server reasertuje politiku).
+Efektivní režim: `override aktivní ? warn : (server přijat ? enforce : lokální default)`.
 
 ## Watchdog – Task Scheduler
 

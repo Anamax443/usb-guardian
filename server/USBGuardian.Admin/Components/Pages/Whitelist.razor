@@ -53,10 +53,22 @@ else
         <div class="banner @(_msgBad ? "bad" : "ok")">@_msg</div>
     }
 
-    <h2>Katalog (@_devices.Count)</h2>
+    <h2>Katalog (@(string.IsNullOrWhiteSpace(_catFilter) ? $"{_devices.Count}" : $"{CatalogFiltered().Count()} / {_devices.Count}"))</h2>
+    @if (_devices.Count > 0)
+    {
+        <div class="toolbar">
+            <input class="inp mono" style="min-width:280px" @bind="_catFilter" @bind:event="oninput"
+                   placeholder="filtr: sériák / VID / PID / popis (je už v katalogu?)" />
+            @if (!string.IsNullOrWhiteSpace(_catFilter)) { <button class="iconbtn" @onclick="() => _catFilter = string.Empty" title="Zrušit filtr">✕</button> }
+        </div>
+    }
     @if (_devices.Count == 0)
     {
         <p class="muted">Zatím žádné médium.</p>
+    }
+    else if (!CatalogFiltered().Any())
+    {
+        <p class="muted">Filtru „@_catFilter" nic neodpovídá — médium <strong>není</strong> v katalogu.</p>
     }
     else
     {
@@ -65,7 +77,7 @@ else
                 <tr><th>VID</th><th>PID</th><th>Sériové číslo</th><th>Kapacita</th><th>Popis</th><th>Schválil</th><th>Aktivní</th><th></th></tr>
             </thead>
             <tbody>
-                @foreach (var d in _devices)
+                @foreach (var d in CatalogFiltered())
                 {
                     if (_editId == d.Id)
                     {
@@ -108,8 +120,8 @@ else
                 }
             </tbody>
         </table>
-        <p class="muted" data-no-print>Změny v katalogu se k agentům dostanou po vydání nové <strong>podepsané</strong>
-        verze whitelistu (podpisový workflow — privátní klíč nikdy na serveru).</p>
+        <p class="muted" data-no-print>Změny v katalogu se <strong>automaticky</strong> vydají a interně podepíší (server-side)
+        a agenti je stáhnou jako 1:1 kopii do ~2 min. Ruční podpis není potřeba.</p>
     }
 }
 
@@ -139,6 +151,19 @@ else
 
     private int? _editId;
     private string _eVid = "", _ePid = "", _eSerial = "", _eDesc = "";
+
+    // Filtr katalogu (rychlá kontrola „je médium už schválené?" – škáluje i pro 10k)
+    private string _catFilter = "";
+    private IEnumerable<WhitelistDevice> CatalogFiltered()
+    {
+        if (string.IsNullOrWhiteSpace(_catFilter)) return _devices;
+        var f = _catFilter.Trim();
+        return _devices.Where(d =>
+            (d.SerialNumber ?? "").Contains(f, StringComparison.OrdinalIgnoreCase) ||
+            (d.VendorId ?? "").Contains(f, StringComparison.OrdinalIgnoreCase) ||
+            (d.ProductId ?? "").Contains(f, StringComparison.OrdinalIgnoreCase) ||
+            (d.Description ?? "").Contains(f, StringComparison.OrdinalIgnoreCase));
+    }
 
     protected override async Task OnInitializedAsync()
     {

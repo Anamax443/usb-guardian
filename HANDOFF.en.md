@@ -139,10 +139,16 @@ SHA-256/Pkcs1). Agent matches via **Dictionary O(1)** (scales to 10k). Signing u
 - **Trusted Publisher:** for non-interactive runs (gMSA/SYSTEM) the signing cert must be in `LocalMachine\TrustedPublisher`
   on .213 and clients (added on .181+.213; **fleet via GPO** – cert export `_AXIMA-CodeSign-publisher.cer` on the share).
 
+### 5.3c Enforcement server→agent + break-glass — DONE (Phase 2+3)
+**Phase 2:** heartbeat returns `Enforce` (from `AppSettings policy.enforce`, .213 = truth); the agent (`WhitelistSync`)
+passes it to `PolicyState`, `PolicyEnforcer` uses the effective mode (enforce → block, else warn; local default before
+the first heartbeat). **Phase 3 (break-glass):** a local admin in the local console (`127.0.0.1:5080`,
+`POST /api/override?hours=N`, cap 72 h) temporarily disables blocking for **offline** work. Persisted (`override.json`,
+survives restart), **logged** as an incident (`Action=OverrideDisabled`, who/duration) → reported to .213. **On the next
+connection to the server the override is CLEARED** (`PolicyState.OnServerHeartbeat`). **Requires API redeploy
+(.213→SQL-04) + agent redeploy.**
+
 ### 5.5 Roadmap (pending)
-- **Phase 2 – distribute `policy.enforce` to the agent** (heartbeat carries the effective policy) → the agent really blocks per .213.
-- **Phase 3 – local break-glass override** — a local admin temporarily disables blocking (off-network work); expires /
-  is overwritten on sync; **logged** as an audit event + reported to .213. See the model in memory.
 - **Monitoring of signing cert expiry** – `CN=powershell.axinetwork.loc` valid until 2028-06-17; alert via e-mail from the console.
 - **"Everything on the server .213":** move the API runtime from SQL-04 to .213 (console+API on .213, DB on SQL-04, agent repoint to
   `https://10.8.2.213:5443`) → .181 really not needed. **Build/deploy artifacts are on D:\deploy (locally), not on .181.**

@@ -22,6 +22,7 @@ public class WhitelistSync : BackgroundService
     private readonly int _syncIntervalMinutes;
     private readonly HttpClient _httpClient;
     private readonly SyncSignals? _signals;
+    private readonly PolicyState? _policyState;
 
     // Cesta k .sig souboru (vedle whitelistu)
     private string SignaturePath => _localWhitelistPath + ".sig";
@@ -33,13 +34,15 @@ public class WhitelistSync : BackgroundService
         int syncIntervalMinutes,
         bool validateServerCertificate = true,
         string pinnedThumbprint = "",
-        SyncSignals? signals = null)
+        SyncSignals? signals = null,
+        PolicyState? policyState = null)
     {
         _logger              = logger;
         _syncUrl             = syncUrl;
         _localWhitelistPath  = localWhitelistPath;
         _syncIntervalMinutes = syncIntervalMinutes;
         _signals             = signals;
+        _policyState         = policyState;
 
         // TLS: pinning (otisk API certu) / vývojové vypnutí / výchozí validace
         _httpClient = USBGuardian.Security.TlsClient.Create(validateServerCertificate, pinnedThumbprint, 30);
@@ -86,9 +89,15 @@ public class WhitelistSync : BackgroundService
 
             if (heartbeat == null) return;
 
+            // Fáze 2+3: spojení se serverem (.213 = zdroj pravdy) → aplikovat enforce A zrušit lokální
+            // break-glass override (ten platí jen offline). Vrátí true, když override právě zrušil.
+            var overrideCleared = _policyState?.OnServerHeartbeat(heartbeat.Enforce) ?? false;
+            if (overrideCleared)
+                _logger.LogWarning("Break-glass override ZRUŠEN spojením se serverem – platí opět serverová politika (enforce={Enforce}).", heartbeat.Enforce);
+
             _logger.LogInformation(
-                "WhitelistSync: heartbeat OK – server: {Server}, lokální: {Local}",
-                heartbeat.CurrentWhitelistVersion, localVersion);
+                "WhitelistSync: heartbeat OK – server: {Server}, lokální: {Local}, enforce: {Enforce}",
+                heartbeat.CurrentWhitelistVersion, localVersion, heartbeat.Enforce);
 
             // Konzole vyžádala okamžité odevzdání dat → probudíme IncidentSync.
             // Heartbeat sám už potvrdil online + verzi (server posunul LastSeen).
@@ -201,5 +210,6 @@ internal class HeartbeatDto
     public string   CurrentWhitelistVersion  { get; set; } = string.Empty;
     public bool     WhitelistUpdateAvailable { get; set; }
     public bool     ReportNow                { get; set; }
+    public bool     Enforce                  { get; set; }
     public DateTime ServerTime               { get; set; }
 }

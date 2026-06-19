@@ -138,10 +138,15 @@ na `.213` a nastavit `Whitelist:PrivateKeyPath` v `appsettings.local.json`. Serv
 - **Trusted Publisher:** pro neinteraktivní běh (gMSA/SYSTEM) musí být podpisový cert v `LocalMachine\TrustedPublisher`
   na .213 i klientech (přidáno na .181+.213; **fleet přes GPO** – cert export `_AXIMA-CodeSign-publisher.cer` na share).
 
+### 5.3c Vynucování server→agent + break-glass — HOTOVO (Fáze 2+3)
+**Fáze 2:** heartbeat vrací `Enforce` (z `AppSettings policy.enforce`, .213 = pravda); agent (`WhitelistSync`) ho předá
+do `PolicyState`, `PolicyEnforcer` použije efektivní režim (enforce → block, jinak warn; před heartbeatem lokální default).
+**Fáze 3 (break-glass):** lokální admin v lokální konzoli (`127.0.0.1:5080`, `POST /api/override?hours=N`, strop 72 h)
+dočasně vypne blokování pro **offline** práci. Perzistované (`override.json`, přežije restart), **logované** jako incident
+(`Action=OverrideDisabled`, kdo/délka) → nahlášeno na .213. **Při příštím spojení se serverem se override ZRUŠÍ**
+(`PolicyState.OnServerHeartbeat`). **Vyžaduje redeploy API (.213→SQL-04) + redeploy agenta.**
+
 ### 5.5 Roadmapa (pending)
-- **Fáze 2 – distribuce `policy.enforce` na agenta** (heartbeat nese efektivní politiku) → agent reálně blokuje dle .213.
-- **Fáze 3 – lokální break-glass override** — lokální admin dočasně vypne blokování (práce mimo síť); vyprší / přepíše
-  se sync; **logováno** jako auditní událost + nahlášeno na .213. Viz model v paměti.
 - **Monitoring expirace podpisového certu** – `CN=powershell.axinetwork.loc` platí do 2028-06-17; alert e-mailem z konzole.
 - **„Vše server na .213":** přesun API runtime z SQL-04 na .213 (konzole+API na .213, DB na SQL-04, agent repoint na
   `https://10.8.2.213:5443`) → .181 fakt netřeba. **Build/deploy artefakty jsou na D:\deploy (lokálně), ne na .181.**

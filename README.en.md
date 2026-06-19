@@ -35,8 +35,9 @@ Unapproved media are warned or blocked. Designed as a technical control for
 | 25 | **Agent local console** also shows the list of approved devices (whitelist) + agent version | ✅ |
 | 26 | **HTML animation** of how the system works (`/how-it-works.html`, 10 steps of the data flow) | ✅ |
 | 27 | **Whitelist signing/publishing workflow (automatic)** – catalog change → console publishes and **signs internally** (server-side RSA, key on .213) → API serves the signed blob verbatim → **client = a 1:1 copy of the server** within ~2 min; agent O(1) match (scales to 10k) | ✅ |
+| 28 | **Enforcement server→agent (Phase 2)** – heartbeat carries `policy.enforce` (.213 = truth) → agent really **blocks/warns** per the server | ✅ |
+| 29 | **Local break-glass (Phase 3)** – station admin temporarily disables blocking offline (local console), persisted, **logged** → server; cleared on reconnect | ✅ |
 | – | Close unencrypted HTTP 5050 (HTTPS only) | 🔜 NIS2 |
-| – | **Distribute `enforce` to the agent** (heartbeat) → real blocking per .213 + **break-glass override** (local admin, temporary, logged) | 🔜 Phase 2–3 |
 | – | Per-serial **blocklist** + blocking of an already-connected device | 🔜 |
 | – | Signing certificate expiry monitoring | 🔜 |
 

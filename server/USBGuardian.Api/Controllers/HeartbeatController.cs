@@ -60,11 +60,16 @@ public class HeartbeatController : ControllerBase
             .Select(v => v.Version)
             .FirstOrDefaultAsync() ?? string.Empty;
 
+        // Centrální vynucování (.213 = zdroj pravdy) → agent dle něj blokuje/varuje (Fáze 2).
+        var enforceRow = await _db.AppSettings.FirstOrDefaultAsync(s => s.Key == "policy.enforce");
+        var enforce = string.Equals(enforceRow?.Value, "true", StringComparison.OrdinalIgnoreCase);
+
         return Ok(new HeartbeatResponse
         {
             CurrentWhitelistVersion  = currentVersion,
             WhitelistUpdateAvailable = currentVersion != whitelistVersion,
             ReportNow                = reportNow,
+            Enforce                  = enforce,
             ServerTime               = DateTime.UtcNow
         });
     }

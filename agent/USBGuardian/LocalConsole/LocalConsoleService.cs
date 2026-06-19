@@ -26,6 +26,7 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using USBGuardian.Models;
 
 namespace USBGuardian.LocalConsole;
 
@@ -35,6 +36,7 @@ public class LocalConsoleService : BackgroundService
     private readonly DeviceMonitor _monitor;
     private readonly WhitelistChecker _whitelist;
     private readonly IncidentLogger _incidents;
+    private readonly PolicyState _policy;
     private readonly string _policyMode;
     private readonly int _port;
 
@@ -45,6 +47,7 @@ public class LocalConsoleService : BackgroundService
         DeviceMonitor monitor,
         WhitelistChecker whitelist,
         IncidentLogger incidents,
+        PolicyState policy,
         string policyMode,
         int port)
     {
@@ -52,6 +55,7 @@ public class LocalConsoleService : BackgroundService
         _monitor    = monitor;
         _whitelist  = whitelist;
         _incidents  = incidents;
+        _policy     = policy;
         _policyMode = policyMode;
         _port       = port;
     }
@@ -120,18 +124,68 @@ public class LocalConsoleService : BackgroundService
                 return;
             }
 
-            var path = ctx.Request.Url?.AbsolutePath ?? "/";
+            var path   = ctx.Request.Url?.AbsolutePath ?? "/";
+            var method = ctx.Request.HttpMethod;
 
-            if (path.Equals("/api/status", StringComparison.OrdinalIgnoreCase))
+            // Break-glass (jediná zapisující akce – admin-only, loopback): dočasné vypnutí blokování offline.
+            if (method == "POST" && path.Equals("/api/override", StringComparison.OrdinalIgnoreCase))
+            {
+                HandleSetOverride(ctx);
+            }
+            else if (method == "POST" && path.Equals("/api/override/clear", StringComparison.OrdinalIgnoreCase))
+            {
+                _policy.ClearOverride();
+                _logger.LogWarning("Break-glass: override ručně zrušen ({By}).", ctx.User?.Identity?.Name ?? "?");
                 WriteJson(ctx, BuildStatus());
+            }
+            else if (path.Equals("/api/status", StringComparison.OrdinalIgnoreCase))
+            {
+                WriteJson(ctx, BuildStatus());
+            }
             else
+            {
                 WriteHtml(ctx, DashboardHtml);
+            }
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Chyba při zpracování požadavku lokální konzole");
             try { ctx.Response.StatusCode = 500; ctx.Response.Close(); } catch { }
         }
+    }
+
+    // --------------------------------------------------------
+    // Break-glass: lokální admin dočasně vypne blokování (offline). Logováno + nahlášeno na server;
+    // při příštím spojení se serverem se override zruší (server = zdroj pravdy).
+    // --------------------------------------------------------
+    private void HandleSetOverride(HttpListenerContext ctx)
+    {
+        var hours = 4;
+        if (int.TryParse(ctx.Request.QueryString["hours"], out var h) && h > 0)
+            hours = Math.Min(72, h);   // strop 72 h jako pojistka
+
+        var until = DateTime.UtcNow.AddHours(hours);
+        var by    = ctx.User?.Identity?.Name ?? "lokální admin";
+        _policy.SetOverride(until, by);
+
+        _logger.LogWarning(
+            "Break-glass: {By} VYPNUL blokování na {H} h (do {Until} UTC) – offline výjimka, zruší se po spojení se serverem.",
+            by, hours, until);
+
+        // Auditní incident → fronta → server (NIS2 stopa kdo/kdy/jak dlouho).
+        try
+        {
+            _incidents.LogConnection(new Incident
+            {
+                Username         = by,
+                Device           = new DeviceInfo { FriendlyName = $"Break-glass: blokování vypnuto na {hours} h (offline)" },
+                Action           = IncidentAction.OverrideDisabled,
+                WhitelistVersion = _whitelist.GetVersion()
+            });
+        }
+        catch (Exception ex) { _logger.LogError(ex, "Nelze zalogovat break-glass incident"); }
+
+        WriteJson(ctx, BuildStatus());
     }
 
     // --------------------------------------------------------
@@ -196,6 +250,15 @@ public class LocalConsoleService : BackgroundService
             generatedAt = now,
             policyMode  = _policyMode,
             agentCommit = AppInfo.Commit,
+            enforcement = new
+            {
+                effectiveMode  = _policy.EffectiveMode(_policyMode),   // block / warn
+                serverEnforce  = _policy.ServerEnforce,
+                serverReceived = _policy.ServerReceived,
+                overrideActive = _policy.OverrideActive,
+                overrideUntil  = _policy.OverrideUntil,
+                overrideBy     = _policy.OverrideBy
+            },
             whitelist = new
             {
                 version     = wl.Version,
@@ -287,6 +350,9 @@ public class LocalConsoleService : BackgroundService
             .bad { background:#3a1518; color:#f85149; }
             .muted { color:#6e7681; }
             .empty { color:#6e7681; font-size:13px; padding:8px 0; }
+            .btn { font:inherit; font-size:12px; margin-top:10px; padding:7px 11px; border:1px solid #2a2f37;
+                   background:#1c2333; color:#e6e6e6; border-radius:7px; cursor:pointer; }
+            .btn.warn { border-color:#e3b341; } .btn.ok { border-color:#56d364; }
           </style>
         </head>
         <body>
@@ -309,6 +375,16 @@ public class LocalConsoleService : BackgroundService
               return `<span class="pill ${m[a]||'warn'}">${esc(a)}</span>`;
             }
 
+            async function setOv(h){
+              if(!confirm('Dočasně VYPNOUT blokování USB na '+h+' h? Platí jen offline; po spojení se serverem se zruší. Akce se loguje a nahlásí na server.')) return;
+              try{ await fetch('/api/override?hours='+h, {method:'POST'}); }catch(e){}
+              refresh();
+            }
+            async function clearOv(){
+              try{ await fetch('/api/override/clear', {method:'POST'}); }catch(e){}
+              refresh();
+            }
+
             async function refresh(){
               try{
                 const r = await fetch('/api/status', {cache:'no-store'});
@@ -325,8 +401,11 @@ public class LocalConsoleService : BackgroundService
               document.getElementById('meta').textContent =
                 `${d.hostname} · policy: ${d.policyMode} · agent ${d.agentCommit||'?'} · ${dt(d.generatedAt)}`;
 
-              const wl = d.whitelist, mon = d.monitor, q = d.queue;
+              const wl = d.whitelist, mon = d.monitor, q = d.queue, enf = d.enforcement || {};
               const stale = mon.secondsSinceLastEvent > 600;
+              const enfPill = enf.overrideActive
+                ? '<span class="pill warn">BREAK-GLASS (neblokuje)</span>'
+                : (enf.effectiveMode === 'block' ? '<span class="pill bad">BLOKUJE</span>' : '<span class="pill ok">jen varuje</span>');
 
               const wlDevices = (wl.devices||[]).map(e =>
                 `<tr><td class="muted">${esc(e.vendorId)}</td><td class="muted">${esc(e.productId)}</td>
@@ -362,6 +441,15 @@ public class LocalConsoleService : BackgroundService
                   <div class="big">${q.pendingRecords}</div>
                   <div class="row"><span>Záznamů ve frontě</span><span>${q.pendingRecords}</span></div>
                   <div class="row"><span>Souborů</span><span>${q.files}</span></div>
+                </div>
+                <div class="card">
+                  <h2>Vynucování</h2>
+                  <div class="big">${enfPill}</div>
+                  <div class="row"><span>Server (.213)</span><span>${enf.serverReceived ? (enf.serverEnforce ? 'vynucovat' : 'jen varovat') : 'nepřijato'}</span></div>
+                  <div class="row"><span>Break-glass</span><span>${enf.overrideActive ? ('do ' + dt(enf.overrideUntil)) : '—'}</span></div>
+                  ${enf.overrideActive
+                    ? '<button class="btn ok" onclick="clearOv()">Zapnout blokování zpět</button>'
+                    : '<button class="btn warn" onclick="setOv(4)">Vypnout blokování 4 h (offline)</button>'}
                 </div>
                 <div class="card full">
                   <h2>Schválená zařízení – whitelist (${(wl.devices||[]).length})</h2>
