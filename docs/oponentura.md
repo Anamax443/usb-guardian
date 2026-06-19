@@ -86,6 +86,10 @@ stanici a **poctivý rozbor omezení, rizik a otevřených bodů**.
 27. Detailní diagramy
 28. Detailní legislativní a normativní analýza
 29. Referenční přehled tříd a odpovědností
+30. Detailní rozbor klíčových algoritmů a kódu
+31. Útočné scénáře (attack trees)
+32. Kompletní příklady konfigurace
+33. Chování v hraničních situacích (edge cases)
 
 **Přílohy**
 - A. Glosář pojmů
@@ -1329,6 +1333,121 @@ neotevře ochranu — to je důsledek modelu „klient = kopie, funguje samostat
 
 ---
 
+### 22.7 Hlubší technické otázky
+
+**Q23: Co WMI jako zdroj událostí — není polling `WITHIN 1` neefektivní / nespolehlivý?**
+`__InstanceCreationEvent ... WITHIN 1` je dotazovací interval 1 s — pro připojení média (řídká, lidská
+událost) je to dostatečné a nezatěžující. Spolehlivost řeší **watchdog** (à 5 min ověří subscriptions a
+re-registruje při selhání) a **startovní sken** (média připojená před startem). Alternativou by byl
+`RegisterDeviceNotification` (Win32) — výkonnější, ale složitější; WMI bylo zvoleno pro jednoduchost a
+dostatečnost.
+
+**Q24: Sériové číslo z WMI není spolehlivé u všech zařízení (některá vrací prázdné / VID-založené).**
+Pravda. Proto: (a) sériák se **trimuje** (WMI vrací koncové mezery); (b) při prázdném `SerialNumber` se
+fallbackuje na extrakci z `PNPDeviceID`; (c) volitelný **wildcard** režim (`VID:PID` bez sériáku) je
+default **vypnutý** s bezpečnostním varováním (méně specifické). Médium bez stabilního identifikátoru je
+inherentně obtížné whitelistovat — to je vlastnost HW, ne nástroje.
+
+**Q25: Dvě zařízení se stejným VID:PID:SN (klon/kolize)?**
+Match je dle klíče; kolize sériáků jsou u kvalitních zařízení vzácné, ale teoreticky možné (levné
+klony). Whitelist by je nerozlišil. Mitigace: per-serial blocklist (roadmapa) a fyzická kontrola; pro
+většinu firemního parku (značková média) je riziko nízké.
+
+**Q26: Proč incidenty přes JSON soubory na disku, ne přímo do paměti/streamu?**
+Perzistence fronty (`queue/`) zajišťuje, že incident **nezmizí** při výpadku sítě/restartu — agent ho
+doručí po obnovení. Soubor je jednoduchý, odolný a auditovatelný i lokálně. Po odeslání se přesune do
+`sent/` s vlastní retencí.
+
+**Q27: In-memory `IncidentQueue` na API — co když API spadne s plnou frontou?**
+Riziko ztráty nezapsaných incidentů v okamžiku pádu API. Mitigace: agent dostane 202 až po zařazení;
+pokud by se vyžadovala tvrdší garance, šlo by frontu perzistovat (trade-off latence/throughput).
+Pro daný účel (řídké incidenty, agent má vlastní perzistentní frontu a retry) je in-memory přijatelné —
+agent při nepotvrzení znovu odešle. **Pozn.:** agent maže z `queue/` až po úspěšném odeslání, takže
+duplicitní doručení je možné, ztráta nikoli (na straně agenta).
+
+**Q28: Idempotence příjmu incidentů — duplikáty?**
+Agent může incident odeslat znovu (po timeoutu), takže duplikáty jsou možné. Pro audit je „raději dvakrát
+než nikdy" přijatelné; deduplikace dle (hostname, timestamp, sériák, akce) je možné vylepšení.
+
+**Q29: Proč PowerShell pro `Disable-PnpDevice` a ne přímé Win32/CIM volání z .NET?**
+PowerShell cmdlet je nejjednodušší stabilní cesta k PnP operacím; přímé CIM `Win32_PnPEntity.Disable` /
+SetupAPI je možné, ale složitější a chybovější. Pro řídkou událost je režie `powershell.exe` (~stovky ms)
+zanedbatelná. Při masivním re-enforce by se dalo přejít na CIM (sledováno, §19.10).
+
+**Q30: `Get-PnpDevice | Where -like '*...*'` — nemůže matchnout víc zařízení / špatné zařízení?**
+Používáme nejdřív **přesný** `-InstanceId` (jedno zařízení); `-like` je jen fallback. Wildcard `*id*`
+by teoreticky matchnul podřetězec, ale `InstanceId` médií jsou dostatečně specifické (VID/PID/sériák).
+Riziko je nízké a fallback se uplatní jen když přesná shoda selže.
+
+**Q31: Co se stane při změně písmene jednotky / reconnect téhož média?**
+Identita je `PNPDeviceID` / VID:PID:SN, ne drive-letter — reconnect téhož média = stejný klíč, stejné
+rozhodnutí. Drive-letter je jen doplňková informace do logu.
+
+**Q32: Blazor Server + Windows Auth — jak řešíte autorizaci granularně?**
+`WindowsPrincipal.IsInRole` (řeší doménové skupiny) proti `AdminGroups`, plus whitelist účtů
+(`AllowedUsers` v appsettings = lockout-safe) **nebo** DB seznam z Nastavení. `DevAllowAll` je bypass jen
+pro vývoj (v prod false). Pro SSO chodit přes hostname (ne IP).
+
+**Q33: AccessCache — co když změním přístup a cache drží staré?**
+Reload přes Nastavení → Údržba (a při restartu). Trade-off: cache šetří DB dotazy na každý request;
+explicitní reload je přijatelný kompromis pro řídkou změnu přístupových práv.
+
+**Q34: Jak zabráníte „lockoutu" z konzole (smažu si vlastní přístup)?**
+`AllowedUsers`/`AdminGroups` v **appsettings** (mimo DB) fungují jako **bootstrap** — i kdyby se DB
+seznam přístupů vyprázdnil, appsettings účet se dostane dovnitř. Záměrně.
+
+**Q35: Heartbeat nese `enforce` — co když útočník odposlechne a podvrhne enforce=false?**
+Kanál je TLS + pinning (MITM eliminován). Bez kompromitace serveru/klíče nelze podvrhnout odpověď.
+Navíc agent při nedostupnosti serveru drží **poslední** politiku (nezmění se na „nechráněno" jen proto,
+že server mlčí).
+
+**Q36: `ReportNow` přes AppSettings — jak je to jednorázové?**
+Konzole zapíše `cmd.report.<HOST>` = čas požadavku. Agent při heartbeatu dostane `ReportNow=true`, jen
+pokud je požadavek novější než předchozí `LastSeen`; příští heartbeat má `LastSeen` už za časem požadavku
+→ `ReportNow=false`. API jen **čte** AppSettings, nezapisuje stav agenta jinam.
+
+**Q37: Proč konzole nemá DELETE na Incidents, ale API ano?**
+Least-privilege. Mazání incidentů (retence) je citlivá operace; provádí ji **jediná** komponenta (API,
+`RetentionService`) s úzce vymezeným právem. Konzole incidenty jen čte/agreguje — nemůže je mazat (ani
+omylem, ani při kompromitaci).
+
+**Q38: Co lokalizace / více jazyků?**
+UI a dokumentace jsou CS + EN (README/HANDOFF dvojjazyčně). Hlášky agenta jsou CS (firemní prostředí).
+Rozšíření je možné, není to bezpečnostní téma.
+
+**Q39: Jak se chová systém při změně času / časových zónách?**
+Časy se drží v **UTC** (override `until`, timestamps), zobrazení v lokálním čase. Tím se vyhneme chybám
+při DST/zónách. Heartbeat nese `ServerTime` pro referenci.
+
+**Q40: Co aktualizace .NET runtime / závislostí (zranitelnosti)?**
+Buildy jsou **self-contained** — runtime je součástí balíčku, takže update runtime = redeploy nové verze
+(viz §15.4). To je trade-off (větší balíček, vlastní odpovědnost za patchování runtime) za nezávislost na
+přítomnosti .NET na stanici. Správa zranitelností runtime je součástí update procesu.
+
+**Q41: Proč ne kontejnery / jiná distribuce serveru?**
+Cílové prostředí je Windows Server + AD + gMSA; služby běží nativně jako Windows Services. Kontejnerizace
+by přidala složitost bez zjevného přínosu pro daný rozsah. Self-contained publish + `sc.exe` je dostačující.
+
+**Q42: Jak testujete regrese po změnách?**
+Aktuálně živým end-to-end ověřením na pilotu + Event Log evidencí (§18). Slabší stránka je absence
+rozsáhlých automatizovaných testů — uvedeno otevřeně (§19); doporučení: doplnit unit testy pro čistou
+logiku (`PolicyState.EffectiveMode`, klíčování, reconcile rozhodování) a integrační test ingest cesty.
+
+**Q43: Co když se whitelist přiblíží expiraci (`ValidUntil`)?**
+Per-záznam i celá verze mají expiraci. Při expiraci celé verze jede agent v **degraded** módu dle
+`onExpiredWhitelist` (warn/block/allow) s varováním. Roadmapa: aktivní monitoring blížící se expirace +
+alert (analogicky k monitoringu podpisového certu).
+
+**Q44: Jak se liší chování na notebooku mimo síť?**
+Agent funguje offline (lokální whitelist + poslední politika). Break-glass umožní legitimní výjimku.
+Po návratu do sítě heartbeat dorovná politiku a zruší override. Incidenty se doručí ze fronty.
+
+**Q45: Jaký je dopad na uživatele / výkon stanice?**
+Agent je lehký (WMI subscriber, řídké události). Žádné průběžné skenování souborů. Toast jen při události.
+Blokace je událostní (na connect). Dopad na výkon stanice je zanedbatelný.
+
+---
+
 ## 23. Srovnání s alternativními přístupy a produkty
 
 ### 23.1 Přístupové možnosti
@@ -1732,6 +1851,350 @@ omezení uložení.
 | `ExportEndpoints` | CSV + manažerský report |
 | `IncidentAlertService` / `EmailSender` | Alerty e-mailem |
 | `AccessCache` | Cache přístupových práv (reload z Údržby) |
+
+---
+
+## 30. Detailní rozbor klíčových algoritmů a kódu
+
+Tato kapitola rozebírá netriviální algoritmy do hloubky — pro oponenta, který chce ověřit korektnost
+implementace, ne jen popis.
+
+### 30.1 Párování WMI událostí (timing fix)
+
+**Problém:** Při připojení média přijdou dvě nezávislé WMI události — `Win32_DiskDrive` (fyzický disk)
+a `Win32_LogicalDisk` (drive-letter) — v **nedeterministickém pořadí** a s prodlevou. Naivní řešení
+(čekat na obě) by zdrželo blokaci.
+
+**Řešení:** dvě „pending" mapy klíčované `DiskIndex` + okamžité vyhodnocení na disk-connect:
+
+```
+OnDiskConnected(wmi):
+    if not IsRemovableMedia(wmi): return
+    device = ParseDeviceFromWmi(wmi)          # VID:PID:SN (serial TRIM), PnpDeviceId
+    diskIndex = ExtractDiskIndex(DeviceID)
+    if _pendingDriveLetters.TryRemove(diskIndex, out drive):   # scénář B: letter přišel dřív
+        device.DriveLetters.Add(drive)
+    ProcessDevice(device)                      # ENFORCEMENT HNED, nečeká na letter
+
+OnLogicalDiskConnected(wmi):
+    diskIndex = GetDiskIndexForLogicalDisk(DeviceID)
+    if _pendingDevices.TryRemove(diskIndex, out pending):      # scénář A: disk čekal
+        pending.Device.DriveLetters.Add(letter); ProcessDevice(pending.Device)
+    else:
+        _pendingDriveLetters[diskIndex] = (letter, now)        # počkej na disk (timeout 30 s)
+```
+
+**Klíčové rozhodnutí:** enforcement se spouští v `OnDiskConnected` **bez čekání** na drive-letter →
+minimalizace okna namountování. Drive-letter se jen doplní do logu, pokud dorazí. Timeout 30 s brání
+hromadění „osiřelých" pending záznamů.
+
+**Hraniční případy:** velmi rychlé připojení/odpojení (race) — pending mapy jsou `ConcurrentDictionary`,
+`TryRemove` je atomické; osiřelý záznam vyprší. Médium bez drive-letteru (nenamountovatelné) se přesto
+vyhodnotí (blokace funguje na úrovni PnP, ne FS).
+
+### 30.2 Reconciliace stavu vynucování (`ReconcileBlocked`)
+
+Volá se po každém sync cyklu. Logika (zjednodušeně):
+
+```
+blocking = PolicyState.EffectiveMode("warn") == "block"
+
+# 1) Re-blokace připojených (jen když blokujeme) – idempotentní
+if blocking:
+    DeviceMonitor.ReEnforceConnectedDevices()
+
+# 2) Vracení dříve blokovaných
+blocked = DeviceBlocker.GetBlocked()        # PnpId -> klíč VID:PID:SN
+if blocked.Count == 0: return
+for (pnpId, key) in blocked:
+    if (not blocking) or WhitelistChecker.IsAllowedKey(key):
+        DeviceBlocker.UnblockDevice(pnpId)
+```
+
+**Invarianty:**
+- *Vypnuté blokování* → vrátí **vše**, co agent zakázal.
+- *Zapnuté blokování* → vrátí jen ta, co jsou **mezitím schválená** (`IsAllowedKey`).
+- Idempotence: opakované volání v ustáleném stavu nic nemění (re-enforce přeskakuje
+  schválená i už-blokovaná; unblock se volá jen na splněnou podmínku).
+
+**Pořadí (subtilní, ale korektní):** re-enforce běží **před** unblock smyčkou. Pro médium mezitím
+schválené a stále připojené: re-enforce zkontroluje `IsAllowed(device)` = true → **přeskočí** (nezablokuje),
+následná unblock smyčka ho `IsAllowedKey` = true → **vrátí**. Tím nedojde ke konfliktu „zablokuj a hned
+odblokuj".
+
+### 30.3 Spolehlivé vracení (`UnblockDevice`)
+
+**Problém (nalezený bug):** naivní `Enable-PnpDevice` bez `-ErrorAction Stop` → ne-terminující chyba →
+skript přesto vypíše `ENABLED` → **falešný úspěch** → médium zůstane zakázané, ale agent ho odebere ze
+seznamu (a už nezkusí).
+
+**Řešení:** přesný `-InstanceId` (jako ruční příkaz) + fallback `-like`, `try/catch` s `-ErrorAction Stop`,
+tři výsledky:
+
+```
+$dev = Get-PnpDevice -InstanceId '<exact>'              # přesná shoda
+if (-not $dev) { $dev = Get-PnpDevice | ? InstanceId -like '*<escaped>*' }   # fallback
+if ($dev) {
+    try { Enable-PnpDevice -InstanceId $dev.InstanceId -Confirm:$false -ErrorAction Stop; 'ENABLED' }
+    catch { 'FAILED:' + $_.Exception.Message }
+} else { 'GONE' }
+```
+
+| Výsledek | Význam | Akce agenta |
+|----------|--------|-------------|
+| `ENABLED` | Povoleno | Untrack (odebrat z `blocked.json`) |
+| `GONE` | Médium už není v systému (odpojeno) | Untrack (vyřešeno; další plug se vyhodnotí znovu) |
+| `FAILED:<chyba>` | Skutečné selhání Enable | **Ponechat** v seznamu → příští reconcile retry; zalogovat příčinu |
+
+**Escapování:** pro `-InstanceId` přesnou shodu escapujeme jen apostrof; pro `-like` i `&` (`` `& ``).
+Ověřeno, že `-like` matchne reálné `InstanceId` s `&`.
+
+### 30.4 Cache whitelistu a invalidace (`Reload`)
+
+**Problém (nalezený bug):** 5min cache + stažení nové verze bez invalidace → nově schválené/odebrané
+médium se projeví až po vypršení cache (a `ReEnforce` mezitím čte stará data).
+
+**Řešení:** `WhitelistSync.DownloadAndSaveWhitelist` po atomickém zápisu souborů volá
+`WhitelistChecker.Reload()` (zahodí cache; `_lastLoaded = MinValue`). Pořadí ve smyčce:
+
+```
+TrySyncWhitelist()         # heartbeat → pokud nová verze: stáhnout, ověřit, uložit, Reload()
+ReconcileBlocked()         # IsAllowedKey → LoadWhitelist (cache=MinValue) → čerstvý index
+```
+
+→ reconcile v **témž cyklu** vidí novou verzi. Cache zůstává jako optimalizace pro časté dotazy na
+connect (mezi stahováními se nemění), ale po stažení je vždy čerstvá.
+
+### 30.5 Efektivní režim (`PolicyState.EffectiveMode`)
+
+```
+EffectiveMode(localMode):
+    if OverrideActive:        return "warn"            # break-glass má přednost (offline práce)
+    if serverReceived:        return enforce ? "block" : "warn"   # server = pravda
+    return localMode                                    # před 1. heartbeatem: lokální config
+```
+
+**OnServerHeartbeat(enforce):** nastaví `serverEnforce`/`serverReceived` a **zruší** případný override
+(server reasertuje politiku). Override je perzistovaný (`override.json`) se stropem 72 h. Tím je
+zajištěno: lokální výjimka je dočasná a vždy ustoupí serveru při spojení.
+
+### 30.6 Bajtová přesnost podpisu
+
+Kritická invarianta: **týž string** se podepisuje, servíruje i ověřuje.
+
+```
+publish:  blob = CanonicalJson(activeDevices)          # UTF-8, bez BOM, stabilní pořadí
+          sig  = RSA_SHA256_Sign(blob, privateKey)
+          DB: Json = blob (NVARCHAR(MAX)), Signature = base64(sig)
+serve:    GET /api/whitelist  → vrátí Json VERBATIM (žádná re-serializace)
+          GET /api/whitelist/signature → base64(sig)
+verify:   ok = RSA_SHA256_Verify(downloadedBlob, decode(sig), publicKey)   # fail-secure
+```
+
+Jakákoli re-serializace (jiné pořadí klíčů, mezery, BOM) by podpis rozbila — proto **verbatim** přenos
+a uložení `NVARCHAR(MAX)` (ne strukturovaně).
+
+---
+
+## 31. Útočné scénáře (attack trees)
+
+Detailní rozbor vybraných útoků krok za krokem, s vyznačením, kde a jak je systém přeruší.
+
+### 31.1 Cíl útočníka: vynést data na neschválené médium
+
+```
+Vynést data na USB
+├── Připojit neschválené USB
+│   ├── Agent enforce=block → Disable-PnpDevice → médium nepoužitelné            [BLOK]
+│   │     └── (zbytkové okno před mountem — §19.2; mitigace GPO/driver)         [ČÁST. RIZIKO]
+│   ├── Agent enforce=warn → médium funguje, ale incident s atribucí            [AUDIT/DETEKCE]
+│   └── Agent nainstalován? → konzole „chybí agent" / „zmlklo"                   [VIDITELNOST]
+├── Podvrhnout médium na whitelist (přidat svoje VID:PID:SN)
+│   ├── Bez přístupu do konzole (AD skupina/whitelist) → nelze                   [AUTORIZACE]
+│   └── Přímo do DB → nemá podpis priv. klíčem → agent odmítne (fail-secure)     [INTEGRITA]
+├── Podvrhnout lokální whitelist.json na stanici
+│   └── Podpis nesedí (nemá priv. klíč) → odmítnuto                              [INTEGRITA]
+├── Vypnout agenta (lokální admin)
+│   ├── Stop služby → watchdog (3 min) nahodí                                    [ODOLNOST]
+│   ├── Stop služby + task → „zmlklo agentů" v konzoli                           [DETEKCE]
+│   └── (principiální limit host-based — §19.1; mitigace organizační)            [RIZIKO]
+└── Break-glass zneužití
+    └── Logováno (kdo/kdy/délka) + zrušeno při heartbeatu                        [AUDIT]
+```
+
+### 31.2 Cíl útočníka: vnést malware přes médium
+
+```
+Vnést malware
+├── Infikované neschválené USB → block/warn + incident                          [BLOK/AUDIT]
+├── Infikované SCHVÁLENÉ USB (legitimní médium, infikovaný obsah)
+│   └── Mimo rozsah USB Guardian (řeší EDR/antivir)                              [HRANICE]
+│         → doporučení: blocklist konkrétního média (roadmapa §19.7)
+└── BadUSB (médium se tváří jako klávesnice/HID)
+    └── Mimo rozsah (storage-class) — §19.8; mitigace GPO/EDR                    [HRANICE]
+```
+
+### 31.3 Cíl útočníka: MITM mezi agentem a serverem
+
+```
+MITM agent↔API
+├── Odposlech → TLS šifrování                                                    [DŮVĚRNOST]
+├── Podvržení serveru → pinning otisku (agent ověří přesný cert)                 [SPOOFING BLOK]
+│     └── útočník nemá privátní klíč certu → handshake selže
+└── Rollback whitelistu (podstrčit starší validní verzi)
+    ├── Vyžaduje MITM → eliminováno pinningem                                    [BLOK]
+    └── tvrdší ochrana (monotónní verze vynucená agentem) = vylepšení (§22 Q8)
+```
+
+### 31.4 Cíl útočníka: kompromitace serveru / klíče
+
+```
+Kompromitace serveru .213
+├── Získat privátní klíč whitelistu → podvrhnout whitelist
+│   ├── Mitigace: ACL/DPAPI na klíči, omezený přístup na .213                    [MITIGACE]
+│   └── Dopad ohraničen: jen integrita whitelistu (ne CA, ne code-signing)       [OMEZENÝ DOPAD]
+├── Změnit politiku (enforce=false) → agenti přestanou blokovat
+│   └── Detekovatelné (audit změn nastavení); vyžaduje přístup do konzole        [DETEKCE/AUTORIZACE]
+└── Doporučení: monitoring přístupu k .213, budoucí HSM, rotace klíče (§26.7)
+```
+
+### 31.5 Shrnutí pokrytí
+
+| Útok | Přeruší | Zbytkové riziko |
+|------|---------|-----------------|
+| Neschválené médium | Blok/warn + audit | Pre-mount okno |
+| Podvržení whitelistu | Podpis (fail-secure) | Kompromitace klíče na serveru |
+| MITM | TLS + pinning | — |
+| Vyřazení agenta | Watchdog + detekce | Lokální admin |
+| BadUSB / obsah | — (mimo rozsah) | Doplnit GPO/EDR/blocklist |
+
+---
+
+## 32. Kompletní příklady konfigurace (komentované)
+
+> Hodnoty jsou ilustrativní; reálné firemní hodnoty jsou v `*.local.json` (gitignored).
+
+### 32.1 Agent — `agent.config.json` (+ `.local.json`)
+
+```json
+{
+  "policy": {
+    "mode": "block",                 // lokální default před 1. heartbeatem (server pak přebije)
+    "onExpiredWhitelist": "warn",    // warn|block|allow při prošlé verzi whitelistu
+    "overridePath": "C:\\ProgramData\\USBGuardian\\override.json"
+  },
+  "whitelist": {
+    "syncUrl": "https://10.8.2.225:5443",   // API (HTTPS)
+    "localPath": "C:\\ProgramData\\USBGuardian\\whitelist\\whitelist.json",
+    "allowWildcards": false          // true = povolit záznamy bez sériáku (bezpečnostní varování)
+  },
+  "sync": {
+    "whitelistSyncIntervalMinutes": 2,   // heartbeat + kontrola verze
+    "incidentSyncIntervalMinutes": 1
+  },
+  "tls": {
+    "validateServerCertificate": true,
+    "pinnedThumbprint": "E6F6B4FCE0BB627F564E85D6509DE7C4B82CF2F0"   // otisk certu API
+  },
+  "signing": {
+    "enabled": true,                 // prod: VŽDY true (ověřovat podpis whitelistu)
+    "publicKeyPath": "Config\\whitelist_public.pem"
+  },
+  "localConsole": { "enabled": true, "port": 5080 },
+  "notifications": { "toast": { "enabled": true, "contactMessage": "Kontaktujte IT" } }
+}
+```
+
+### 32.2 API — `appsettings.local.json`
+
+```json
+{
+  "ConnectionStrings": {
+    "DefaultConnection": "Server=tcp:10.8.2.225,1433;Database=USBGuardian;Integrated Security=true;TrustServerCertificate=true;"
+  },
+  "Authorization": { "AllowedGroups": [ "AXINETWORK\\USBGuardianClients" ] },
+  "Kestrel": { "Endpoints": {
+    "Https": { "Url": "https://0.0.0.0:5443" },
+    "Http":  { "Url": "http://0.0.0.0:5050" }     // roadmapa: uzavřít (jen HTTPS)
+  }}
+}
+```
+
+### 32.3 Konzole — `appsettings.local.json`
+
+```json
+{
+  "ConnectionStrings": {
+    "DefaultConnection": "Server=tcp:10.8.2.225,1433;Database=USBGuardian;Integrated Security=true;TrustServerCertificate=true;"
+  },
+  "Authorization": {
+    "AdminGroups": [ "AXINETWORK\\USB-Guardian-Admins" ],
+    "AllowedUsers": [ "AXINETWORK\\trnkam" ],     // lockout-safe bootstrap
+    "DevAllowAll": false
+  },
+  "Whitelist": { "PrivateKeyPath": "C:\\Apps\\USBGuardianConsole\\whitelist_private.pem" },
+  "Kestrel": { "Endpoints": { "Http": { "Url": "http://0.0.0.0:4200" } } },
+  "AdSync": { "Enabled": true, "IntervalMinutes": 60, "SearchBase": "", "IncludeDisabled": false }
+}
+```
+
+### 32.4 Centrální nastavení (`AppSettings` v DB) — typické hodnoty
+
+| Klíč | Hodnota | Poznámka |
+|------|---------|----------|
+| `policy.enforce` | `true` | globální vynucování |
+| `comm.silentAfterMinutes` | `180` | práh „zmlklého agenta" |
+| `whitelist.validityDays` | `365` | platnost vydané verze |
+| `retention.enabled` / `.incidentDays` | `true` / `365` | retence |
+| `deploy.enabled` / `.dryRun` / `.defaultEnroll` | `false` / `true` / `false` | auto-enroll (bezpečný default) |
+| `email.enabled` / `.smtpHost` | `true` / `axima-cz.mail.protection.outlook.com` | M365 Direct Send |
+
+---
+
+## 33. Chování v hraničních situacích (edge cases)
+
+Systematický přehled, jak se systém chová v netriviálních situacích — pro oponenta hledajícího
+nedefinované stavy.
+
+| Situace | Chování systému | Návrhový princip |
+|---------|------------------|------------------|
+| Server (.213/API) nedostupný | Agent jede offline: lokální whitelist + poslední politika; fronta incidentů se hromadí (perzistentní) | Klient = samostatný; výpadek neotevře ochranu |
+| Whitelist soubor chybí | `WhitelistChecker` vrátí `null` → médium se neověří → dle `onExpired`/politiky (fail-secure) | Fail-secure |
+| Podpis `.sig` chybí/nesedí | Whitelist odmítnut, jede poslední platná verze; nová se neuloží | Fail-secure, atomický zápis |
+| Stažení whitelistu přeruší uprostřed | Atomický zápis (temp → rename, nejdřív .sig pak .json); nekonzistentní kombinace se odmítne | Atomicita |
+| Agent restartuje s aktivní blokací | `blocked.json` + startovní sken + reconcile → stav dorovnán | Perzistence + reconcile |
+| Médium odpojeno během blokace | `BlockDevice` reportuje stav; při vracení `GONE` → úklid ze seznamu | Robustní vracení |
+| Médium odpojeno, pak znovu připojeno | Stejný klíč → stejné rozhodnutí; reconcile na připojeném vyhodnotí dle aktuální politiky | Identita = VID:PID:SN |
+| Break-glass vyprší (timeout) | `OverrideActive` = false → efektivní režim zpět na server enforce; reconcile re-blokuje | Dočasnost override |
+| Break-glass + ztráta spojení dlouhodobě | Override platí do timeoutu (max 72 h), pak vyprší i bez serveru | Strop jako pojistka |
+| Server enforce=false → true (zapnutí) | Reconcile re-blokuje připojená neschválená (ReEnforce) | Symetrie |
+| Médium schváleno za běhu | Po stažení (Reload) reconcile vrátí i při enforce | Cache invalidace |
+| Médium odebráno z whitelistu | Nově připojené blokováno ihned; připojené po reconcile/restartu | Lokální whitelist |
+| Dvě média současně | Každé vyhodnoceno samostatně (per PNPDeviceID) | Nezávislé zpracování |
+| Uživatel odhlášen (jen služby) | Atribuce fallback na strojový účet (incident se zapíše vždy) | Fail-safe atribuce |
+| Více session (RDP + konzole) | WTS API bere aktivní konzolovou session, fallback enumerace | Best-effort atribuce |
+| WMI subsystém selže | Watchdog (5 min) re-registruje watchery; loguje | Sebeozdravení |
+| Disk bez drive-letteru | Vyhodnocen na úrovni PnP (blokace funguje i bez FS mountu) | Blok na connect |
+| Cizí (jiným nástrojem) zakázané médium | Agent vrací jen to, co **sám** zakázal (`blocked.json`) | Neplete se do cizího |
+| Hodiny stanice posunuté | Časy v UTC; override `until` v UTC → timeout robustní | UTC všude |
+| Velmi velký whitelist (10k) | O(1) match, index v paměti; načtení jen při změně verze | Škálovatelný index |
+| Souběh reconcile a connect události | Stavy thread-safe (`ConcurrentDictionary`, zámky v `DeviceBlocker`/`PolicyState`) | Thread-safety |
+
+### 33.1 Definované „bezpečné" výchozí stavy
+
+- Před prvním heartbeatem: lokální `policy.mode` (lze nastavit `block` pro „secure by default").
+- Chybějící/neplatný whitelist: nepustí (fail-secure), dle `onExpired`.
+- Auto-enrollment: **vypnuto + dry-run** (žádné nečekané hromadné nasazení).
+- Lokální konzole: **vypnuta** (default), admin-only, loopback.
+
+### 33.2 Nedoporučené konfigurace (a proč)
+
+| Konfigurace | Riziko |
+|-------------|--------|
+| `signing.enabled=false` | Vypne ověření podpisu → whitelist lze podvrhnout (jen pro vývoj) |
+| `tls.validateServerCertificate=false` bez pinu | MITM (jen pro vývoj) |
+| `allowWildcards=true` | Méně specifické (VID:PID bez sériáku) → širší povolení |
+| `policy.onExpiredWhitelist=allow` | Po expiraci pustí vše → ztráta ochrany |
 
 ---
 
