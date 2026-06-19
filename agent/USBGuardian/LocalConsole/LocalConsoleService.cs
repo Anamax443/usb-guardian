@@ -141,6 +141,14 @@ public class LocalConsoleService : BackgroundService
                 _logger.LogWarning("Break-glass: override ručně zrušen ({By}).", ctx.User?.Identity?.Name ?? "?");
                 WriteJson(ctx, BuildStatus());
             }
+            else if (method == "POST" && path.Equals("/api/unblock-all", StringComparison.OrdinalIgnoreCase))
+            {
+                // Ruční okamžité vrácení všech médií, která agent sám zakázal (admin-only, loopback).
+                var restored = _blocker.UnblockAll();
+                _logger.LogWarning("Lokální konzole: ruční vrácení blokovaných médií ({By}) → vráceno {N}",
+                    ctx.User?.Identity?.Name ?? "?", restored);
+                WriteJson(ctx, BuildStatus());
+            }
             else if (method == "POST" && path.Equals("/api/restart", StringComparison.OrdinalIgnoreCase))
             {
                 HandleRestart(ctx);
@@ -293,7 +301,11 @@ public class LocalConsoleService : BackgroundService
                 serverReceived = _policy.ServerReceived,
                 overrideActive = _policy.OverrideActive,
                 overrideUntil  = _policy.OverrideUntil,
-                overrideBy     = _policy.OverrideBy
+                overrideBy     = _policy.OverrideBy,
+                blockedCount   = _blocker.BlockedCount,                // kolik médií agent právě drží zablokovaných
+                blockedDevices = _blocker.GetBlocked()
+                    .Select(kv => new { pnpId = kv.Key, key = kv.Value })
+                    .ToList()
             },
             whitelist = new
             {
@@ -420,6 +432,11 @@ public class LocalConsoleService : BackgroundService
               try{ await fetch('/api/override/clear', {method:'POST'}); }catch(e){}
               refresh();
             }
+            async function unblockAll(){
+              if(!confirm('Vrátit (povolit) všechna média, která agent zablokoval? Provede se okamžitě.')) return;
+              try{ await fetch('/api/unblock-all', {method:'POST'}); }catch(e){}
+              refresh();
+            }
             async function restartSvc(){
               if(!confirm('Restartovat klientskou službu USB Guardian? Konzole se na pár sekund odmlčí.')) return;
               try{ await fetch('/api/restart', {method:'POST'}); }catch(e){}
@@ -489,9 +506,13 @@ public class LocalConsoleService : BackgroundService
                   <div class="big">${enfPill}</div>
                   <div class="row"><span>Server (.213)</span><span>${enf.serverReceived ? (enf.serverEnforce ? 'vynucovat' : 'jen varovat') : 'nepřijato'}</span></div>
                   <div class="row"><span>Break-glass</span><span>${enf.overrideActive ? ('do ' + dt(enf.overrideUntil)) : '—'}</span></div>
+                  <div class="row"><span>Zablokováno teď</span><span>${enf.blockedCount ?? 0}</span></div>
                   ${enf.overrideActive
                     ? '<button class="btn ok" onclick="clearOv()">Zapnout blokování zpět</button>'
                     : '<button class="btn warn" onclick="setOv(4)">Vypnout blokování 4 h (offline)</button>'}
+                  ${(enf.blockedCount > 0)
+                    ? '<button class="btn ok" onclick="unblockAll()">Vrátit všechna média hned</button>'
+                    : ''}
                 </div>
                 <div class="card">
                   <h2>Služba</h2>

@@ -56,7 +56,7 @@ public class DeviceBlocker
             $device = Get-PnpDevice | Where-Object {{ $_.InstanceId -like '*{escapedId}*' }}
             if ($device) {{
                 Disable-PnpDevice -InstanceId $device.InstanceId -Confirm:$false
-                Write-Output 'BLOCKED:' + $device.InstanceId
+                Write-Output ('BLOCKED:' + $device.InstanceId)
             }} else {{
                 Write-Output 'NOT_FOUND'
             }}
@@ -87,28 +87,49 @@ public class DeviceBlocker
     // --------------------------------------------------------
     public bool UnblockDevice(string pnpDeviceId)
     {
-        var escapedId = pnpDeviceId.Replace("'", "''").Replace("&", "`&");
+        // Pro přesnou shodu (jako ruční `Enable-PnpDevice -InstanceId '...'`) escapujeme jen apostrof;
+        // pro -like fallback i ampersand (wildcard engine). Nejdřív přesně, pak fallback – ať Enable
+        // proběhne, i kdyby se InstanceId v PnP stromu mírně lišil od WMI PNPDeviceID.
+        var exactId = pnpDeviceId.Replace("'", "''");
+        var likeId  = exactId.Replace("&", "`&");
 
         var script = $@"
-            $device = Get-PnpDevice | Where-Object {{ $_.InstanceId -like '*{escapedId}*' }}
+            $ErrorActionPreference = 'SilentlyContinue'
+            $device = Get-PnpDevice -InstanceId '{exactId}'
+            if (-not $device) {{ $device = Get-PnpDevice | Where-Object {{ $_.InstanceId -like '*{likeId}*' }} }}
             if ($device) {{
-                Enable-PnpDevice -InstanceId $device.InstanceId -Confirm:$false
-                Write-Output 'ENABLED'
+                try {{
+                    Enable-PnpDevice -InstanceId $device.InstanceId -Confirm:$false -ErrorAction Stop
+                    Write-Output 'ENABLED'
+                }} catch {{
+                    Write-Output ('FAILED:' + $_.Exception.Message)
+                }}
+            }} else {{
+                Write-Output 'GONE'
             }}
         ";
 
         var result = RunPowerShell(script);
-        var success = result.Contains("ENABLED");
 
-        if (success)
+        if (result.Contains("ENABLED"))
         {
             _logger.LogInformation("Zařízení POVOLENO: {PnpId}", pnpDeviceId);
             Untrack(pnpDeviceId);
+            return true;
         }
-        else
-            _logger.LogWarning("Nelze povolit zařízení: {PnpId}", pnpDeviceId);
 
-        return success;
+        // Médium už není v systému (odpojené) → ber jako vyřešené a odeber ze seznamu blokovaných,
+        // ať nezůstane viset napořád. Při příštím připojení se vyhodnotí znovu dle aktuální politiky.
+        if (result.Contains("GONE"))
+        {
+            _logger.LogInformation("Zařízení {PnpId} už není připojené – odebírám ze seznamu blokovaných", pnpDeviceId);
+            Untrack(pnpDeviceId);
+            return true;
+        }
+
+        // Skutečné selhání Enable (necháváme v seznamu → příští reconcile zkusí znovu).
+        _logger.LogWarning("Nelze povolit zařízení {PnpId}: {Out}", pnpDeviceId, result.Trim());
+        return false;
     }
 
     // --------------------------------------------------------
@@ -125,8 +146,12 @@ public class DeviceBlocker
         var done = 0;
         foreach (var id in ids)
             if (UnblockDevice(id)) done++;   // UnblockDevice si sám odebere z _blocked
+        _logger.LogWarning("Odblokování dokončeno: vráceno {Done} z {Count} médií", done, ids.Length);
         return done;
     }
+
+    /// <summary>Počet médií, která agent aktuálně drží zablokovaná (pro lokální konzoli).</summary>
+    public int BlockedCount { get { lock (_lock) return _blocked.Count; } }
 
     /// <summary>Snapshot zablokovaných (PnpDeviceID → klíč VID:PID:SN) pro reconciliaci s whitelistem.</summary>
     public IReadOnlyDictionary<string, string> GetBlocked()

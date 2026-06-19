@@ -149,6 +149,14 @@ survives restart), **logged** as an incident (`Action=OverrideDisabled`, who/dur
 connection to the server the override is CLEARED** (`PolicyState.OnServerHeartbeat`). **Requires API redeploy
 (.213→SQL-04) + agent redeploy.**
 
+**Disable blocking = return EVERYTHING immediately (reliability fix, agent redeploy):** the local "Disable blocking"
+(break-glass) calls `UnblockAll()` **synchronously → media are returned at once** (no waiting for the 2-min cycle;
+a server-side `enforce=false` still propagates via heartbeat, which is fine). `UnblockDevice` hardened: Enable via an
+**exact `-InstanceId`** (like a manual `Enable-PnpDevice`), with a `-like` fallback; it distinguishes
+`ENABLED`/`GONE` (an unplugged device is dropped from the list so it doesn't linger)/`FAILED` (logged + kept for retry).
+The local console now shows the **blocked count** + a **"Return all media now"** button (`POST /api/unblock-all`).
+Note: if `.181` runs an agent older than `a590916`, auto-re-enable is physically absent there → redeploy needed (UAC).
+
 ### 5.5 Roadmap (pending)
 - **Monitoring of signing cert expiry** – `CN=powershell.axinetwork.loc` valid until 2028-06-17; alert via e-mail from the console.
 - **"Everything on the server .213":** move the API runtime from SQL-04 to .213 (console+API on .213, DB on SQL-04, agent repoint to

@@ -111,10 +111,12 @@ port `localConsole.port`). Admin-only (`WindowsPrincipal.IsInRole(Administrator)
 agenta: **seznam schválených zařízení (whitelist)** vč. VID/PID/sériák/popis/schválil/platnost, stav+verze
 whitelistu, **verze agenta (commit)**, WMI watchdog, fronta incidentů, právě připojená média a poslední události.
 `HttpListener` schválně místo Kestrelu – agent (`Sdk.Worker`) nepotřebuje ASP.NET Core runtime; loopback → plain
-HTTP akceptovatelné. Endpointy: `GET /` (HTML dashboard, auto-refresh 3 s) · `GET /api/status` (JSON) · zapisující
-(admin-only): `POST /api/override[/clear]` (break-glass) · `POST /api/restart` (**restart klientské služby** – agent
-jako SYSTEM si lokálně restartne vlastní službu odděleným `cmd: sc stop → pauza → sc start`; lokální admin to spustí
-z dashboardu, žádný server/admin na klientech netřeba).
+HTTP akceptovatelné. Endpointy: `GET /` (HTML dashboard, auto-refresh 3 s) · `GET /api/status` (JSON, vč. počtu
+a seznamu médií, která agent právě drží zablokovaná) · zapisující (admin-only): `POST /api/override[/clear]`
+(break-glass) · `POST /api/unblock-all` (**okamžitě vrátí všechna média, která agent sám zakázal** – ruční pojistka
+vedle automatického vrácení) · `POST /api/restart` (**restart klientské služby** – agent jako SYSTEM si lokálně
+restartne vlastní službu odděleným `cmd: sc stop → pauza → sc start`; lokální admin to spustí z dashboardu, žádný
+server/admin na klientech netřeba).
 
 ## Identifikace zařízení
 
@@ -378,7 +380,14 @@ false → `warn`. Před prvním heartbeatem fallback na lokální config.
 (`DeviceBlocker`, perzistně `blocked.json`: PnpDeviceID → klíč VID:PID:SN). `WhitelistSync` po každém cyklu
 **reconciliuje**: blokování vypnuté (break-glass/`enforce=false`) → vrátí (`Enable-PnpDevice`) **vše**, co zakázal;
 blokování zapnuté → vrátí média, která jsou **mezitím na whitelistu** (schválená); jinak nechá blokované.
-Break-glass vrací média **okamžitě**. Vrací jen disky zakázané agentem (ne ručně zakázané jinde).
+**Lokální break-glass vrací média OKAMŽITĚ** (synchronně z konzole 5080, nečeká na cyklus); serverový `enforce=false`
+se propíše dalším heartbeatem (≤ interval). Vrací jen disky zakázané agentem (ne ručně zakázané jinde).
+
+**Spolehlivost vracení (`UnblockDevice`):** Enable se hledá nejdřív **přesnou shodou** `Get-PnpDevice -InstanceId`
+(jako ruční `Enable-PnpDevice -InstanceId '…'`), pak fallbackem `-like`. Výsledek: `ENABLED` (povoleno → odebrat ze
+seznamu), `GONE` (médium už není připojené → bereme jako vyřešené a odebíráme, ať nezůstane viset; příští připojení
+se vyhodnotí znovu), `FAILED` (skutečné selhání → zalogovat a ponechat, příští reconcile zkusí znovu). V lokální
+konzoli je vidět **počet právě blokovaných** a tlačítko **„Vrátit všechna média hned"** (`POST /api/unblock-all`).
 
 **Fáze 3 – lokální break-glass (offline):** lokální **admin** stanice může v lokální konzoli (`127.0.0.1:5080`,
 admin-only, loopback) **dočasně vypnout blokování** (`POST /api/override?hours=N`, strop 72 h) — pro práci, když

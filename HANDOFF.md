@@ -147,6 +147,14 @@ dočasně vypne blokování pro **offline** práci. Perzistované (`override.jso
 (`Action=OverrideDisabled`, kdo/délka) → nahlášeno na .213. **Při příštím spojení se serverem se override ZRUŠÍ**
 (`PolicyState.OnServerHeartbeat`). **Vyžaduje redeploy API (.213→SQL-04) + redeploy agenta.**
 
+**Vypnout blokování = vrátit VŠE hned (oprava spolehlivosti, redeploy agenta):** lokální „Vypnout blokování"
+(break-glass) volá `UnblockAll()` **synchronně → média se vrátí okamžitě** (žádné čekání na 2min cyklus; serverový
+`enforce=false` se propíše až heartbeatem, to je OK). `UnblockDevice` zrobustněn: Enable přes **přesný `-InstanceId`**
+(jako ruční `Enable-PnpDevice`), fallback `-like`; rozlišuje `ENABLED`/`GONE` (odpojené médium odebere ze seznamu, ať
+nezůstane viset)/`FAILED` (zaloguje + ponechá na retry). Lokální konzole nově ukazuje **počet blokovaných** +
+tlačítko **„Vrátit všechna média hned"** (`POST /api/unblock-all`). Pozn.: pokud na `.181` běží agent starší než
+`a590916`, auto-re-enable tam fyzicky NENÍ → nutný redeploy (UAC).
+
 ### 5.5 Roadmapa (pending)
 - **Monitoring expirace podpisového certu** – `CN=powershell.axinetwork.loc` platí do 2028-06-17; alert e-mailem z konzole.
 - **„Vše server na .213":** přesun API runtime z SQL-04 na .213 (konzole+API na .213, DB na SQL-04, agent repoint na
