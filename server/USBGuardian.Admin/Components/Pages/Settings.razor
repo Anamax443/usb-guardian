@@ -121,6 +121,25 @@ denní souhrn) je další krok.</p>
     <dt>SearchBase (OU)</dt><dd>@(string.IsNullOrWhiteSpace(Config["AdSync:SearchBase"]) ? "(celá doména)" : Config["AdSync:SearchBase"])</dd>
 </dl>
 
+<h2>Retence dat (DB)</h2>
+<p class="muted">Automatické mazání starých incidentů z databáze (NIS2 – minimalizace dat). Nastavení se ukládá
+    centrálně; samotný úklid provádí <strong>API</strong> (má jako jediné práva mazat z <code>Incidents</code>),
+    typicky 1× denně. Doporučení: 365 dní.</p>
+<dl class="cfg">
+    <dt>Zapnuto</dt>
+    <dd>
+        @if (_retentionEnabled) { <span class="pill bad">ZAPNUTO — mazat starší než limit</span> }
+        else                    { <span class="pill warn">vypnuto — nic se nemaže</span> }
+        &nbsp;<button class="btn" @onclick="ToggleRetention" disabled="@_busy">@(_retentionEnabled ? "Vypnout" : "Zapnout")</button>
+    </dd>
+    <dt>Uchovávat incidenty (dní)</dt><dd><input class="inp" style="min-width:90px" @bind="_retentionDays" /></dd>
+    <dt>Poslední úklid</dt><dd class="mono">@(string.IsNullOrEmpty(_retentionLastRun) ? "—" : _retentionLastRun)</dd>
+</dl>
+<div class="toolbar">
+    <button class="btn" @onclick="SaveRetention" disabled="@_busy">Uložit retenci</button>
+</div>
+@if (_retentionMsg is not null) { <div class="banner @(_retentionBad ? "bad" : "ok")">@_retentionMsg</div> }
+
 <h2>Databáze / síť</h2>
 <dl class="cfg">
     <dt>SQL Server</dt><dd class="mono">@_sqlServer</dd>
@@ -147,6 +166,10 @@ denní souhrn) je další krok.</p>
     private string _deployInterval = "30", _deployMaxPerRun = "10",
                    _deployAllow = "", _deployTargets = "", _deployLastRun = "";
     private string? _deployMsg;
+
+    private bool _retentionEnabled, _retentionBad;
+    private string _retentionDays = "365", _retentionLastRun = "";
+    private string? _retentionMsg;
 
     protected override async Task OnInitializedAsync()
     {
@@ -180,6 +203,10 @@ denní souhrn) je další krok.</p>
             _deployAllow    = await Get(db, "deploy.allowHosts");
             _deployTargets  = await Get(db, "deploy.targetsFile");
             _deployLastRun  = await Get(db, "deploy.lastRun");
+
+            _retentionEnabled = string.Equals(await Get(db, "retention.enabled"), "true", StringComparison.OrdinalIgnoreCase);
+            var rd = await Get(db, "retention.incidentDays"); _retentionDays = string.IsNullOrEmpty(rd) ? "365" : rd;
+            _retentionLastRun = await Get(db, "retention.lastRun");
 
             _dbError = null;
         }
@@ -250,6 +277,37 @@ denní souhrn) je další krok.</p>
             _deployMsg = "Uloženo."; _deployBad = false;
         }
         catch (Exception ex) { _deployMsg = "Chyba: " + ex.Message; _deployBad = true; }
+        finally { _busy = false; }
+    }
+
+    private async Task ToggleRetention()
+    {
+        _busy = true;
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            await Set(db, "retention.enabled", (!_retentionEnabled).ToString().ToLowerInvariant());
+            await Load();
+        }
+        catch (Exception ex) { _dbError = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task SaveRetention()
+    {
+        _retentionMsg = null;
+        if (!int.TryParse(_retentionDays?.Trim(), out var days) || days < 1)
+        { _retentionMsg = "Zadej kladný počet dní (≥ 1)."; _retentionBad = true; return; }
+
+        _busy = true;
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            await Set(db, "retention.incidentDays", days.ToString());
+            _retentionDays = days.ToString();
+            _retentionMsg = "Uloženo. Úklid provede API při příštím běhu."; _retentionBad = false;
+        }
+        catch (Exception ex) { _retentionMsg = "Chyba: " + ex.Message; _retentionBad = true; }
         finally { _busy = false; }
     }
 

@@ -77,6 +77,15 @@ Firewall `:4200` byl vytvořen přes DCOM/CIM. Konfigurace na serveru:
   `AppSettings cmd.report.<HOST>`), řaditelná tabulka „Detailně", auto-enrollment orchestrátor (default VYPNUTO+dry-run).
 - **Fix trim sériáku** — WMI vrací serial s mezerami (`"WX92D622N4PE    "`) → nesedělo s whitelistem
   („Schváleno=ne" + agent nepoznal whitelisted). Agent trimuje při WMI parse, konzole v `Approved`.
+- **Konzole – kapacita, export, retence, DB stránka (HOTOVO):**
+  - **Kapacita** média v Přehledu (kumulovaný i detailní) a ve Whitelist katalogu (dotahuje se z incidentů).
+  - **Export** z Přehledu (dědí filtr): `⬇ CSV` (Excel CZ) a `📊 Report` = manažerský souhrn (KPI + top uživatelé/
+    stanice/média), tisknutelné HTML → PDF. Endpointy `/export/incidents.csv` a `/export/manager` (chráněné auth).
+  - **Retence dat** (Nastavení → Retence dat): `retention.enabled/incidentDays/lastRun` v `AppSettings`; mazání dělá
+    **API** (`RetentionService`, à 6 h, `db_datawriter`). Default vypnuto. **Vyžaduje redeploy API** (viz 5.2).
+  - **Databáze** (nová stránka): počty v tabulkách, rozsah incidentů, výpis AppSettings, posledních 20 incidentů.
+  - **Spolehlivý commit-stamp** ve všech komponentách (konzole/API/agent) — footer/`/api/version` teď ukazují přesně
+    nasazený commit i u nesouvisejících změn (generovaný `GitCommit.g.cs`, vynutí recompile při změně commitu).
 - **Atribuce uživatele (HOTOVO + ŽIVÉ)** — agent běží jako SYSTEM, dřív hlásil strojový účet (`HOST$`). Nový `SessionUser`
   (WTS API: `WTSGetActiveConsoleSessionId` + enumerace aktivních session, `WTSQuerySessionInformation`) zjistí
   reálného přihlášeného uživatele → `DOMAIN\user` v incidentu, logu i Toastu. Fail-safe: bez přihlášeného uživatele

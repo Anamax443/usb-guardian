@@ -43,14 +43,25 @@
     <None Include="..\..\docs\architecture.md" Link="docs\architecture.md"><CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory></None>
   </ItemGroup>
 
-  <!-- Zaražení git commit hashe do assembly (zobrazí se v patičce konzole) -->
-  <Target Name="StampGitCommit" BeforeTargets="CoreGenerateAssemblyInfo">
+  <!-- Spolehlivé zaražení git commitu do assembly (patička konzole = kontrola aktuálnosti nasazení).
+       Generuje zdrojový soubor přepsaný JEN při změně commitu (WriteOnlyWhenDifferent) → vynutí recompile
+       i kdyz se jinak nezmenil zadny .cs. Pred-stav (BeforeTargets CoreGenerateAssemblyInfo) drzel stary commit. -->
+  <Target Name="StampGitCommit" BeforeTargets="CoreCompile">
     <Exec Command="git -C &quot;$(MSBuildProjectDirectory)&quot; rev-parse --short HEAD"
           ConsoleToMSBuild="true" ContinueOnError="true" StandardOutputImportance="low">
       <Output TaskParameter="ConsoleOutput" PropertyName="GitCommitHash" />
     </Exec>
+    <PropertyGroup>
+      <GitCommitHash Condition="'$(GitCommitHash)' == ''">dev</GitCommitHash>
+      <_GitStampFile>$(IntermediateOutputPath)GitCommit.g.cs</_GitStampFile>
+    </PropertyGroup>
     <ItemGroup>
-      <AssemblyMetadata Include="GitCommit" Value="$(GitCommitHash)" Condition="'$(GitCommitHash)' != ''" />
+      <_GitStampLines Include="// &lt;auto-generated/&gt;" />
+      <_GitStampLines Include="[assembly: System.Reflection.AssemblyMetadata(&quot;GitCommit&quot;, &quot;$(GitCommitHash)&quot;)]" />
+    </ItemGroup>
+    <WriteLinesToFile File="$(_GitStampFile)" Lines="@(_GitStampLines)" Overwrite="true" WriteOnlyWhenDifferent="true" />
+    <ItemGroup>
+      <Compile Include="$(_GitStampFile)" />
     </ItemGroup>
   </Target>
 

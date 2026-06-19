@@ -77,6 +77,15 @@ Firewall `:4200` was created via DCOM/CIM. Configuration on the server:
   `AppSettings cmd.report.<HOST>`), sortable "Detailed" table, auto-enrollment orchestrator (default OFF + dry-run).
 - **Serial trim fix** — WMI returns the serial with spaces (`"WX92D622N4PE    "`) → didn't match the whitelist
   ("Approved=no" + the agent didn't recognize it as whitelisted). The agent trims at WMI parse, the console in `Approved`.
+- **Console – capacity, export, retention, DB page (DONE):**
+  - **Capacity** of the medium in the Overview (cumulated + detailed) and in the Whitelist catalog (pulled from incidents).
+  - **Export** from the Overview (inherits the filter): `⬇ CSV` (Excel) and `📊 Report` = manager summary (KPIs + top
+    users/stations/media), printable HTML → PDF. Endpoints `/export/incidents.csv` and `/export/manager` (auth-protected).
+  - **Data retention** (Settings → Retention): `retention.enabled/incidentDays/lastRun` in `AppSettings`; the deletion is
+    done by the **API** (`RetentionService`, every 6 h, `db_datawriter`). Default off. **Requires API redeploy** (see 5.2).
+  - **Database** (new page): table row counts, incident range, AppSettings dump, last 20 incidents.
+  - **Reliable commit stamp** across all components (console/API/agent) — footer/`/api/version` now show exactly the
+    deployed commit even for unrelated changes (generated `GitCommit.g.cs`, forces recompile when the commit changes).
 - **User attribution (DONE + LIVE)** — the agent runs as SYSTEM and previously reported the machine account (`HOST$`). The new
   `SessionUser` (WTS API: `WTSGetActiveConsoleSessionId` + active-session enumeration, `WTSQuerySessionInformation`)
   resolves the real logged-in user → `DOMAIN\user` in the incident, the log and the Toast. Fail-safe: with nobody

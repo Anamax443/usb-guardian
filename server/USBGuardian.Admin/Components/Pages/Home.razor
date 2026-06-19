@@ -51,6 +51,9 @@ else
         {
             <a class="chip" href="">✕ zrušit filtry</a>
         }
+        <span class="sep"></span>
+        <a class="chip" href="@ExportUrl("/export/incidents.csv")" title="Export incidentů do CSV (Excel) dle aktivního filtru">⬇ CSV</a>
+        <a class="chip" href="@ExportUrl("/export/manager")" target="_blank" title="Manažerský report (souhrn, tisk / uložit PDF)">📊 Report</a>
     </div>
 
     @if (_group)
@@ -61,7 +64,7 @@ else
         {
             <table>
                 <thead>
-                    <tr><th>Médium</th><th>VID</th><th>PID</th><th>Sériové číslo</th><th>Stanice</th><th>Uživatel</th><th>Počet</th><th>Stav</th><th>Schváleno</th><th>Poslední</th></tr>
+                    <tr><th>Médium</th><th>VID</th><th>PID</th><th>Sériové číslo</th><th>Velikost</th><th>Stanice</th><th>Uživatel</th><th>Počet</th><th>Stav</th><th>Schváleno</th><th>Poslední</th></tr>
                 </thead>
                 <tbody>
                     @foreach (var g in _agg)
@@ -71,6 +74,7 @@ else
                             <td class="mono">@g.Vendor</td>
                             <td class="mono">@g.Product</td>
                             <td class="mono">@(string.IsNullOrEmpty(g.Serial) ? "—" : g.Serial)</td>
+                            <td class="muted">@FormatSize(g.Size)</td>
                             <td>@g.Hostname</td>
                             <td>@g.Username</td>
                             <td><strong>@g.Count×</strong></td>
@@ -164,7 +168,7 @@ else
     private string WindowLabel => _days == 0 ? "vše" : _days == 365 ? "rok" : $"{_days} dní";
 
     private record Agg(string Name, string Vendor, string Product, string Serial,
-                       string Hostname, string Username, int Count, int Blocked, int Warned, DateTime Last);
+                       string Hostname, string Username, int Count, int Blocked, int Warned, long Size, DateTime Last);
 
     protected override async Task OnInitializedAsync()
     {
@@ -221,6 +225,7 @@ else
                         Count   = g.Count(),
                         Blocked = g.Sum(x => x.Action == "Blocked" ? 1 : 0),
                         Warned  = g.Sum(x => x.Action == "Warned" ? 1 : 0),
+                        Size    = g.Max(x => x.SizeBytes),
                         Last    = g.Max(x => x.Timestamp)
                     })
                     .OrderByDescending(x => x.Last)
@@ -229,7 +234,7 @@ else
 
                 _agg = raw.Select(x => new Agg(
                     x.Name ?? "", x.Vendor ?? "", x.Product ?? "", x.SerialNumber, x.Hostname, x.Username,
-                    x.Count, x.Blocked, x.Warned, x.Last)).ToList();
+                    x.Count, x.Blocked, x.Warned, x.Size, x.Last)).ToList();
             }
             else
             {
@@ -271,6 +276,16 @@ else
 
     private string SortHeader(string key, string label) =>
         _sort == key ? label + (_desc ? " ▼" : " ▲") : label;
+
+    // Export odkaz se zachováním aktivního filtru (období / akce / hledání).
+    private string ExportUrl(string basePath)
+    {
+        var parts = new List<string>();
+        if (_action is not null) parts.Add($"action={Uri.EscapeDataString(_action)}");
+        if (_days != 30) parts.Add($"days={_days}");
+        if (_q is not null) parts.Add($"q={Uri.EscapeDataString(_q)}");
+        return parts.Count > 0 ? basePath + "?" + string.Join("&", parts) : basePath;
+    }
 
     private IQueryable<Incident> SortDetail(IQueryable<Incident> q)
     {

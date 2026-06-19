@@ -23,14 +23,24 @@
     <PackageReference Include="Microsoft.AspNetCore.Authentication.Negotiate" Version="8.0.0" />
   </ItemGroup>
 
-  <!-- Zaražení git commit hashe do assembly (GET /api/version) -->
-  <Target Name="StampGitCommit" BeforeTargets="CoreGenerateAssemblyInfo">
+  <!-- Spolehlivé zaražení git commitu (GET /api/version = kontrola aktuálnosti). Generuje zdrojový soubor
+       přepsaný JEN při změně commitu → vynutí recompile i bez jiné změny .cs (jinak stary stamp). -->
+  <Target Name="StampGitCommit" BeforeTargets="CoreCompile">
     <Exec Command="git -C &quot;$(MSBuildProjectDirectory)&quot; rev-parse --short HEAD"
           ConsoleToMSBuild="true" ContinueOnError="true" StandardOutputImportance="low">
       <Output TaskParameter="ConsoleOutput" PropertyName="GitCommitHash" />
     </Exec>
+    <PropertyGroup>
+      <GitCommitHash Condition="'$(GitCommitHash)' == ''">dev</GitCommitHash>
+      <_GitStampFile>$(IntermediateOutputPath)GitCommit.g.cs</_GitStampFile>
+    </PropertyGroup>
     <ItemGroup>
-      <AssemblyMetadata Include="GitCommit" Value="$(GitCommitHash)" Condition="'$(GitCommitHash)' != ''" />
+      <_GitStampLines Include="// &lt;auto-generated/&gt;" />
+      <_GitStampLines Include="[assembly: System.Reflection.AssemblyMetadata(&quot;GitCommit&quot;, &quot;$(GitCommitHash)&quot;)]" />
+    </ItemGroup>
+    <WriteLinesToFile File="$(_GitStampFile)" Lines="@(_GitStampLines)" Overwrite="true" WriteOnlyWhenDifferent="true" />
+    <ItemGroup>
+      <Compile Include="$(_GitStampFile)" />
     </ItemGroup>
   </Target>
 

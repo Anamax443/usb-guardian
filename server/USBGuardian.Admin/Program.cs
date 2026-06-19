@@ -18,6 +18,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
 using USBGuardian.Admin.AdSync;
 using USBGuardian.Admin.Components;
+using USBGuardian.Admin.Export;
 using USBGuardian.Admin.Security;
 using USBGuardian.Api.Data;
 
@@ -129,6 +130,9 @@ app.MapGet("/api/version", () => Results.Json(new
     commit    = USBGuardian.Admin.AppInfo.Commit,
     startedAt
 })).AllowAnonymous();
+
+// ── Export incidentů (CSV + manažerský report) – dědí FallbackPolicy ──
+app.MapExportEndpoints();
 
 app.MapRazorComponents<App>()
    .AddInteractiveServerRenderMode();

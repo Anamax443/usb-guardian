@@ -192,7 +192,10 @@ HH:mm:ss [SERVER] info: USBGuardian.Api.IncidentController[0]
 
 ## Verzování (commit na všech komponentách)
 
-Každá komponenta hlásí svůj git commit (razítkuje MSBuild `git rev-parse` při buildu), aby operátor ověřil, co běží:
+Každá komponenta hlásí svůj git commit (razítkuje MSBuild `git rev-parse` při buildu), aby operátor ověřil, co běží
+(= kontrola aktuálnosti nasazení: co je na gitu, musí být na stránce). **Stamp je spolehlivý** – generuje se zdrojový
+soubor `GitCommit.g.cs` přepsaný jen při změně commitu (`WriteOnlyWhenDifferent`), což vynutí recompile i když se
+jinak nezměnil žádný `.cs`. Dřív (`BeforeTargets=CoreGenerateAssemblyInfo`) mohl incremental build držet starý commit.
 
 | Komponenta | Kde |
 |-----------|-----|
@@ -297,7 +300,23 @@ Nastavení: [auto-deploy-setup.md](auto-deploy-setup.md).
   dlaždice „Zmlklo agentů" (hlásí agenta, ale `LastSeen` starší než práh `comm.silentAfterMinutes` – možný výpadek/tamper),
   tlačítko „Vyžádat data" (řádek/hromadně) → [ReportNow](#vyžádání-dat-na-klik-reportnow).
 - **Whitelist** – serial-only zadání + backfill VID/PID z incidentů + import + inline edit + `IsActive` checkbox.
+  **Kapacita** média se dotahuje z incidentů (max `SizeBytes` dle sériáku, display-only – na whitelistu se nedrží).
+- **Databáze** – read-only přehled obsahu DB: počty záznamů v tabulkách, rozsah incidentů (kontrola retence),
+  výpis `AppSettings` a posledních 20 incidentů.
 - **Dokumentace** – render `.md` (Markdig) jako tisknutelné HTML, rozcestník.
+
+**Přehled – kapacita & export:** kumulovaný i detailní výpis ukazují velikost média. Dvě tlačítka exportu (dědí
+aktivní filtr období/akce/hledání):
+- `GET /export/incidents.csv` – surová data (CSV, UTF-8 BOM + `;` → Excel CZ), max 50 000 řádků.
+- `GET /export/manager` – **manažerský report** (tisknutelné HTML → PDF): KPI (incidenty/blokováno/varování/
+  dotčené stanice+uživatelé/neschválená média) + top uživatelé/stanice/média. Endpointy dědí FallbackPolicy (auth).
+
+## Retence dat (NIS2)
+
+Centrální nastavení v `AppSettings` (konzole → Nastavení → Retence dat): `retention.enabled`, `retention.incidentDays`
+(default 365), `retention.lastRun`. Samotné mazání dělá **API** (`RetentionService`, BackgroundService à 6 h) – jako
+jediné má na DB delete práva (`db_datawriter`). Smaže incidenty starší limitu (`ExecuteDeleteAsync`) a zapíše `lastRun`.
+Konzole má na `AppSettings` jen write (ne delete na `Incidents`), proto je enforcement v API.
 
 ## Pending (roadmap)
 

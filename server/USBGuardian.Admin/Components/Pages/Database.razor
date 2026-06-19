@@ -1,0 +1,129 @@
+@page "/databaze"
+@inject IDbContextFactory<AppDbContext> DbFactory
+
+<h1>Databáze</h1>
+
+<p class="intro">Read-only pohled na obsah databáze <strong>USB Guardian</strong> — počty záznamů v tabulkách,
+rozsah dat (pro kontrolu <a href="nastaveni">retence</a>) a centrální nastavení. Slouží k rychlé kontrole stavu dat.</p>
+
+@if (_error is not null)
+{
+    <div class="banner bad">Nelze načíst data z databáze: @_error</div>
+}
+else
+{
+    <div class="cards">
+        <div class="card"><div class="num">@_incidents</div><div class="lbl">Incidenty</div></div>
+        <div class="card"><div class="num">@_computers</div><div class="lbl">Stanice (AD)</div></div>
+        <div class="card"><div class="num">@_wlDevices</div><div class="lbl">Whitelist – média</div></div>
+        <div class="card"><div class="num">@_wlVersions</div><div class="lbl">Whitelist – verze</div></div>
+        <div class="card"><div class="num">@_settings</div><div class="lbl">Nastavení (klíčů)</div></div>
+    </div>
+
+    <h2>Tabulky</h2>
+    <table>
+        <thead><tr><th>Tabulka</th><th class="num">Záznamů</th><th>Nejstarší</th><th>Nejnovější</th></tr></thead>
+        <tbody>
+            <tr>
+                <td class="mono">Incidents</td>
+                <td class="num">@_incidents</td>
+                <td class="mono">@Fmt(_incOldest)</td>
+                <td class="mono">@Fmt(_incNewest)</td>
+            </tr>
+            <tr>
+                <td class="mono">Computers</td>
+                <td class="num">@_computers</td>
+                <td colspan="2" class="muted">hlásí agenta: @_computersWithAgent</td>
+            </tr>
+            <tr><td class="mono">WhitelistDevices</td><td class="num">@_wlDevices</td>
+                <td colspan="2" class="muted">aktivních: @_wlActive</td></tr>
+            <tr><td class="mono">WhitelistVersions</td><td class="num">@_wlVersions</td><td colspan="2" class="muted">—</td></tr>
+            <tr><td class="mono">AppSettings</td><td class="num">@_settings</td><td colspan="2" class="muted">—</td></tr>
+        </tbody>
+    </table>
+
+    <h2>Centrální nastavení (AppSettings)</h2>
+    @if (_appSettings.Count == 0)
+    {
+        <p class="muted">Žádné klíče. Spusť <code>database/06_appsettings.sql</code>.</p>
+    }
+    else
+    {
+        <table>
+            <thead><tr><th>Klíč</th><th>Hodnota</th></tr></thead>
+            <tbody>
+                @foreach (var kv in _appSettings)
+                {
+                    <tr><td class="mono">@kv.Key</td><td class="mono">@(string.IsNullOrEmpty(kv.Value) ? "—" : kv.Value)</td></tr>
+                }
+            </tbody>
+        </table>
+    }
+
+    <h2>Posledních 20 incidentů</h2>
+    @if (_recent.Count == 0)
+    {
+        <p class="muted">Žádné incidenty.</p>
+    }
+    else
+    {
+        <table>
+            <thead><tr><th>Čas</th><th>Stanice</th><th>Uživatel</th><th>Médium</th><th>Velikost</th><th>Akce</th></tr></thead>
+            <tbody>
+                @foreach (var i in _recent)
+                {
+                    <tr>
+                        <td class="mono">@i.Timestamp.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</td>
+                        <td>@i.Hostname</td>
+                        <td>@i.Username</td>
+                        <td>@i.FriendlyName</td>
+                        <td class="muted">@FormatSize(i.SizeBytes)</td>
+                        <td><span class="pill @PillClass(i.Action)">@i.Action</span></td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+}
+
+@code {
+    private string? _error;
+    private int _incidents, _computers, _computersWithAgent, _wlDevices, _wlActive, _wlVersions, _settings;
+    private DateTime? _incOldest, _incNewest;
+    private List<(string Key, string Value)> _appSettings = new();
+    private List<Incident> _recent = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+
+            _incidents          = await db.Incidents.CountAsync();
+            _computers          = await db.Computers.CountAsync();
+            _computersWithAgent = await db.Computers.CountAsync(c => c.LastSeen != null);
+            _wlDevices          = await db.WhitelistDevices.CountAsync();
+            _wlActive           = await db.WhitelistDevices.CountAsync(d => d.IsActive);
+            _wlVersions         = await db.WhitelistVersions.CountAsync();
+            _settings           = await db.AppSettings.CountAsync();
+
+            if (_incidents > 0)
+            {
+                _incOldest = await db.Incidents.MinAsync(i => i.Timestamp);
+                _incNewest = await db.Incidents.MaxAsync(i => i.Timestamp);
+            }
+
+            _appSettings = (await db.AppSettings.OrderBy(s => s.Key).ToListAsync())
+                .Select(s => (s.Key, s.Value)).ToList();
+
+            _recent = await db.Incidents.OrderByDescending(i => i.Timestamp).Take(20).ToListAsync();
+
+            _error = null;
+        }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+
+    private static string Fmt(DateTime? t) => t is null ? "—" : t.Value.ToLocalTime().ToString("dd.MM.yyyy HH:mm");
+    private static string FormatSize(long bytes) => bytes > 0 ? $"{bytes / 1_073_741_824.0:F1} GB" : "—";
+    private static string PillClass(string action) => action switch { "Blocked" => "bad", "Warned" => "warn", _ => "ok" };
+}

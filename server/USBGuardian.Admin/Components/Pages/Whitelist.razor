@@ -47,7 +47,7 @@ else
     {
         <table>
             <thead>
-                <tr><th>VID</th><th>PID</th><th>Sériové číslo</th><th>Popis</th><th>Schválil</th><th>Aktivní</th><th></th></tr>
+                <tr><th>VID</th><th>PID</th><th>Sériové číslo</th><th>Kapacita</th><th>Popis</th><th>Schválil</th><th>Aktivní</th><th></th></tr>
             </thead>
             <tbody>
                 @foreach (var d in _devices)
@@ -58,6 +58,7 @@ else
                             <td><input class="inp mono" style="min-width:90px" @bind="_eVid" /></td>
                             <td><input class="inp mono" style="min-width:130px" @bind="_ePid" /></td>
                             <td><input class="inp mono" style="min-width:120px" @bind="_eSerial" /></td>
+                            <td class="muted">@FormatSize(SizeOf(d.SerialNumber))</td>
                             <td><input class="inp" @bind="_eDesc" /></td>
                             <td class="muted">@d.ApprovedBy</td>
                             <td>—</td>
@@ -73,6 +74,7 @@ else
                             <td class="mono">@(string.IsNullOrEmpty(d.VendorId) ? "—" : d.VendorId)</td>
                             <td class="mono">@(string.IsNullOrEmpty(d.ProductId) ? "—" : d.ProductId)</td>
                             <td class="mono">@(string.IsNullOrEmpty(d.SerialNumber) ? "—" : d.SerialNumber)</td>
+                            <td class="muted">@FormatSize(SizeOf(d.SerialNumber))</td>
                             <td>
                                 @(string.IsNullOrEmpty(d.Description) ? "—" : d.Description)
                                 @if (string.IsNullOrEmpty(d.VendorId)) { <span class="pill warn">čeká na výskyt</span> }
@@ -110,6 +112,12 @@ else
     private bool _signed;
     private int _active, _disabled;
 
+    // Kapacita média se na whitelistu nedrží – dotahuje se z incidentů (max SizeBytes podle sériáku).
+    private Dictionary<string, long> _sizes = new(StringComparer.OrdinalIgnoreCase);
+    private long SizeOf(string serial) =>
+        !string.IsNullOrWhiteSpace(serial) && _sizes.TryGetValue(serial.Trim(), out var s) ? s : 0;
+    private static string FormatSize(long bytes) => bytes > 0 ? $"{bytes / 1_073_741_824.0:F1} GB" : "—";
+
     private int? _editId;
     private string _eVid = "", _ePid = "", _eSerial = "", _eDesc = "";
 
@@ -131,6 +139,17 @@ else
             await Backfill(db);
 
             _devices  = await db.WhitelistDevices.OrderByDescending(d => d.ApprovedAt).ToListAsync();
+
+            // kapacity z incidentů (max podle sériáku) – jen pro sériová čísla v katalogu
+            var serials = _devices.Where(d => !string.IsNullOrEmpty(d.SerialNumber))
+                .Select(d => d.SerialNumber).Distinct().ToList();
+            _sizes = (await db.Incidents
+                    .Where(i => serials.Contains(i.SerialNumber) && i.SizeBytes > 0)
+                    .GroupBy(i => i.SerialNumber)
+                    .Select(g => new { Serial = g.Key, Size = g.Max(i => i.SizeBytes) })
+                    .ToListAsync())
+                .ToDictionary(x => x.Serial, x => x.Size, StringComparer.OrdinalIgnoreCase);
+
             _ver      = await db.WhitelistVersions.Where(v => v.IsActive)
                 .OrderByDescending(v => v.IssuedAt).FirstOrDefaultAsync();
             _signed   = _ver != null && !string.IsNullOrWhiteSpace(_ver.Signature);

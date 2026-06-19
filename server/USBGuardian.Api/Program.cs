@@ -55,6 +55,10 @@ builder.Services.AddDbContext<AppDbContext>(options =>
 builder.Services.AddSingleton<USBGuardian.Api.Queue.IncidentQueue>();
 builder.Services.AddHostedService<USBGuardian.Api.Queue.IncidentQueueWorker>();
 
+// ── Retence dat: úklid starých incidentů dle AppSettings (retention.*) ──
+// API maže (db_datawriter); nastavení spravuje konzole. Default vypnuto.
+builder.Services.AddHostedService<USBGuardian.Api.Retention.RetentionService>();
+
 // ── Controllers + Swagger ─────────────────────────────────────
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
