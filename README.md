@@ -24,7 +24,9 @@ technické opatření pro **NIS2 / zákon 181/2014 Sb. / ISO 27001**.
 | 14 | **Šifrovaná komunikace agent↔API** – self-signed cert (bez CA, MachineKeySet) + pinning otisku | ✅ |
 | 15 | **Dohled komunikace** – dlaždice „Zmlklo agentů" + konfigurovatelný práh; **„Vyžádat data" na klik**; řaditelná tabulka Detailně | ✅ |
 | 16 | **Startovní sken** už-připojených médií; whitelist poll 2 min; centrální `onExpired`/`enforce` | ✅ |
-| 17 | **Auto-enrollment agenta** – konzole sama nasadí agenta na stanice bez něj (gMSA + scheduled task, dry-run/opt-in) | 🟡 pilot |
+| 17 | **Auto-enrollment agenta** – konzole sama nasadí agenta na stanice bez něj (gMSA + scheduled task, dry-run/opt-in); **PILOT ÚSPĚŠNÝ na .181 (bez creds, přes gMSA)** | ✅ pilot OK |
+| 18 | **DB/incidenty tečou** (agent→API→DB→konzole) | ✅ |
+| 19 | **Verze/commit na všech komponentách** (`/api/version`, agent hlásí commit) | ✅ |
 | – | Zavřít nešifrované HTTP 5050 (jen HTTPS) | 🔜 NIS2 |
 | – | **Podpisový/publikační workflow** whitelistu → vynucování + blocklist „naostro" k agentům | 🔜 |
 | – | Per-serial **blocklist** + blokace už-připojeného média | 🔜 |
@@ -57,7 +59,7 @@ Detail viz [docs/architecture.md](docs/architecture.md). Předávka a živý sta
 | Komponenta | Technologie | Kde běží |
 |-----------|-------------|----------|
 | **Agent** | C# .NET 8, Windows Service | každá stanice (SYSTEM) |
-| **API** | ASP.NET Core, :5050 / :5443 | `B-S-W-SQL-04` (Windows služba) |
+| **API** | ASP.NET Core, :5050 / :5443 | `B-S-W-SQL-04`, instalace `C:\USBGuardian.Api`, Windows služba „USB Guardian API" |
 | **Admin konzole** | Blazor Server, :4200 | `10.8.2.213` (`B-S-W-MIKOS`, Windows služba `USBGuardianConsole`) |
 | **Databáze** | SQL Server | `B-S-W-SQL-04`, DB `USBGuardian` |
 | **Autentizace** | Windows Auth (Kerberos / Negotiate) | API: AD skupina; konzole: AD skupina + whitelist účtů |
@@ -89,6 +91,16 @@ dark/light přepínač `axima.theme` bez FOUC, tisk = light, semafor stavů). St
 
 Patička (servisní řádek dle standardu): **živé hodiny + klikací commit hash + DB health + © Milan Trnka**.
 Kontrakt **`GET /api/version`**.
+
+### Verzování (commit na všech komponentách)
+
+Všechny komponenty hlásí svůj git commit, takže operátor ověří, co přesně běží:
+
+- **Konzole** – commit v **patičce** + endpoint `:4200/api/version`.
+- **API** – endpoint `:5050/api/version` (NOVĚ).
+- **Agent** – hlásí commit (heartbeat) → konzole ho zobrazí jako **„Agent verze"**.
+
+Commit se razítkuje při buildu přes MSBuild (`git rev-parse`).
 
 **Autorizace:** Windows Auth, dovnitř jen členové `Authorization:AdminGroups` / účty
 `Authorization:AllowedUsers` (appsettings) **nebo** DB seznam z Nastavení. Pro tiché SSO chodit přes hostname, ne IP.
@@ -206,6 +218,9 @@ robocopy D:\deploy\USBGuardianConsole \\10.8.2.213\C$\Apps\USBGuardianConsole /E
 sc.exe \\10.8.2.213 create USBGuardianConsole binPath= "C:\Apps\USBGuardianConsole\USBGuardian.Admin.exe" start= auto
 sc.exe \\10.8.2.213 start USBGuardianConsole
 ```
+
+> **Build/deploy artefakty:** publikuje se lokálně do `D:\deploy`; API se stageuje na .213 do
+> `C:\Apps\USBGuardianApiPublish` a odtud se instaluje na SQL-04 do `C:\USBGuardian.Api` (služba „USB Guardian API").
 
 SQL grant (least-privilege) pro účet konzole na SQL-04:
 

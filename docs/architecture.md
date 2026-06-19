@@ -63,11 +63,15 @@
 
 | Komponenta | Popis |
 |-----------|-------|
-| `IncidentsController` | POST příjem incidentů od agentů, GET pro Admin UI |
+| `IncidentsController` | POST příjem incidentů od agentů (vrací **202 Accepted** – zařadí do `IncidentQueue`, sám do DB NEpíše), GET pro Admin UI |
 | `WhitelistController` | GET aktuální whitelist + verze + podpis |
 | `HeartbeatController` | GET zdravotní stav serveru |
-| `IncidentQueueWorker` | Background worker – zpracovává příchozí incidenty do DB |
+| `IncidentQueue` | In-memory fronta přijatých incidentů (mezi controllerem a workerem) |
+| `IncidentQueueWorker` | Background worker – odebírá z `IncidentQueue` a **až on zapisuje** incidenty do DB (async) |
 | `AppDbContext` | EF Core kontext – SQL Server přes gMSA Windows Auth |
+
+> **DI:** příjem→zápis je rozdělený, proto je nutné v `Program.cs` zaregistrovat **`IncidentQueue`** (singleton)
+> **i** hosted **`IncidentQueueWorker`** – bez obojího se incidenty přijmou (202), ale do DB se nezapíšou.
 
 ## Serverová admin konzole (USBGuardian.Admin)
 
@@ -83,7 +87,7 @@ od 500+ agentů nesmí ovlivnit adminní použití). Čte/píše SQL-04, modely 
 | `Settings` / `Docs` | Efektivní konfigurace (read-only) / nápověda v prohlížeči |
 | `AdSyncRunner` | Logika AD syncu – volatelná z časovače i z UI (semafor proti souběhu) |
 | `AdSyncService` | Časovač nad `AdSyncRunner` (interval z configu) |
-| `AppInfo` | Commit hash buildu (MSBuild stamp z gitu) → patička |
+| `AppInfo` | Commit hash buildu (MSBuild `git rev-parse` stamp z gitu) → patička + `:4200/api/version` |
 
 **Autorizace:** Windows Auth (Negotiate). Přístup jen členům `Authorization:AdminGroups`
 (AD skupina) **nebo** účtům v `Authorization:AllowedUsers` (whitelist). Kontrola přes
@@ -114,6 +118,13 @@ Např: KINGSTON:DATATRAVELER_3.0:4E0788D05AC9
 ```
 
 Whitelist záznam obsahuje: `vendorId`, `productId`, `serialNumber`, `description`, `approvedAt`, `approvedBy`
+
+> **Pozn. – trim sériového čísla:** WMI vrací sériák často s **koncovými mezerami** (trailing spaces);
+> před porovnáním i zápisem se musí **trimovat**, jinak whitelist match selže nebo se uloží „špinavý" sériák.
+
+> **Pozn. – atribuce uživatele:** agent běží jako **SYSTEM**, takže `Environment.UserName` vrací **strojový účet**
+> (`HOST$`), ne reálného přihlášeného uživatele. Skutečného uživatele incidentu doplnit přes **WTS detekci aktivní
+> session** (`WTSGetActiveConsoleSessionId` / `WTSQuerySessionInformation`) – **roadmap**.
 
 ## Bezpečnostní vrstvy
 
@@ -175,6 +186,16 @@ HH:mm:ss [SERVER] info: USBGuardian.Api.IncidentController[0]
 - **Server** → `[SERVER]`
 - Produkce: agent loguje do Windows Event Log, server do Event Log i konzole
 
+## Verzování (commit na všech komponentách)
+
+Každá komponenta hlásí svůj git commit (razítkuje MSBuild `git rev-parse` při buildu), aby operátor ověřil, co běží:
+
+| Komponenta | Kde |
+|-----------|-----|
+| Konzole | patička + `:4200/api/version` |
+| API | `:5050/api/version` (**NOVĚ**) |
+| Agent | hlásí commit v heartbeatu → konzole „Agent verze" |
+
 ## Datový tok – incident
 
 ```
@@ -185,7 +206,8 @@ HH:mm:ss [SERVER] info: USBGuardian.Api.IncidentController[0]
 5. NotificationService: Toast uživateli
 6. IncidentLogger: uložit do queue/log_MACHINE_DATE.json
 7. IncidentSync (1 min): odeslat na server /api/incidents
-8. Server: uložit do SQL tabulky Incidents
+8. IncidentsController: zařadit do IncidentQueue → vrátit 202 Accepted (NEpíše do DB)
+9. IncidentQueueWorker (async): odebrat z fronty a zapsat do SQL tabulky Incidents
 ```
 
 ## Deployment

@@ -24,7 +24,9 @@ Unapproved media are warned or blocked. Designed as a technical control for
 | 14 | **Encrypted agent↔API comms** – self-signed cert (no CA, MachineKeySet) + thumbprint pinning | ✅ |
 | 15 | **Communication oversight** – "Silent agents" tile + configurable threshold; **"Request data" on click**; sortable Detailed table | ✅ |
 | 16 | **Startup scan** of already-connected media; whitelist poll 2 min; central `onExpired`/`enforce` | ✅ |
-| 17 | **Agent auto-enrollment** – the console deploys the agent itself onto stations without it (gMSA + scheduled task, dry-run/opt-in) | 🟡 pilot |
+| 17 | **Agent auto-enrollment** – the console deploys the agent itself onto stations without it (gMSA + scheduled task, dry-run/opt-in); **PILOT SUCCESSFUL on .181 (no creds, via gMSA)** | ✅ pilot OK |
+| 18 | **DB/incidents flowing** (agent→API→DB→console) | ✅ |
+| 19 | **Version/commit on all components** (`/api/version`, agent reports commit) | ✅ |
 | – | Close unencrypted HTTP 5050 (HTTPS only) | 🔜 NIS2 |
 | – | **Signing/publishing workflow** for the whitelist → enforcement + blocklist live to agents | 🔜 |
 | – | Per-serial **blocklist** + blocking of an already-connected device | 🔜 |
@@ -57,7 +59,7 @@ Details: [docs/architecture.md](docs/architecture.md). Handoff & live state: [HA
 | Component | Technology | Where it runs |
 |-----------|-------------|----------|
 | **Agent** | C# .NET 8, Windows Service | every station (SYSTEM) |
-| **API** | ASP.NET Core, :5050 / :5443 | `B-S-W-SQL-04` (Windows service) |
+| **API** | ASP.NET Core, :5050 / :5443 | `B-S-W-SQL-04`, installed at `C:\USBGuardian.Api`, Windows service "USB Guardian API" |
 | **Admin console** | Blazor Server, :4200 | `10.8.2.213` (`B-S-W-MIKOS`, Windows service `USBGuardianConsole`) |
 | **Database** | SQL Server | `B-S-W-SQL-04`, DB `USBGuardian` |
 | **Authentication** | Windows Auth (Kerberos / Negotiate) | API: AD group; console: AD group + account whitelist |
@@ -88,6 +90,16 @@ dark/light toggle `axima.theme` without FOUC, print = light, status traffic-ligh
 
 Footer (service line per standard): **live clock + clickable commit hash + DB health + © Milan Trnka**.
 Contract **`GET /api/version`**.
+
+### Versioning (commit on all components)
+
+Every component reports its git commit so the operator can verify exactly what is running:
+
+- **Console** – commit in the **footer** + endpoint `:4200/api/version`.
+- **API** – endpoint `:5050/api/version` (NEW).
+- **Agent** – reports the commit (heartbeat) → the console shows it as **"Agent version"**.
+
+The commit is stamped at build time via MSBuild (`git rev-parse`).
 
 **Authorization:** Windows Auth; access only for members of `Authorization:AdminGroups` / accounts
 `Authorization:AllowedUsers` (appsettings) **or** the DB list from Settings. For silent SSO use the hostname, not the IP.
@@ -205,6 +217,9 @@ robocopy D:\deploy\USBGuardianConsole \\10.8.2.213\C$\Apps\USBGuardianConsole /E
 sc.exe \\10.8.2.213 create USBGuardianConsole binPath= "C:\Apps\USBGuardianConsole\USBGuardian.Admin.exe" start= auto
 sc.exe \\10.8.2.213 start USBGuardianConsole
 ```
+
+> **Build/deploy artefacts:** published locally to `D:\deploy`; the API is staged on .213 at
+> `C:\Apps\USBGuardianApiPublish` and installed from there onto SQL-04 at `C:\USBGuardian.Api` (service "USB Guardian API").
 
 SQL grant (least-privilege) for the console account on SQL-04:
 

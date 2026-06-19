@@ -2,7 +2,7 @@
 
 *🇬🇧 English · [🇨🇿 Čeština](HANDOFF.md)*
 
-**Date:** 2026-06-18 · **Repo:** `Anamax443/usb-guardian` · **Author:** Milan Trnka (AXIMA)
+**Date:** 2026-06-19 · **Repo:** `Anamax443/usb-guardian` · **Author:** Milan Trnka (AXIMA)
 
 Document for whoever takes over the project. Architecture: [docs/architecture.md](docs/architecture.md),
 functional description: [README.en.md](README.en.md).
@@ -19,16 +19,17 @@ The server console aggregates data, keeps a station inventory from AD and shows 
 |---|---|
 | **Domain** | `axinetwork.loc` |
 | **DB** | SQL Server `B-S-W-SQL-04` (= `10.8.2.225`), database `USBGuardian`, scripts `database/01–06` applied |
-| **API** | `B-S-W-SQL-04`, Windows service, gMSA `AXINETWORK\gmsa-SQL$`; **HTTPS `:5443`** (self-signed cert, **PIN `E6F6B4FCE0BB627F564E85D6509DE7C4B82CF2F0`**) + HTTP `:5050` (NIS2: close) |
+| **API** | `B-S-W-SQL-04`, Windows service "USB Guardian API", install `C:\USBGuardian.Api`, gMSA `AXINETWORK\gmsa-SQL$`; **HTTPS `:5443`** (self-signed, **PIN `E6F6B4FCE0BB627F564E85D6509DE7C4B82CF2F0`**) + HTTP `:5050`. **Live version via `GET /api/version`** |
+| **Version/commit (check)** | console footer + `:4200/api/version`; API `:5050/api/version`; agent reports commit → console "Agent version". All stamped by `git rev-parse` (MSBuild) |
 | **Admin console** | **live** `http://10.8.2.213:4200/` (`B-S-W-MIKOS`), service `USBGuardianConsole`, `C:\Apps\USBGuardianConsole`, self-contained |
 | **Console account** | **LocalSystem** = `AXINETWORK\B-S-W-MIKOS$` (SQL grant: read all + write Computers/WhitelistDevices/WhitelistVersions/AppSettings) |
 | **Console authorization** | AD `AXINETWORK\SQL Admins2` + whitelist `AXINETWORK\trnkam` (+ DB list from Settings) |
 | **Agent↔API encryption** | HTTPS + **thumbprint pinning** (no CA) — verified end-to-end (heartbeat OK from .181) |
 | **AD sync** | enabled 60 min + on-demand; **211 in AD, ~210 without agent** |
-| **Live commit (console)** | see console footer / `/api/version` (after the last doc sweep) |
+| **Live commit (console)** | `5940eb6` (footer / `/api/version`) · **API live `19e4018`** |
 | **Console – pages** | Overview (filter+aggregation+sortable "Detailed"), Stations (AD inventory + "Agents gone silent" tile + "Request data"), Whitelist, Settings (enforcement/access/email/alerts/communication monitoring/**auto-enrollment**), Documentation |
-| **Deploy account (auto-enroll)** | **gMSA `AXINETWORK\gmsa-USBGdep$`** – in `PC Admins` (admin on clients), installed on `.213`; scheduled task `\USBGuardian\USBGuardian-Watchdog`… deploy task `USBGuardian-AutoDeploy` on `.213` |
-| **Agent (test)** | `.181` (TRNKAMW11) – `syncUrl=https://B-S-W-SQL-04:5443` + pin; **auto-deploy pilot is running** (copies files, sc.exe create being fine-tuned) |
+| **Deploy account (auto-enroll)** | **gMSA `AXINETWORK\gmsa-USBGdep$`** – in `PC Admins` (admin on clients) **and local admin on SQL-04** (API deploy); installed on `.213`; deploy task `USBGuardian-AutoDeploy` (under gMSA, via CIM) |
+| **Agent (test) .181** | **PILOT SUCCESSFUL** – auto-installed via gMSA (no creds), service "USB Guardian" RUNNING, heartbeat + **incidents flowing into DB** (37). Remaining: watchdog task + user attribution (see 5.5) |
 
 ## 3. Key decisions (why)
 
@@ -65,29 +66,34 @@ Firewall `:4200` was created via DCOM/CIM. Configuration on the server:
 
 ## 5. Status and next steps
 
-### 5.1 Done and live on the console (.213)
-- **"Agents gone silent" tile** on Stations + threshold `comm.silentAfterMinutes` (Settings → Communication monitoring).
-  Reveals stations that previously reported an agent but whose `LastSeen` is older than the threshold (outage/tamper).
-- **"Request data" on click** (Stations, per-row/bulk) – `ReportNow` command via `AppSettings` `cmd.report.<HOST>`.
-- **Overview → "Detailed" table with sortable headers** (sorting in the DB via query-string).
-- **Auto-enrollment orchestrator** `AgentDeployService` + Settings "Agent auto-enrollment" (default OFF + dry-run).
+### 5.1 Done and live
+- **DB / incidents = 100 %** — agent → API → DB → console, the whole path runs (Overview shows incidents from .181).
+  **Key fix:** the API had an unfinished queue refactor — `IncidentsController` required `IncidentQueue`, but
+  `Program.cs` **did not register it in DI** → **500 on every `/api/incidents`** (heartbeat ran without that dependency).
+  After `AddSingleton<IncidentQueue>` + `AddHostedService<IncidentQueueWorker>` the controller returns 202 + the worker writes.
+- **Version/commit on all components** — the console + API have `GET /api/version`, the agent reports the real commit
+  (`AppInfo` + MSBuild `git rev-parse` stamp) → in the console "Agent version" shows the deployed commit per station.
+- **Console:** "Agents gone silent" tile (threshold `comm.silentAfterMinutes`), "Request data" (`ReportNow` via
+  `AppSettings cmd.report.<HOST>`), sortable "Detailed" table, auto-enrollment orchestrator (default OFF + dry-run).
+- **Serial trim fix** — WMI returns the serial with spaces (`"WX92D622N4PE    "`) → didn't match the whitelist
+  ("Approved=no" + the agent didn't recognize it as whitelisted). The agent trims at WMI parse, the console in `Approved`.
 
-### 5.2 In repo, awaiting rollout / operator
-- **API (SQL-04, operator):** `HeartbeatController` returns `ReportNow` (once, based on the previous `LastSeen`).
-  + fix `DateTimeStyles` (otherwise heartbeat 500). Without an API deploy, "Request data" only writes a flag, the agent won't get it.
-- **Agent (rollout):** **whitelist poll 15 → 2 min**; **startup scan of already-connected media** (WMI watchers caught
-  only new connections); `ReportNow` handling (flush); fixes: `onExpiredWhitelist` (block/allow/warn), publicKeyPath
-  relative to exe (otherwise the whitelist is rejected when running as a service), GUID `:N[..8]`, removed unused `Microsoft.Data.Sqlite`.
+### 5.2 Deployed components
+- **API on SQL-04 (live `19e4018`):** `ReportNow` in the heartbeat, queue DI fix, `/api/version`. Deploy via
+  **gMSA** (build staged on `.213` `C:\Apps\USBGuardianApiPublish` → gMSA has local admin on SQL-04). Caution on
+  redeploy: **wait for `STOPPED`** (otherwise `USBGuardian.Api.exe` is locked → robocopy `FAILED` → the old version keeps running).
+- **Agent on .181 (auto-installed):** whitelist poll 2 min, startup scan, `ReportNow`, serial trim,
+  real version. Fixes: `onExpiredWhitelist`, publicKeyPath relative to exe, GUID, removed Sqlite.
 
-### 5.3 Agent auto-enrollment (console .213 deploys it itself) — IN PROGRESS, pilot
-Goal: the console, running 24/7 after AD sync, deploys the agent itself onto stations without an agent. **Least-privilege:** the console only writes
-the target list (`deploy.targetsFile`), the installation is done by a **scheduled task on .213 under gMSA** (only that account has admin on the PCs).
-- **Done:** gMSA `gmsa-USBGdep$` (in `PC Admins`, on .213), task `USBGuardian-AutoDeploy`, .213 provisioned
-  (agent publish `C:\Apps\USBGuardianAgentPublish` + scripts), `Deploy-AgentFleet.ps1` (runspace pool = PS5.1 compat),
-  `scripts\New-DeployGmsa.ps1`, `Install-Agent.ps1`/`Uninstall-Agent.ps1`. Detail: [docs/auto-deploy-setup.md](docs/auto-deploy-setup.md).
-- **Pilot .181:** file robocopy **works** (gMSA admin via `PC Admins`); service creation via CIM/DCOM failed
-  → switched to **`sc.exe \\HOST create`** (via cmd because of quoting). **Script must be re-signed** (see 5.4) and finished.
-- **Remaining for "live" auto-enrollment:** enable in Settings (dry-run → verify → turn off); expand from .181 to .180 → fleet.
+### 5.3 Agent auto-enrollment — PILOT SUCCESSFUL (.181), expand to fleet
+Goal: the console, running 24/7 after AD sync, deploys the agent itself onto stations without an agent. **Least-privilege:** the console writes the target list
+(`deploy.targetsFile`), the installation is done by a **scheduled task on .213 under gMSA** (only that account has admin on the clients).
+- **Works end-to-end:** gMSA `gmsa-USBGdep$` (in `PC Admins` = admin on clients, no password), task `USBGuardian-AutoDeploy`,
+  `Deploy-AgentFleet.ps1` (runspace pool PS5.1, `sc.exe \\HOST create` via cmd). **.181 installed without any creds**,
+  the service runs, heartbeat + incidents flow. Scripts: `New-DeployGmsa.ps1`, `Install-Agent.ps1`/`Uninstall-Agent.ps1`,
+  Detail: [docs/auto-deploy-setup.md](docs/auto-deploy-setup.md).
+- **Remaining on .181:** **watchdog task** (PS-free `sc start` schtasks – single-line command for the client, see git history).
+- **Expand to fleet:** GPO publisher trust on clients (5.4), enable in Settings (dry-run → live), `.181 → .180 → fleet`.
 
 ### 5.4 Environment for PS scripts (IMPORTANT – AXIMA gotchas)
 - **AllSigned (GPO):** every PS script that runs there **must be signed** with the prod cert `CN=powershell.axinetwork.loc`
@@ -98,13 +104,24 @@ the target list (`deploy.targetsFile`), the installation is done by a **schedule
   on .213 and clients (added on .181+.213; **fleet via GPO** – cert export `_AXIMA-CodeSign-publisher.cer` on the share).
 
 ### 5.5 Roadmap (pending)
-- **Monitoring of signing cert expiry** (user wants it) – cert valid until 2028-06-17; alert via e-mail from the console.
+- **User attribution** — incidents report `TRNKAMW11$` (machine account), because the agent runs as SYSTEM
+  (`Environment.UserName`). Add detection of the active console session (WTS API: `WTSGetActiveConsoleSessionId`
+  + `WTSQuerySessionInformation`) → the real logged-in user. Fits into "Toast Privilege Separation".
+- **Whitelist signing/publishing workflow** — changes in the catalog only reach the agents **after a signed
+  version is released** (the private key is never on the server). Without it the agent keeps warning even on an approved medium (Signature status = unsigned).
+  It also unlocks enforcement + the **blocklist** "for real".
+- **Monitoring of signing cert expiry** – `CN=powershell.axinetwork.loc` valid until 2028-06-17; alert via e-mail from the console.
+- **"Everything on the server .213":** move the API runtime from SQL-04 to .213 (console+API on .213, DB on SQL-04, agent repoint to
+  `https://10.8.2.213:5443`) → .181 really not needed. **Build/deploy artifacts are on D:\deploy (locally), not on .181.**
 - **Close HTTP 5050** on SQL-04 (HTTPS only) – NIS2.
-- **Whitelist signing/publishing workflow** → unlocks enforcement and the **blocklist** "for real".
 - **Per-serial blocklist** + **blocking already-connected media** (the startup scan is half the way there).
-- **Hardening:** dedicated `USB-Guardian-Admins` instead of `SQL Admins2`, HTTPS console, move the API off SQL-04 onto .213.
-- **Cleanup:** stray (untracked) folder `server/USBGuardianAPI/` remains (duplicate – to be deleted).
-  Done: unused `Microsoft.Data.Sqlite`, GUID `:N[..8]`.
+- **Hardening:** dedicated `USB-Guardian-Admins` instead of `SQL Admins2`, HTTPS console.
+- **Cleanup:** stray (untracked) `server/USBGuardianAPI/` (to be deleted).
+
+> **Note on automation (NOT bypassable by me):** the security classifier auto-denies me actions on prod
+> SQL-04 as well as **changes to my own permissions** (update-config) → prod deploys and permission rules must be run/allowed by the
+> user (bypass mode or a manual rule). That's why the API deploy on SQL-04 is done by the user with ready-made PS blocks (I prepare
+> the build on `.213`).
 
 ## 6. Documentation map
 
