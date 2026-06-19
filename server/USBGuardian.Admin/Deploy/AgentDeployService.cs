@@ -65,6 +65,10 @@ public class AgentDeployService : BackgroundService
         if (cfg.AllowHosts.Count > 0)
             targets = targets.Where(h => cfg.AllowHosts.Contains(h, StringComparer.OrdinalIgnoreCase)).ToList();
 
+        // Per-stanice vyřazení (spravované v seznamu Stanic – deploy.excludeHosts).
+        if (cfg.ExcludeHosts.Count > 0)
+            targets = targets.Where(h => !cfg.ExcludeHosts.Contains(h, StringComparer.OrdinalIgnoreCase)).ToList();
+
         targets = targets.Take(Math.Max(1, cfg.MaxPerRun)).ToList();
 
         if (targets.Count == 0)
@@ -141,6 +145,7 @@ public class AgentDeployService : BackgroundService
         public int  MaxPerRun = 10;
         public string TargetsFile = "";
         public List<string> AllowHosts = new();
+        public List<string> ExcludeHosts = new();
 
         public static async Task<DeployConfig> LoadAsync(AppDbContext db)
         {
@@ -158,6 +163,9 @@ public class AgentDeployService : BackgroundService
             var allow = await Get("deploy.allowHosts");
             if (!string.IsNullOrWhiteSpace(allow))
                 c.AllowHosts = allow.Split(new[] { ',', ';', '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+            var excl = await Get("deploy.excludeHosts");
+            if (!string.IsNullOrWhiteSpace(excl))
+                c.ExcludeHosts = excl.Split(new[] { ',', ';', '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
             return c;
         }
     }

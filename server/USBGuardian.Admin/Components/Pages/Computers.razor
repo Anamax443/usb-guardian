@@ -47,7 +47,7 @@ else
         <thead>
             <tr>
                 <th>Kom.</th><th>Hostname</th><th>Cesta v AD</th><th>OS</th><th>Doména</th>
-                <th>Stav</th><th>Agent verze</th><th>Poslední kontakt</th><th data-no-print>Data</th>
+                <th>Stav</th><th>Agent verze</th><th>Poslední kontakt</th><th data-no-print>Nasazení</th><th data-no-print>Data</th>
             </tr>
         </thead>
         <tbody>
@@ -66,6 +66,25 @@ else
                     </td>
                     <td>@(string.IsNullOrEmpty(c.AgentVersion) ? "—" : c.AgentVersion)</td>
                     <td>@(c.LastSeen is null ? "—" : c.LastSeen.Value.ToLocalTime().ToString("dd.MM.yyyy HH:mm"))</td>
+                    <td data-no-print>
+                        @if (c.InActiveDirectory && !Reports(c))
+                        {
+                            <EditForm FormName="@($"excl-{c.Hostname}")" Model="_form" OnValidSubmit="ToggleDeployExclude">
+                                <input type="hidden" name="ExclHost" value="@c.Hostname" />
+                                @if (_excluded.Contains(c.Hostname))
+                                {
+                                    <span class="pill warn" title="Auto-nasazení agenta je pro tuto stanici vypnuté">vyřazeno</span>
+                                    <button class="btn" type="submit" title="Znovu zařadit do auto-nasazení">Zařadit</button>
+                                }
+                                else
+                                {
+                                    <span class="pill ok">nasadí se</span>
+                                    <button class="btn" type="submit" title="Vyřadit stanici z auto-nasazení agenta">Vyřadit</button>
+                                }
+                            </EditForm>
+                        }
+                        else { <span class="muted">—</span> }
+                    </td>
                     <td data-no-print>
                         @if (Reports(c))
                         {
@@ -98,6 +117,7 @@ else
     [SupplyParameterFromQuery(Name = "stav")] public string? Stav { get; set; }
     [SupplyParameterFromQuery(Name = "q")]    public string? Q { get; set; }
     [SupplyParameterFromForm]                 public string? ReqHost { get; set; }
+    [SupplyParameterFromForm]                 public string? ExclHost { get; set; }
 
     private const int DefaultSilentAfterMinutes = 180;
 
@@ -111,6 +131,10 @@ else
     // hostname (UPPER) → čas posledního vyžádání dat (z AppSettings cmd.report.*)
     private Dictionary<string, DateTime> _reqMap = new(StringComparer.OrdinalIgnoreCase);
     private string? _reqError;   // chyba zápisu vyžádání (Load() ho nevynuluje)
+
+    // stanice vyřazené z auto-nasazení agenta (AppSettings deploy.excludeHosts)
+    private HashSet<string> _excluded = new(StringComparer.OrdinalIgnoreCase);
+    private const string ExcludeKey = "deploy.excludeHosts";
 
     private static bool Reports(Computer c) => !string.IsNullOrEmpty(c.AgentVersion) || c.LastSeen is not null;
 
@@ -204,6 +228,44 @@ else
         catch (Exception ex) { _reqError = "Vyžádání se nepodařilo uložit: " + ex.Message; }
     }
 
+    private static readonly char[] ListSep = { ',', ';', '\n', '\r' };
+
+    private static async Task<HashSet<string>> LoadExcluded(AppDbContext db)
+    {
+        var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            var row = await db.AppSettings.FirstOrDefaultAsync(s => s.Key == ExcludeKey);
+            if (!string.IsNullOrWhiteSpace(row?.Value))
+                foreach (var h in row.Value.Split(ListSep, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                    set.Add(h);
+        }
+        catch { /* AppSettings nemusí existovat */ }
+        return set;
+    }
+
+    private async Task ToggleDeployExclude()
+    {
+        var host = ExclHost?.Trim();
+        if (!string.IsNullOrEmpty(host))
+        {
+            try
+            {
+                await using var db = await DbFactory.CreateDbContextAsync();
+                var set = await LoadExcluded(db);
+                if (!set.Add(host)) set.Remove(host);   // toggle
+                var value = string.Join(",", set.OrderBy(x => x, StringComparer.OrdinalIgnoreCase));
+                var row = await db.AppSettings.FirstOrDefaultAsync(s => s.Key == ExcludeKey);
+                if (row is null) db.AppSettings.Add(new AppSetting { Key = ExcludeKey, Value = value });
+                else            row.Value = value;
+                await db.SaveChangesAsync();
+                _reqError = null;
+            }
+            catch (Exception ex) { _reqError = "Změnu nasazení se nepodařilo uložit: " + ex.Message; }
+        }
+        await Load();
+    }
+
     private static async Task<int> LoadSilentThreshold(AppDbContext db)
     {
         try
@@ -231,6 +293,7 @@ else
             await using var db = await DbFactory.CreateDbContextAsync();
             _silentAfterMin = await LoadSilentThreshold(db);
             _reqMap = await LoadReportRequests(db);
+            _excluded = await LoadExcluded(db);
             _all = await db.Computers.OrderBy(c => c.Hostname).ToListAsync();
             _reporting = _all.Count(Reports);
             _silent    = _all.Count(Silent);

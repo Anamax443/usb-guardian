@@ -51,6 +51,7 @@
     <dt>Interval (min)</dt><dd><input class="inp" style="min-width:90px" @bind="_deployInterval" /></dd>
     <dt>Max stanic / běh</dt><dd><input class="inp" style="min-width:90px" @bind="_deployMaxPerRun" /></dd>
     <dt>Allowlist hostů (čárkou; prázdné = vše bez agenta)</dt><dd><input class="inp" @bind="_deployAllow" placeholder="PC01, PC02 …" /></dd>
+    <dt>Vyřazené stanice</dt><dd class="muted">jednotlivé stanice vyřaď z nasazování přímo v <a href="stanice">Stanicích</a> (sloupec „Nasazení")</dd>
     <dt>Targets file (čte scheduled task pod deploy účtem)</dt><dd><input class="inp" @bind="_deployTargets" placeholder="C:\Apps\USBGuardianConsole\deploy-targets.txt" /></dd>
     <dt>Poslední běh</dt><dd class="mono">@(string.IsNullOrEmpty(_deployLastRun) ? "—" : _deployLastRun)</dd>
 </dl>

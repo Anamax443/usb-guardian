@@ -270,7 +270,8 @@ Klíč `cmd.report.<HOST>` v `AppSettings` slouží i jako audit „naposledy vy
 Tabulka `AppSettings` (key/value, migrace 06) spravovaná z Nastavení; `AccessCache` singleton:
 - `policy.enforce` – vynucovat jen schválená média (agent začne respektovat po heartbeat distribuci – pending).
 - `comm.silentAfterMinutes` – práh „zmlklého agenta" (default 180); hranice pro tečku komunikace i dlaždici na Stanicích.
-- `deploy.*` – auto-enrollment (viz níže): `enabled`/`dryRun`/`intervalMinutes`/`maxPerRun`/`allowHosts`/`targetsFile`/`lastRun`.
+- `deploy.*` – auto-enrollment (viz níže): `enabled`/`dryRun`/`intervalMinutes`/`maxPerRun`/`allowHosts`/`excludeHosts`/`targetsFile`/`lastRun`.
+  `excludeHosts` = per-stanice vyřazení z nasazování, spravované **přímo v Stanicích** (sloupec „Nasazení") – pohodlnější než čárkový seznam.
 - `access.users` / `access.groups` – whitelist přístupu do konzole (`appsettings` = lockout-safe bootstrap).
 - `email.*` – SMTP relay (M365 Direct Send) + `IncidentAlertService` (background notifier: souhrn nových
   neschválených incidentů, baseline při 1. běhu, interval/throttle; `EmailSender`).
@@ -300,7 +301,8 @@ Nastavení: [auto-deploy-setup.md](auto-deploy-setup.md).
   **řaditelné hlavičky** (řazení v DB přes query-string, před `Take(200)`).
 - **Stanice** – AD inventář, filtr, cesta v AD (OU), ikona komunikace (dle čerstvosti `LastSeen`),
   dlaždice „Zmlklo agentů" (hlásí agenta, ale `LastSeen` starší než práh `comm.silentAfterMinutes` – možný výpadek/tamper),
-  tlačítko „Vyžádat data" (řádek/hromadně) → [ReportNow](#vyžádání-dat-na-klik-reportnow).
+  tlačítko „Vyžádat data" (řádek/hromadně) → [ReportNow](#vyžádání-dat-na-klik-reportnow). Sloupec **„Nasazení"** u stanic
+  bez agenta = přepínač vyřazení z auto-enrollmentu (zapisuje `deploy.excludeHosts`; deploy služba je přeskočí).
 - **Whitelist** – serial-only zadání + backfill VID/PID z incidentů + import + inline edit + `IsActive` checkbox.
   **Kapacita** média se dotahuje z incidentů (max `SizeBytes` dle sériáku, display-only – na whitelistu se nedrží).
 - **Databáze** – read-only přehled obsahu DB: počty záznamů v tabulkách, rozsah incidentů (kontrola retence),
@@ -310,8 +312,10 @@ Nastavení: [auto-deploy-setup.md](auto-deploy-setup.md).
 **Přehled – kapacita & export:** kumulovaný i detailní výpis ukazují velikost média. Dvě tlačítka exportu (dědí
 aktivní filtr období/akce/hledání):
 - `GET /export/incidents.csv` – surová data (CSV, UTF-8 BOM + `;` → Excel CZ), max 50 000 řádků.
-- `GET /export/manager` – **manažerský report** (tisknutelné HTML → PDF): KPI (incidenty/blokováno/varování/
-  dotčené stanice+uživatelé/neschválená média) + top uživatelé/stanice/média. Endpointy dědí FallbackPolicy (auth).
+- `GET /export/manager` – **manažerský report** (tisknutelné HTML → PDF, cíleně na **1–2 A4**): KPI + **grafy
+  (inline SVG, bez knihoven):** vývoj incidentů v čase (stacked bar po dnech/týdnech), donut rozpadu podle akce,
+  horizontální pruhy top uživatelé/stanice; tabulka neschválených médií; sekce **Databáze incidentů** (celkový počet,
+  unikátní média/stanice, rozsah dat pro kontrolu retence). Endpointy dědí FallbackPolicy (auth).
 
 ## Retence dat (NIS2)
 
