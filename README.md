@@ -37,6 +37,8 @@ technické opatření pro **NIS2 / zákon 181/2014 Sb. / ISO 27001**.
 | 27 | **Publikační/podpisový workflow whitelistu (automatický)** – změna katalogu → konzole sama vydá a **interně podepíše** (server-side RSA, klíč na .213) → API servíruje podepsaný blob verbatim → **klient = 1:1 kopie serveru** do ~2 min; agent O(1) match (scale 10k) | ✅ |
 | 28 | **Vynucování server→agent (Fáze 2)** – heartbeat nese `policy.enforce` (.213 = pravda) → agent reálně **blokuje/varuje** dle serveru | ✅ |
 | 29 | **Lokální break-glass (Fáze 3)** – admin stanice dočasně vypne blokování offline (lokální konzole), perzistované, **logované** → server; při spojení se serverem se zruší | ✅ |
+| 30 | **Auto-re-enable + reconciliace** – při vypnutí blokování / break-glass agent vrátí dříve zablokovaná média; mezitím schválené médium vrátí i při zapnutém blokování | ✅ |
+| 31 | **Restart klientské služby** (lokální konzole, agent self-restart) + **reload nastavení** (serverová konzole, AccessCache) | ✅ |
 | – | Zavřít nešifrované HTTP 5050 (jen HTTPS) | 🔜 NIS2 |
 | – | Per-serial **blocklist** + blokace už-připojeného média | 🔜 |
 | – | Monitoring expirace podpisového certu | 🔜 |

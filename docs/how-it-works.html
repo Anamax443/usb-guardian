@@ -135,9 +135,13 @@
     { t:"Příjem → fronta → DB", nodes:["n_api","n_queue","n_worker","n_sql"], edge:["n_queue","n_worker"],
       b:'API vrátí <b>202 Accepted</b> a vloží do <b>IncidentQueue</b> (sám do DB nepíše → odolnost při náporech). <b>IncidentQueueWorker</b> asynchronně zapisuje do SQL tabulky <code>Incidents</code>.' },
     { t:"Konzole, export, retence", nodes:["n_sql","n_con"], edge:["n_sql","n_con"], color:"ok", cls:{n_con:"ok"},
-      b:'<b>Blazor konzole</b> (.213) agreguje incidenty, drží AD inventář stanic, spravuje whitelist a nastavení. Umí <b>CSV/manažerský export</b> a <b>retenci</b> (API maže staré incidenty). Footer hlásí živý commit = kontrola aktuálnosti.' },
-    { t:"Podpis whitelistu (offline)", nodes:["n_admin","n_sign","n_api","n_sync","n_wl"], edge:["n_sign","n_api"], color:"rsa", cls:{n_sign:"rsa"},
-      b:'IT admin schválí médium v konzoli. Vydání podepsané verze whitelistu je <b>offline</b> krok (<b>WhitelistSigner</b>, privátní RSA klíč nikdy na serveru). Agent si ji stáhne při heartbeatu (≤2 min) a teprve pak vynucuje/blokuje „naostro". Službu hlídá <b>Watchdog</b>.' },
+      b:'<b>Blazor konzole</b> (.213) agreguje incidenty, drží AD inventář stanic, spravuje whitelist a nastavení. Umí <b>CSV/manažerský report s grafy</b>, <b>retenci</b> i řízení nasazení agentů. Footer hlásí živý commit = kontrola aktuálnosti.' },
+    { t:"Whitelist 1:1 (auto-podpis serverem)", nodes:["n_admin","n_sign","n_con","n_api","n_sync","n_wl"], edge:["n_sign","n_api"], color:"rsa", cls:{n_sign:"rsa"},
+      b:'Admin schválí médium → konzole <b>automaticky vydá a podepíše</b> novou verzi whitelistu <b>interním RSA klíčem na serveru</b> (.213). API ji servíruje <b>verbatim</b>, agent ji do ≤2 min stáhne, ověří (fail-secure) a uloží jako <b>1:1 kopii</b> (Dictionary O(1), škáluje na 10k).' },
+    { t:"Vynucování server→agent", nodes:["n_con","n_api","n_sync","n_pol"], edge:["n_api","n_sync"], color:"bad", cls:{n_pol:"bad"},
+      b:'Centrální politika <code>policy.enforce</code> (.213 = zdroj pravdy) jde k agentovi v <b>heartbeatu</b>. Když je zapnuté vynucování, agent neschválené médium <b>reálně zablokuje</b> (Disable-PnpDevice). Schválené médium se mezitím samo vrátí (reconciliace s whitelistem).' },
+    { t:"Break-glass (offline) + watchdog", nodes:["n_pol","n_wd"], edge:["n_pol","n_wd"], color:"warn", cls:{n_pol:"warn"},
+      b:'Lokální <b>admin</b> stanice může v lokální konzoli (127.0.0.1:5080) <b>dočasně vypnout blokování</b> pro práci mimo síť — <b>logováno</b> + nahlášeno na .213, při příštím spojení se serverem se <b>zruší</b> (server = pravda). Službu hlídá <b>Watchdog</b> (à 3 min), lze ji i restartovat z lokální konzole.' },
   ];
   var COLORS = { brand:'#3b82f6', tls:'#22d3ee', rsa:'#a855f7', ok:'#22c55e', warn:'#f59e0b', bad:'#ef4444' };
 

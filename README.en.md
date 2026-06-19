@@ -37,6 +37,8 @@ Unapproved media are warned or blocked. Designed as a technical control for
 | 27 | **Whitelist signing/publishing workflow (automatic)** – catalog change → console publishes and **signs internally** (server-side RSA, key on .213) → API serves the signed blob verbatim → **client = a 1:1 copy of the server** within ~2 min; agent O(1) match (scales to 10k) | ✅ |
 | 28 | **Enforcement server→agent (Phase 2)** – heartbeat carries `policy.enforce` (.213 = truth) → agent really **blocks/warns** per the server | ✅ |
 | 29 | **Local break-glass (Phase 3)** – station admin temporarily disables blocking offline (local console), persisted, **logged** → server; cleared on reconnect | ✅ |
+| 30 | **Auto-re-enable + reconciliation** – on blocking off / break-glass the agent restores previously blocked media; a now-approved medium is restored even while blocking is on | ✅ |
+| 31 | **Client service restart** (local console, agent self-restart) + **settings reload** (server console, AccessCache) | ✅ |
 | – | Close unencrypted HTTP 5050 (HTTPS only) | 🔜 NIS2 |
 | – | Per-serial **blocklist** + blocking of an already-connected device | 🔜 |
 | – | Signing certificate expiry monitoring | 🔜 |
