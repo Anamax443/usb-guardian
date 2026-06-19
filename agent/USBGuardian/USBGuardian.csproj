@@ -35,4 +35,15 @@
     </None>
   </ItemGroup>
 
+  <!-- Zaražení git commit hashe do assembly (agent hlásí jako verzi → konzole „Agent verze") -->
+  <Target Name="StampGitCommit" BeforeTargets="CoreGenerateAssemblyInfo">
+    <Exec Command="git -C &quot;$(MSBuildProjectDirectory)&quot; rev-parse --short HEAD"
+          ConsoleToMSBuild="true" ContinueOnError="true" StandardOutputImportance="low">
+      <Output TaskParameter="ConsoleOutput" PropertyName="GitCommitHash" />
+    </Exec>
+    <ItemGroup>
+      <AssemblyMetadata Include="GitCommit" Value="$(GitCommitHash)" Condition="'$(GitCommitHash)' != ''" />
+    </ItemGroup>
+  </Target>
+
 </Project>

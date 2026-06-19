@@ -104,6 +104,14 @@ app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
 
+// Verze buildu (commit) – ať jde ověřit, co je nasazené (symetrické s konzolí)
+var apiStartedAt = DateTime.UtcNow;
+app.MapGet("/api/version", () => Results.Json(new
+{
+    commit    = USBGuardian.Api.AppInfo.Commit,
+    startedAt = apiStartedAt
+})).AllowAnonymous();
+
 // Otisk TLS certu pro pinning na agentech (veřejná informace)
 app.MapGet("/api/cert-info", () => Results.Json(new
 {

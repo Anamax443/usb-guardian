@@ -171,7 +171,7 @@ public class IncidentSync : BackgroundService
             var request = new
             {
                 hostname     = Environment.MachineName,
-                agentVersion = "1.0.0",
+                agentVersion = AppInfo.Commit,
                 sourceFile   = fileName,
                 incidents    = toSend.Select(r => new
                 {

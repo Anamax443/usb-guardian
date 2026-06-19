@@ -70,7 +70,7 @@ public class WhitelistSync : BackgroundService
                 $"{_syncUrl}/api/heartbeat" +
                 $"?hostname={Uri.EscapeDataString(Environment.MachineName)}" +
                 $"&whitelistVersion={Uri.EscapeDataString(localVersion)}" +
-                $"&agentVersion=1.0.0";
+                $"&agentVersion={Uri.EscapeDataString(AppInfo.Commit)}";
 
             var heartbeatResp = await _httpClient.GetAsync(heartbeatUrl);
 
