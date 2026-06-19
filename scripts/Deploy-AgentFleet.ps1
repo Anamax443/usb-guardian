@@ -94,14 +94,17 @@ $perHost = {
 
         & sc.exe "\\$h" failure $ServiceName reset= 86400 actions= restart/60000/restart/60000/restart/60000 | Out-Null
 
-        $tr = 'powershell.exe -NonInteractive -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File \"{0}\scripts\Watch-USBGuardian.ps1\"' -f $InstallDir
-        & cmd.exe /c ('schtasks /Create /S {0} /RU SYSTEM /RL HIGHEST /SC MINUTE /MO 3 /TN "USBGuardian\USBGuardian-Watchdog" /TR "{1}" /F' -f $h, $tr) 2>&1 | Out-Null
+        # Watchdog: PS-free scheduled task (zadny podpis/trust na klientech) – nahodi sluzbu kdyz se zastavi.
+        # sc start na bezici sluzbu vrati 1056 (neskodne); kdyz je zastavena, spusti ji.
+        $wOut = (& cmd.exe /c ('schtasks /Create /S {0} /RU SYSTEM /RL HIGHEST /SC MINUTE /MO 3 /TN "USBGuardian\USBGuardian-Watchdog" /TR "sc start \"{1}\"" /F' -f $h, $ServiceName) 2>&1 | Out-String)
+        $wOk = ($LASTEXITCODE -eq 0)
 
         & sc.exe "\\$h" start $ServiceName | Out-Null
         Start-Sleep -Seconds 2
         $st = (& sc.exe "\\$h" query $ServiceName 2>&1 | Out-String)
-        if ($st -match 'RUNNING') { $r.Status = 'OK'; $r.Detail = $(if ($exists) { 'reinstalled' } else { 'installed' }) }
-        else                      { $r.Status = 'STARTED?'; $r.Detail = 'sluzba vytvorena, stav nepotvrzen RUNNING' }
+        $wd = $(if ($wOk) { 'wd ok' } else { 'wd FAIL: ' + ($wOut.Trim() -replace '\s+',' ') })
+        if ($st -match 'RUNNING') { $r.Status = 'OK'; $r.Detail = ($(if ($exists) { 'reinstalled' } else { 'installed' }) + '; ' + $wd) }
+        else                      { $r.Status = 'STARTED?'; $r.Detail = 'sluzba vytvorena, stav nepotvrzen RUNNING; ' + $wd }
     }
     catch { $r.Status = 'FAIL'; $r.Detail = $_.Exception.Message }
     return [pscustomobject]$r
