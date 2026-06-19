@@ -22,28 +22,18 @@ else
         <div class="card @(_signed ? "" : "warn")"><div class="num">@(_signed ? "podepsáno" : "—")</div><div class="lbl">Stav podpisu</div></div>
     </div>
 
-    <h2>Publikace verze — podepsaný whitelist pro agenty (1:1 kopie na klienta)</h2>
-    <p class="muted">Agenti dostávají <strong>jen podepsanou</strong> verzi (privátní klíč nikdy na serveru).
-        Postup: ① <strong>Vydat verzi</strong> z katalogu → ② <strong>stáhnout</strong> <code>whitelist.json</code> →
-        ③ offline podepsat (<code>WhitelistSigner sign whitelist.json</code>) → ④ <strong>nahrát</strong> <code>.sig</code> → aktivace.
-        Po aktivaci si ji agenti stáhnou do ~2 min (heartbeat).</p>
+    <h2>Publikace verze (automatická, podepsaná serverem)</h2>
+    <p class="muted">Po <strong>každé změně katalogu</strong> konzole automaticky vydá a <strong>interně podepíše</strong>
+        novou verzi (RSA klíč na serveru, <code>Whitelist:PrivateKeyPath</code>); agenti ji stáhnou do ~2 min jako
+        <strong>1:1 kopii</strong>. Ruční podpis není potřeba.</p>
     <div class="toolbar">
-        <button class="btn" @onclick="PublishVersion" disabled="@_busy">① Vydat verzi z katalogu (@_active aktivních)</button>
-        @if (_pending is not null)
+        <button class="btn" @onclick="RepublishNow" disabled="@_busy">Publikovat nyní (@_active aktivních)</button>
+        @if (_ver is not null)
         {
-            <a class="btn" href="/whitelist/pending.json" target="_blank" rel="noopener">② Stáhnout whitelist.json</a>
+            <span class="muted">Aktivní verze: <strong>@_ver.Version</strong> · @(_signed ? "podepsáno ✓" : "NEPODEPSÁNO ✗")
+                · platí do @_ver.ValidUntil.ToLocalTime().ToString("dd.MM.yyyy")</span>
         }
     </div>
-    @if (_pending is not null)
-    {
-        <div class="banner warn">Verze <strong>@_pending.Version</strong> čeká na podpis
-            (vydáno @_pending.IssuedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm"), @_pendingCount zařízení).
-            Podepiš offline a nahraj <code>.sig</code>:</div>
-        <div class="toolbar">
-            <label class="btn">④ Nahrát .sig <InputFile OnChange="OnSigSelected" accept=".sig,.txt" style="display:none" /></label>
-            @if (_sigMsg is not null) { <span class="muted">@_sigMsg</span> }
-        </div>
-    }
     @if (_pubMsg is not null) { <div class="banner @(_pubBad ? "bad" : "ok")">@_pubMsg</div> }
 
     <h2>Přidat médium</h2>
@@ -137,10 +127,8 @@ else
     private bool _signed;
     private int _active, _disabled;
 
-    // Publikace: verze čekající na podpis (IsActive=false, Signature='', Json<>'')
-    private WhitelistVersion? _pending;
-    private int _pendingCount;
-    private string? _pubMsg, _sigMsg;
+    // Publikace (automatická, server-side podpis)
+    private string? _pubMsg;
     private bool _pubBad;
 
     // Kapacita média se na whitelistu nedrží – dotahuje se z incidentů (max SizeBytes podle sériáku).
@@ -186,21 +174,6 @@ else
             _signed   = _ver != null && !string.IsNullOrWhiteSpace(_ver.Signature);
             _active   = _devices.Count(d => d.IsActive);
             _disabled = _devices.Count(d => !d.IsActive);
-
-            _pending = await db.WhitelistVersions
-                .Where(v => !v.IsActive && v.Signature == "" && v.Json != "")
-                .OrderByDescending(v => v.IssuedAt).FirstOrDefaultAsync();
-            _pendingCount = 0;
-            if (_pending != null)
-            {
-                try
-                {
-                    using var doc = System.Text.Json.JsonDocument.Parse(_pending.Json);
-                    if (doc.RootElement.TryGetProperty("devices", out var dev) && dev.ValueKind == System.Text.Json.JsonValueKind.Array)
-                        _pendingCount = dev.GetArrayLength();
-                }
-                catch { }
-            }
             _error = null;
         }
         catch (Exception ex) { _error = ex.Message; }
@@ -247,6 +220,7 @@ else
                 IsActive = true
             });
             await db.SaveChangesAsync();
+            await AutoPublish(db);
             _serial = "";
             Msg(inc != null
                 ? $"Přidáno a aktivní: {inc.VendorId}:{inc.ProductId}:{serial} — {inc.FriendlyName}"
@@ -281,6 +255,7 @@ else
                 added++;
             }
             await db.SaveChangesAsync();
+            await AutoPublish(db);
             _bulk = "";
             Msg($"Import: +{added} přidáno (aktivní), {dup} už v katalogu.", false);
             await Load();
@@ -296,7 +271,7 @@ else
         {
             await using var db = await DbFactory.CreateDbContextAsync();
             var e = await db.WhitelistDevices.FindAsync(d.Id);
-            if (e is not null) { e.IsActive = !e.IsActive; await db.SaveChangesAsync(); }
+            if (e is not null) { e.IsActive = !e.IsActive; await db.SaveChangesAsync(); await AutoPublish(db); }
             await Load();
         }
         catch (Exception ex) { Msg("Chyba: " + ex.Message, true); }
@@ -323,6 +298,7 @@ else
                 d.VendorId = (_eVid ?? "").Trim(); d.ProductId = (_ePid ?? "").Trim();
                 d.SerialNumber = (_eSerial ?? "").Trim(); d.Description = (_eDesc ?? "").Trim();
                 await db.SaveChangesAsync();
+                await AutoPublish(db);
             }
             _editId = null;
             await Load();
@@ -338,7 +314,7 @@ else
         {
             await using var db = await DbFactory.CreateDbContextAsync();
             var d = await db.WhitelistDevices.FindAsync(id);
-            if (d is not null) { db.WhitelistDevices.Remove(d); await db.SaveChangesAsync(); await Load(); }
+            if (d is not null) { db.WhitelistDevices.Remove(d); await db.SaveChangesAsync(); await AutoPublish(db); await Load(); }
         }
         catch (Exception ex) { Msg("Chyba: " + ex.Message, true); }
         finally { _busy = false; }
@@ -347,114 +323,25 @@ else
     private void Msg(string text, bool bad) { _msg = text; _msgBad = bad; }
     private void Pub(string text, bool bad) { _pubMsg = text; _pubBad = bad; }
 
-    // ① Vydat verzi: snapshot aktivního katalogu → kanonický whitelist.json blob (pending, nepodepsaný).
-    private async Task PublishVersion()
+    // Ruční „Publikovat nyní" – vydá a podepíše novou verzi (server-side).
+    private async Task RepublishNow()
     {
-        _pubMsg = null; _sigMsg = null;
         _busy = true;
         try
         {
             await using var db = await DbFactory.CreateDbContextAsync();
-            var active = await db.WhitelistDevices.Where(d => d.IsActive)
-                .OrderBy(d => d.SerialNumber).ToListAsync();
-            if (active.Count == 0) { Pub("Katalog nemá žádné aktivní zařízení.", true); return; }
-
-            var now = DateTime.UtcNow;
-            var validityDays = 365;
-            var vd = await db.AppSettings.FirstOrDefaultAsync(s => s.Key == "whitelist.validityDays");
-            if (int.TryParse(vd?.Value, out var dd) && dd > 0) validityDays = dd;
-            var validUntil = now.AddDays(validityDays);
-
-            // Unikátní verze yyyy-MM-dd-vN
-            var total = await db.WhitelistVersions.CountAsync();
-            var ver = $"{now:yyyy-MM-dd}-v{total + 1}";
-            while (await db.WhitelistVersions.AnyAsync(v => v.Version == ver)) { total++; ver = $"{now:yyyy-MM-dd}-v{total + 1}"; }
-
-            // Kanonický blob – přesně tyto bajty se podepíšou a budou servírovány agentům VERBATIM.
-            var blobObj = new
-            {
-                version = ver,
-                issuedAt = now,
-                validUntil,
-                signature = "",
-                devices = active.Select(d => new
-                {
-                    vendorId = d.VendorId, productId = d.ProductId, serialNumber = d.SerialNumber,
-                    description = d.Description, approvedAt = d.ApprovedAt, approvedBy = d.ApprovedBy,
-                    validUntil = (DateTime?)null
-                })
-            };
-            var blob = System.Text.Json.JsonSerializer.Serialize(blobObj,
-                new System.Text.Json.JsonSerializerOptions { WriteIndented = false });
-
-            // Smaž staré nepodepsané pending verze (nahradíme novou).
-            var oldPending = await db.WhitelistVersions
-                .Where(v => !v.IsActive && v.Signature == "" && v.Json != "").ToListAsync();
-            db.WhitelistVersions.RemoveRange(oldPending);
-
-            db.WhitelistVersions.Add(new WhitelistVersion
-            {
-                Version = ver, IssuedAt = now, ValidUntil = validUntil, IssuedBy = _user,
-                Json = blob, Signature = "", IsActive = false
-            });
-            await db.SaveChangesAsync();
-            Pub($"Verze {ver} vydána ({active.Count} zařízení). Stáhni whitelist.json, podepiš offline a nahraj .sig.", false);
+            var (ok, msg) = await USBGuardian.Admin.Whitelist.WhitelistPublisher.PublishAsync(db, _user, Config);
+            Pub(msg, !ok);
             await Load();
         }
-        catch (Exception ex) { Pub("Chyba vydání verze: " + ex.Message, true); }
+        catch (Exception ex) { Pub("Chyba publikace: " + ex.Message, true); }
         finally { _busy = false; }
     }
 
-    // ④ Nahrát .sig: ověřit veřejným klíčem (pokud je v configu) → aktivovat verzi.
-    private async Task OnSigSelected(InputFileChangeEventArgs e)
+    // Auto-publish po mutaci katalogu (v rámci existujícího db kontextu).
+    private async Task AutoPublish(AppDbContext db)
     {
-        _sigMsg = null;
-        if (_pending is null) return;
-        _busy = true;
-        try
-        {
-            using var stream = e.File.OpenReadStream(64 * 1024);
-            using var sr = new StreamReader(stream);
-            var sigText = (await sr.ReadToEndAsync()).Trim();
-            if (string.IsNullOrEmpty(sigText)) { _sigMsg = "Soubor .sig je prázdný."; return; }
-
-            var (ok, msg) = VerifySig(_pending.Json, sigText);
-            if (!ok) { _sigMsg = "✗ " + msg; return; }
-
-            await using var db = await DbFactory.CreateDbContextAsync();
-            var pend = await db.WhitelistVersions.FindAsync(_pending.Id);
-            if (pend is null) { _sigMsg = "Pending verze už neexistuje – vydej znovu."; await Load(); return; }
-
-            foreach (var v in await db.WhitelistVersions.Where(v => v.IsActive).ToListAsync())
-                v.IsActive = false;
-            pend.Signature = sigText;
-            pend.IsActive  = true;
-            await db.SaveChangesAsync();
-            Pub($"✔ Verze {pend.Version} podepsána a AKTIVOVÁNA ({msg}). Agenti ji stáhnou do ~2 min.", false);
-            await Load();
-        }
-        catch (Exception ex) { _sigMsg = "Chyba nahrání .sig: " + ex.Message; }
-        finally { _busy = false; }
-    }
-
-    // RSA-4096 ověření blobu proti podpisu (stejně jako agent SignatureVerifier / WhitelistSigner).
-    // Veřejný klíč z configu Whitelist:PublicKeyPath; bez něj se aktivuje bez ověření (s upozorněním).
-    private (bool ok, string msg) VerifySig(string blob, string sigBase64)
-    {
-        var keyPath = Config["Whitelist:PublicKeyPath"];
-        if (string.IsNullOrWhiteSpace(keyPath) || !File.Exists(keyPath))
-            return (true, "bez ověření – veřejný klíč není v configu (Whitelist:PublicKeyPath)");
-        try
-        {
-            using var rsa = System.Security.Cryptography.RSA.Create();
-            rsa.ImportFromPem(File.ReadAllText(keyPath));
-            var data = System.Text.Encoding.UTF8.GetBytes(blob);
-            var sig  = Convert.FromBase64String(sigBase64);
-            var valid = rsa.VerifyData(data, sig,
-                System.Security.Cryptography.HashAlgorithmName.SHA256,
-                System.Security.Cryptography.RSASignaturePadding.Pkcs1);
-            return (valid, valid ? "podpis platný" : "podpis NEPLATNÝ (jiný klíč nebo upravený soubor)");
-        }
-        catch (Exception ex) { return (false, "chyba ověření: " + ex.Message); }
+        var (ok, msg) = await USBGuardian.Admin.Whitelist.WhitelistPublisher.PublishAsync(db, _user, Config);
+        Pub(msg, !ok);
     }
 }

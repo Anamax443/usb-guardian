@@ -117,17 +117,19 @@ Goal: the console, running 24/7 after AD sync, deploys the agent itself onto sta
   incidents are still recorded, but the user would not see the warning.
 - **Expand to fleet:** GPO publisher trust on clients (5.4), enable in Settings (dry-run → live), `.181 → .180 → fleet`.
 
-### 5.3b Whitelist signing/publishing workflow — DONE (client = a 1:1 copy of the server)
+### 5.3b Whitelist signing/publishing workflow — DONE, AUTOMATIC (client = a 1:1 copy of the server)
 Unlocks catalog delivery to agents (previously console changes never reached agents – version wasn't bumped +
-`/api/whitelist/signature` was missing). Flow: console **Whitelist → "Publish version"** (snapshot active catalog →
-canonical `whitelist.json` blob, new version `yyyy-MM-dd-vN`, validity `whitelist.validityDays` default 365) → stored as
-**pending** (`WhitelistVersions.Json`, `IsActive=0`) → **download** `/whitelist/pending.json` → **offline sign**
-`WhitelistSigner sign whitelist.json` (private key never on the server) → **upload `.sig`** in the console (verified with
-the public key `Whitelist:PublicKeyPath`) → **activation**. API `GET /api/whitelist` returns the blob **verbatim** +
-`GET /api/whitelist/signature` → the agent downloads (≤2 min), verifies (fail-secure), stores as a JSON file. **Byte-exact**
-(the same blob is signed/served/verified, UTF-8 without BOM). Agent matches via **Dictionary O(1)** (scales to 10k).
-DB: `database/07_whitelist_publish.sql` (`Json` + `Signature` → `NVARCHAR(MAX)`). **Requires API deploy + DB migration
-(SQL-04) + publish/sign (user).** Server = DB (blob), client = JSON file (`C:\ProgramData\USBGuardian\whitelist\`).
+`/api/whitelist/signature` was missing). **Fully automatic (`WhitelistPublisher`):** on **every catalog change**
+(add/remove/activate/edit; also manual "Publish now") the console snapshots the active catalog → canonical
+`whitelist.json` blob (version `yyyy-MM-dd-vN`, validity `whitelist.validityDays` default 365) → **signs it with the
+internal RSA key on the server** (`Whitelist:PrivateKeyPath`) → stores `Json`+`Signature`, activates. API
+`GET /api/whitelist` returns the blob **verbatim** + `GET /api/whitelist/signature` → the agent downloads (≤2 min),
+verifies (fail-secure), stores as a JSON file. **Byte-exact** (same blob signed/served/verified, UTF-8 without BOM,
+SHA-256/Pkcs1). Agent matches via **Dictionary O(1)** (scales to 10k). Signing uses the **internal** USB Guardian key
+(public = `whitelist_public.pem` on agents), not a CA/AXIMA cert. **Trade-off (chosen):** the private key sits on `.213`
+(protect via ACL) in exchange for automation. DB: `database/07_whitelist_publish.sql` (`Json`+`Signature`→`NVARCHAR(MAX)`).
+**Deployed:** console + API + DB migration. **Setup (user):** place the private key on `.213` and set
+`Whitelist:PrivateKeyPath` in `appsettings.local.json`. Server = DB (blob), client = JSON file.
 
 ### 5.4 Environment for PS scripts (IMPORTANT – AXIMA gotchas)
 - **AllSigned (GPO):** every PS script that runs there **must be signed** with the prod cert `CN=powershell.axinetwork.loc`

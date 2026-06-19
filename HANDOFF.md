@@ -117,17 +117,18 @@ cílů (`deploy.targetsFile`), instalaci dělá **scheduled task na .213 pod gMS
   incidenty zaznamenaly, ale uživatel by varování neviděl.
 - **Rozšíření na fleet:** GPO trust publisheru na klienty (5.4), v Nastavení zapnout (dry-run → ostrý), `.181 → .180 → fleet`.
 
-### 5.3b Publikační/podpisový workflow whitelistu — HOTOVO (klient = 1:1 kopie serveru)
-Odemyká doručení katalogu k agentům (předtím se změny v konzoli k agentům nedostaly – verze se nebumpla + chyběl
-`/api/whitelist/signature`). Tok: konzole **Whitelist → „Vydat verzi"** (snapshot aktivního katalogu → kanonický
-`whitelist.json` blob, nová verze `yyyy-MM-dd-vN`, validita `whitelist.validityDays` default 365) → uloží jako
-**pending** (`WhitelistVersions.Json`, `IsActive=0`) → **stáhnout** `/whitelist/pending.json` → **offline podpis**
-`WhitelistSigner sign whitelist.json` (privátní klíč nikdy na serveru) → **nahrát `.sig`** v konzoli (ověří se
-veřejným klíčem `Whitelist:PublicKeyPath`) → **aktivace**. API `GET /api/whitelist` vrací blob **verbatim** +
-`GET /api/whitelist/signature` → agent stáhne (≤2 min), ověří (fail-secure) a uloží jako JSON soubor. **Byte-exact**
-(podepisuje/servíruje/ověřuje se týž blob, UTF-8 bez BOM). Agent matchuje **Dictionary O(1)** (scale-safe i 10k).
-DB: `database/07_whitelist_publish.sql` (`Json` + `Signature` → `NVARCHAR(MAX)`). **Vyžaduje deploy API + migraci DB
-(SQL-04) + publikaci/podpis (uživatel).** Server = DB (blob), klient = JSON soubor (`C:\ProgramData\USBGuardian\whitelist\`).
+### 5.3b Publikační/podpisový workflow whitelistu — HOTOVO, AUTOMATICKÝ (klient = 1:1 kopie serveru)
+Odemyká doručení katalogu k agentům (předtím se změny v konzoli nedostaly – verze se nebumpla + chyběl
+`/api/whitelist/signature`). **Plně automatické (`WhitelistPublisher`):** po **každé změně katalogu**
+(přidat/odebrat/aktivovat/edit; i ručně „Publikovat nyní") konzole sama snapshotne aktivní katalog → kanonický
+`whitelist.json` blob (verze `yyyy-MM-dd-vN`, validita `whitelist.validityDays` default 365) → **PODEPÍŠE interním
+RSA klíčem na serveru** (`Whitelist:PrivateKeyPath`) → uloží `Json`+`Signature`, aktivuje. API `GET /api/whitelist`
+vrací blob **verbatim** + `GET /api/whitelist/signature` → agent stáhne (≤2 min), ověří (fail-secure), uloží JSON soubor.
+**Byte-exact** (týž blob se podepisuje/servíruje/ověřuje, UTF-8 bez BOM, SHA-256/Pkcs1). Agent matchuje **Dictionary O(1)**
+(scale-safe i 10k). Podpis = **interní klíč** USB Guardianu (public = `whitelist_public.pem` na agentech), ne CA/AXIMA cert.
+**Trade-off (zvolený):** privátní klíč je na `.213` (chránit ACL) výměnou za automatizaci. DB: `database/07_whitelist_publish.sql`
+(`Json`+`Signature`→`NVARCHAR(MAX)`). **Nasazeno:** konzole + API + DB migrace. **Setup (uživatel):** umístit privátní klíč
+na `.213` a nastavit `Whitelist:PrivateKeyPath` v `appsettings.local.json`. Server = DB (blob), klient = JSON soubor.
 
 ### 5.4 Prostředí pro PS skripty (DŮLEŽITÉ – AXIMA gotchas)
 - **AllSigned (GPO):** každý PS skript co tam běží **musí být podepsaný** prod certem `CN=powershell.axinetwork.loc`
