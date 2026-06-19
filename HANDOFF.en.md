@@ -29,7 +29,7 @@ The server console aggregates data, keeps a station inventory from AD and shows 
 | **Live commit (console)** | `5940eb6` (footer / `/api/version`) · **API live `19e4018`** |
 | **Console – pages** | Overview (filter+aggregation+sortable "Detailed"), Stations (AD inventory + "Agents gone silent" tile + "Request data"), Whitelist, Settings (enforcement/access/email/alerts/communication monitoring/**auto-enrollment**), Documentation |
 | **Deploy account (auto-enroll)** | **gMSA `AXINETWORK\gmsa-USBGdep$`** – in `PC Admins` (admin on clients) **and local admin on SQL-04** (API deploy); installed on `.213`; deploy task `USBGuardian-AutoDeploy` (under gMSA, via CIM) |
-| **Agent (test) .181** | **PILOT SUCCESSFUL** – auto-installed via gMSA (no creds), service "USB Guardian" RUNNING, heartbeat + **incidents flowing into DB** (37). Remaining: watchdog task + user attribution (see 5.5) |
+| **Agent (test) .181** | **PILOT SUCCESSFUL** – `.181` = **TRNKAMW11** (own workstation); service "USB Guardian" RUNNING, heartbeat + **incidents flowing into DB**. Agent live **`428a262`** – **user attribution LIVE** (`AXINETWORK\trnkam`). Remaining: watchdog task (see 5.3). Updating the agent there needs elevation (UAC) → run by the user |
 
 ## 3. Key decisions (why)
 
@@ -77,11 +77,11 @@ Firewall `:4200` was created via DCOM/CIM. Configuration on the server:
   `AppSettings cmd.report.<HOST>`), sortable "Detailed" table, auto-enrollment orchestrator (default OFF + dry-run).
 - **Serial trim fix** — WMI returns the serial with spaces (`"WX92D622N4PE    "`) → didn't match the whitelist
   ("Approved=no" + the agent didn't recognize it as whitelisted). The agent trims at WMI parse, the console in `Approved`.
-- **User attribution (DONE)** — the agent runs as SYSTEM and previously reported the machine account (`HOST$`). The new
+- **User attribution (DONE + LIVE)** — the agent runs as SYSTEM and previously reported the machine account (`HOST$`). The new
   `SessionUser` (WTS API: `WTSGetActiveConsoleSessionId` + active-session enumeration, `WTSQuerySessionInformation`)
   resolves the real logged-in user → `DOMAIN\user` in the incident, the log and the Toast. Fail-safe: with nobody
-  logged in it falls back to the machine account (the incident is always recorded). Verified live via the WTS resolver
-  (`AXINETWORK\trnkam`). **Remaining: deploy the agent to .181 and verify a real incident.**
+  logged in it falls back to the machine account (the incident is always recorded). **Verified live on .181:** agent
+  commit `428a262` deployed, new incidents record `AXINETWORK\trnkam` (previously `TRNKAMW11$`).
 
 ### 5.2 Deployed components
 - **API on SQL-04 (live `19e4018`):** `ReportNow` in the heartbeat, queue DI fix, `/api/version`. Deploy via

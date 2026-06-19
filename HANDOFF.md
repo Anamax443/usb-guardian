@@ -29,7 +29,7 @@ Serverová konzole agreguje data, drží inventář stanic z AD a ukazuje, kam c
 | **Live commit (konzole)** | `5940eb6` (patička / `/api/version`) · **API live `19e4018`** |
 | **Konzole – stránky** | Přehled (filtr+kumulace+řazení Detailně), Stanice (AD inventář + dlaždice „Zmlklo agentů" + „Vyžádat data"), Whitelist, Nastavení (vynucování/přístup/email/alerty/dohled komunikace/**auto-enrollment**), Dokumentace |
 | **Deploy účet (auto-enroll)** | **gMSA `AXINETWORK\gmsa-USBGdep$`** – v `PC Admins` (admin na klientech) **i lokální admin na SQL-04** (deploy API); nainstalován na `.213`; deploy task `USBGuardian-AutoDeploy` (pod gMSA, přes CIM) |
-| **Agent (test) .181** | **PILOT ÚSPĚŠNÝ** – auto-nainstalován přes gMSA (bez creds), služba „USB Guardian" RUNNING, heartbeat + **incidenty tečou do DB** (37). Zbývá: watchdog task + atribuce uživatele (viz 5.5) |
+| **Agent (test) .181** | **PILOT ÚSPĚŠNÝ** – `.181` = **TRNKAMW11** (vlastní workstation); služba „USB Guardian" RUNNING, heartbeat + **incidenty tečou do DB**. Agent live **`428a262`** – **atribuce uživatele ŽIVÁ** (`AXINETWORK\trnkam`). Zbývá: watchdog task (viz 5.3). Update agenta tam chce elevaci (UAC) → spustí uživatel |
 
 ## 3. Klíčová rozhodnutí (proč)
 
@@ -77,10 +77,11 @@ Firewall `:4200` byl vytvořen přes DCOM/CIM. Konfigurace na serveru:
   `AppSettings cmd.report.<HOST>`), řaditelná tabulka „Detailně", auto-enrollment orchestrátor (default VYPNUTO+dry-run).
 - **Fix trim sériáku** — WMI vrací serial s mezerami (`"WX92D622N4PE    "`) → nesedělo s whitelistem
   („Schváleno=ne" + agent nepoznal whitelisted). Agent trimuje při WMI parse, konzole v `Approved`.
-- **Atribuce uživatele (HOTOVO)** — agent běží jako SYSTEM, dřív hlásil strojový účet (`HOST$`). Nový `SessionUser`
+- **Atribuce uživatele (HOTOVO + ŽIVÉ)** — agent běží jako SYSTEM, dřív hlásil strojový účet (`HOST$`). Nový `SessionUser`
   (WTS API: `WTSGetActiveConsoleSessionId` + enumerace aktivních session, `WTSQuerySessionInformation`) zjistí
   reálného přihlášeného uživatele → `DOMAIN\user` v incidentu, logu i Toastu. Fail-safe: bez přihlášeného uživatele
-  fallback na strojový účet (incident se zapíše vždy). Ověřeno WTS resolverem živě (`AXINETWORK\trnkam`). **Zbývá: nasadit agenta na .181 a ověřit reálný incident.**
+  fallback na strojový účet (incident se zapíše vždy). **Ověřeno živě na .181:** nasazen agent commit `428a262`,
+  nové incidenty zapisují `AXINETWORK\trnkam` (dřív `TRNKAMW11$`).
 
 ### 5.2 Nasazené komponenty
 - **API na SQL-04 (živé `19e4018`):** `ReportNow` v heartbeatu, DI fix fronty, `/api/version`. Deploy přes
