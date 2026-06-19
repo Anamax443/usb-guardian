@@ -12,6 +12,7 @@
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using USBGuardian.Models;
+using USBGuardian.Security;
 
 namespace USBGuardian;
 
@@ -101,7 +102,7 @@ public class NotificationService
                 Body           = $"Médium \"{device.FriendlyName}\" nebylo schváleno IT oddělením.",
                 DeviceName     = device.FriendlyName,
                 DeviceSize     = device.SizeFormatted,
-                UserName       = Environment.UserName,
+                UserName       = SessionUser.GetActiveConsoleUser(),
                 MachineName    = Environment.MachineName,
                 Action         = action,
                 ContactMessage = _contactMessage

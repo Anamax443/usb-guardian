@@ -4,6 +4,8 @@
 // Ukládá se do lokální SQLite DB a odesílá na server (Fáze 3).
 // ============================================================
 
+using USBGuardian.Security;
+
 namespace USBGuardian.Models;
 
 /// <summary>
@@ -20,8 +22,9 @@ public class Incident
     /// <summary>Název počítače kde k incidentu došlo</summary>
     public string Hostname { get; set; } = Environment.MachineName;
 
-    /// <summary>Přihlášený uživatel Windows</summary>
-    public string Username { get; set; } = Environment.UserName;
+    /// <summary>Reálný přihlášený uživatel (WTS aktivní session) – agent běží jako SYSTEM,
+    /// proto NE Environment.UserName (= strojový účet HOST$). Viz <see cref="SessionUser"/>.</summary>
+    public string Username { get; set; } = SessionUser.GetActiveConsoleUser();
 
     /// <summary>Zařízení které incident způsobilo</summary>
     public DeviceInfo Device { get; set; } = new();

@@ -77,6 +77,10 @@ Firewall `:4200` byl vytvořen přes DCOM/CIM. Konfigurace na serveru:
   `AppSettings cmd.report.<HOST>`), řaditelná tabulka „Detailně", auto-enrollment orchestrátor (default VYPNUTO+dry-run).
 - **Fix trim sériáku** — WMI vrací serial s mezerami (`"WX92D622N4PE    "`) → nesedělo s whitelistem
   („Schváleno=ne" + agent nepoznal whitelisted). Agent trimuje při WMI parse, konzole v `Approved`.
+- **Atribuce uživatele (HOTOVO)** — agent běží jako SYSTEM, dřív hlásil strojový účet (`HOST$`). Nový `SessionUser`
+  (WTS API: `WTSGetActiveConsoleSessionId` + enumerace aktivních session, `WTSQuerySessionInformation`) zjistí
+  reálného přihlášeného uživatele → `DOMAIN\user` v incidentu, logu i Toastu. Fail-safe: bez přihlášeného uživatele
+  fallback na strojový účet (incident se zapíše vždy). Ověřeno WTS resolverem živě (`AXINETWORK\trnkam`). **Zbývá: nasadit agenta na .181 a ověřit reálný incident.**
 
 ### 5.2 Nasazené komponenty
 - **API na SQL-04 (živé `19e4018`):** `ReportNow` v heartbeatu, DI fix fronty, `/api/version`. Deploy přes
@@ -104,9 +108,6 @@ cílů (`deploy.targetsFile`), instalaci dělá **scheduled task na .213 pod gMS
   na .213 i klientech (přidáno na .181+.213; **fleet přes GPO** – cert export `_AXIMA-CodeSign-publisher.cer` na share).
 
 ### 5.5 Roadmapa (pending)
-- **Atribuce uživatele** — incidenty hlásí `TRNKAMW11$` (strojový účet), protože agent běží jako SYSTEM
-  (`Environment.UserName`). Doplnit detekci aktivní konzolové session (WTS API: `WTSGetActiveConsoleSessionId`
-  + `WTSQuerySessionInformation`) → reálný přihlášený uživatel. Zapadá do „Toast Privilege Separation".
 - **Podpisový/publikační workflow whitelistu** — změny v katalogu se k agentům dostanou až **po vydání podepsané
   verze** (privátní klíč nikdy na serveru). Bez toho agent dál varuje i schválené médium (Stav podpisu = nepodepsáno).
   Odemkne i vynucování + **blocklist** „naostro".

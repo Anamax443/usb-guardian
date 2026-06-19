@@ -77,6 +77,11 @@ Firewall `:4200` was created via DCOM/CIM. Configuration on the server:
   `AppSettings cmd.report.<HOST>`), sortable "Detailed" table, auto-enrollment orchestrator (default OFF + dry-run).
 - **Serial trim fix** — WMI returns the serial with spaces (`"WX92D622N4PE    "`) → didn't match the whitelist
   ("Approved=no" + the agent didn't recognize it as whitelisted). The agent trims at WMI parse, the console in `Approved`.
+- **User attribution (DONE)** — the agent runs as SYSTEM and previously reported the machine account (`HOST$`). The new
+  `SessionUser` (WTS API: `WTSGetActiveConsoleSessionId` + active-session enumeration, `WTSQuerySessionInformation`)
+  resolves the real logged-in user → `DOMAIN\user` in the incident, the log and the Toast. Fail-safe: with nobody
+  logged in it falls back to the machine account (the incident is always recorded). Verified live via the WTS resolver
+  (`AXINETWORK\trnkam`). **Remaining: deploy the agent to .181 and verify a real incident.**
 
 ### 5.2 Deployed components
 - **API on SQL-04 (live `19e4018`):** `ReportNow` in the heartbeat, queue DI fix, `/api/version`. Deploy via
@@ -104,9 +109,6 @@ Goal: the console, running 24/7 after AD sync, deploys the agent itself onto sta
   on .213 and clients (added on .181+.213; **fleet via GPO** – cert export `_AXIMA-CodeSign-publisher.cer` on the share).
 
 ### 5.5 Roadmap (pending)
-- **User attribution** — incidents report `TRNKAMW11$` (machine account), because the agent runs as SYSTEM
-  (`Environment.UserName`). Add detection of the active console session (WTS API: `WTSGetActiveConsoleSessionId`
-  + `WTSQuerySessionInformation`) → the real logged-in user. Fits into "Toast Privilege Separation".
 - **Whitelist signing/publishing workflow** — changes in the catalog only reach the agents **after a signed
   version is released** (the private key is never on the server). Without it the agent keeps warning even on an approved medium (Signature status = unsigned).
   It also unlocks enforcement + the **blocklist** "for real".

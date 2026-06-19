@@ -8,6 +8,7 @@
 
 using Microsoft.Extensions.Logging;
 using USBGuardian.Models;
+using USBGuardian.Security;
 
 namespace USBGuardian;
 
@@ -57,9 +58,11 @@ public class PolicyEnforcer
             return;
         }
 
+        var user = SessionUser.GetActiveConsoleUser();
+
         _logger.LogWarning(
             "Neautorizované médium: {Device} | Uživatel: {User} | PC: {Host}",
-            device, Environment.UserName, Environment.MachineName);
+            device, user, Environment.MachineName);
 
         var action = DetermineAction(whitelistStatus);
 
@@ -67,7 +70,8 @@ public class PolicyEnforcer
         {
             Device           = device,
             Action           = action,
-            WhitelistVersion = whitelistVersion
+            WhitelistVersion = whitelistVersion,
+            Username         = user
         };
         _incidentLogger.LogConnection(incident);
 

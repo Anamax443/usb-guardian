@@ -58,6 +58,7 @@
 | `IncidentSync` | Odesílá frontu incidentů na server (interval: 1 min, s jitter; probudí se dřív při `ReportNow`) |
 | `SyncSignals` | Sdílený signál: heartbeat (`ReportNow`) → okamžitý flush fronty incidentů |
 | `SignatureVerifier` | Ověřuje RSA-4096 podpis whitelistu – fail-secure |
+| `SessionUser` | Reálný přihlášený uživatel přes WTS API (agent=SYSTEM → ne `Environment.UserName`=`HOST$`); fail-safe fallback na strojový účet |
 
 ## Komponenty serveru
 
@@ -122,9 +123,12 @@ Whitelist záznam obsahuje: `vendorId`, `productId`, `serialNumber`, `descriptio
 > **Pozn. – trim sériového čísla:** WMI vrací sériák často s **koncovými mezerami** (trailing spaces);
 > před porovnáním i zápisem se musí **trimovat**, jinak whitelist match selže nebo se uloží „špinavý" sériák.
 
-> **Pozn. – atribuce uživatele:** agent běží jako **SYSTEM**, takže `Environment.UserName` vrací **strojový účet**
-> (`HOST$`), ne reálného přihlášeného uživatele. Skutečného uživatele incidentu doplnit přes **WTS detekci aktivní
-> session** (`WTSGetActiveConsoleSessionId` / `WTSQuerySessionInformation`) – **roadmap**.
+> **Pozn. – atribuce uživatele (HOTOVO):** agent běží jako **SYSTEM**, takže `Environment.UserName` by vrátil
+> **strojový účet** (`HOST$`), ne reálného uživatele. `SessionUser` proto čte uživatele aktivní interaktivní
+> session přes **WTS API** (`WTSGetActiveConsoleSessionId` → fallback enumerace aktivních session přes
+> `WTSEnumerateSessions`; `WTSQuerySessionInformation` na `WTSUserName`+`WTSDomainName`) → `DOMAIN\user`.
+> **Fail-safe:** když nikdo není přihlášen (zamčeno/jen služby), padá zpět na `Environment.UserName` (strojový účet) –
+> incident se zaznamená vždy. Použito v `Incident.Username`, `PolicyEnforcer` (log) i Toast notifikaci.
 
 ## Bezpečnostní vrstvy
 
