@@ -46,6 +46,12 @@ $srcExe = Join-Path $SourcePath "USBGuardian.exe"
 if (-not (Test-Path $srcExe)) {
     throw "USBGuardian.exe nenalezen v '$SourcePath'."
 }
+# ToastHelper je soucast kompletniho klienta (notifikace uzivateli). Bez nej se incidenty
+# zaznamenaji, ale uzivatel varovani neuvidi. Build balicku: scripts\Build-AgentPackage.ps1.
+if (-not (Test-Path (Join-Path $SourcePath "ToastHelper\ToastHelper.exe"))) {
+    Write-Host "  UPOZORNENI: v balicku chybi ToastHelper\ToastHelper.exe – toast notifikace nepojedou." -ForegroundColor Yellow
+    Write-Host "             Sestav balicek pres scripts\Build-AgentPackage.ps1." -ForegroundColor Yellow
+}
 $watchSrc = Join-Path $PSScriptRoot "Watch-USBGuardian.ps1"
 if (-not $LogCsv) { $LogCsv = Join-Path $PSScriptRoot ("deploy-fleet-" + (Get-Date -Format 'yyyyMMdd_HHmmss') + ".csv") }
 
@@ -99,12 +105,26 @@ $perHost = {
         $wOut = (& cmd.exe /c ('schtasks /Create /S {0} /RU SYSTEM /RL HIGHEST /SC MINUTE /MO 3 /TN "USBGuardian\USBGuardian-Watchdog" /TR "sc start \"{1}\"" /F' -f $h, $ServiceName) 2>&1 | Out-String)
         $wOk = ($LASTEXITCODE -eq 0)
 
+        # ToastHelper task (PS-free na klientovi): logon + unlock trigger, bezi v user session.
+        # XML se re-encode na Unicode (schtasks /XML to vyzaduje) a vytvori na klientovi pres /S.
+        # ToastHelper.exe se na klienta dostal robocopy /E (podslozka ToastHelper\ v balicku).
+        $toOk = $false; $toMsg = 'toast: bez XML v balicku'
+        $toastXml = Join-Path $SourcePath 'tasks\USBGuardian-ToastHelper.xml'
+        if (Test-Path $toastXml) {
+            $tmpXml = Join-Path ([System.IO.Path]::GetTempPath()) ("usbg-toast-{0}.xml" -f $h)
+            (Get-Content $toastXml -Raw) | Set-Content $tmpXml -Encoding Unicode
+            $toOut = (& schtasks /Create /S $h /XML $tmpXml /TN "USBGuardian\USBGuardian-ToastHelper" /F 2>&1 | Out-String)
+            $toOk  = ($LASTEXITCODE -eq 0)
+            $toMsg = $(if ($toOk) { 'toast ok' } else { 'toast FAIL: ' + ($toOut.Trim() -replace '\s+',' ') })
+        }
+
         & sc.exe "\\$h" start $ServiceName | Out-Null
         Start-Sleep -Seconds 2
         $st = (& sc.exe "\\$h" query $ServiceName 2>&1 | Out-String)
         $wd = $(if ($wOk) { 'wd ok' } else { 'wd FAIL: ' + ($wOut.Trim() -replace '\s+',' ') })
-        if ($st -match 'RUNNING') { $r.Status = 'OK'; $r.Detail = ($(if ($exists) { 'reinstalled' } else { 'installed' }) + '; ' + $wd) }
-        else                      { $r.Status = 'STARTED?'; $r.Detail = 'sluzba vytvorena, stav nepotvrzen RUNNING; ' + $wd }
+        $extra = $wd + '; ' + $toMsg
+        if ($st -match 'RUNNING') { $r.Status = 'OK'; $r.Detail = ($(if ($exists) { 'reinstalled' } else { 'installed' }) + '; ' + $extra) }
+        else                      { $r.Status = 'STARTED?'; $r.Detail = 'sluzba vytvorena, stav nepotvrzen RUNNING; ' + $extra }
     }
     catch { $r.Status = 'FAIL'; $r.Detail = $_.Exception.Message }
     return [pscustomobject]$r

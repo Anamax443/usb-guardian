@@ -29,7 +29,7 @@ Serverová konzole agreguje data, drží inventář stanic z AD a ukazuje, kam c
 | **Live commit (konzole)** | `5940eb6` (patička / `/api/version`) · **API live `19e4018`** |
 | **Konzole – stránky** | Přehled (filtr+kumulace+řazení Detailně), Stanice (AD inventář + dlaždice „Zmlklo agentů" + „Vyžádat data"), Whitelist, Nastavení (vynucování/přístup/email/alerty/dohled komunikace/**auto-enrollment**), Dokumentace |
 | **Deploy účet (auto-enroll)** | **gMSA `AXINETWORK\gmsa-USBGdep$`** – v `PC Admins` (admin na klientech) **i lokální admin na SQL-04** (deploy API); nainstalován na `.213`; deploy task `USBGuardian-AutoDeploy` (pod gMSA, přes CIM) |
-| **Agent (test) .181** | **PILOT ÚSPĚŠNÝ** – `.181` = **TRNKAMW11** (vlastní workstation); služba „USB Guardian" RUNNING, heartbeat + **incidenty tečou do DB**. Agent live **`428a262`** – **atribuce uživatele ŽIVÁ** (`AXINETWORK\trnkam`). Zbývá: watchdog task (viz 5.3). Update agenta tam chce elevaci (UAC) → spustí uživatel |
+| **Agent (test) .181** | **PILOT ÚSPĚŠNÝ** – `.181` = **TRNKAMW11** (vlastní workstation); služba „USB Guardian" RUNNING, heartbeat + **incidenty tečou do DB**. Agent live **`428a262`** – **atribuce uživatele ŽIVÁ** (`AXINETWORK\trnkam`). **Klient 100%:** watchdog + ToastHelper task (viz 5.3). Update agenta tam chce elevaci (UAC) → spustí uživatel |
 
 ## 3. Klíčová rozhodnutí (proč)
 
@@ -97,7 +97,12 @@ cílů (`deploy.targetsFile`), instalaci dělá **scheduled task na .213 pod gMS
   `Deploy-AgentFleet.ps1` (runspace pool PS5.1, `sc.exe \\HOST create` přes cmd). **.181 se nainstaloval bez jakýchkoli creds**,
   služba běží, heartbeat + incidenty tečou. Skripty: `New-DeployGmsa.ps1`, `Install-Agent.ps1`/`Uninstall-Agent.ps1`,
   Detail: [docs/auto-deploy-setup.md](docs/auto-deploy-setup.md).
-- **Zbývá na .181:** **watchdog task** (PS-free `sc start` schtasks – jednořádkový příkaz pro klienta, viz git historie).
+- **Kompletní klient (HOTOVO):** balíček nově nese i **ToastHelper** (notifikace uživateli) + scheduled tasky.
+  Sestavení: `scripts\Build-AgentPackage.ps1` → agent (root) + `ToastHelper\` (self-contained) + `tasks\`.
+  `Deploy-AgentFleet.ps1` registruje na klientovi **PS-free** dva tasky: **watchdog** (`schtasks … sc start`, à 3 min)
+  a **ToastHelper** (`schtasks /XML`, trigger přihlášení+odemčení, běh v user session, least-privilege).
+  Na **.181 aplikováno a ověřeno** (ToastHelper.exe v `…\ToastHelper\`, oba tasky Ready). Bez ToastHelpera by se
+  incidenty zaznamenaly, ale uživatel by varování neviděl.
 - **Rozšíření na fleet:** GPO trust publisheru na klienty (5.4), v Nastavení zapnout (dry-run → ostrý), `.181 → .180 → fleet`.
 
 ### 5.4 Prostředí pro PS skripty (DŮLEŽITÉ – AXIMA gotchas)

@@ -225,7 +225,13 @@ dotnet run                 (server)
 
 ### Produkce
 
+- **Kompletní balíček klienta:** `scripts\Build-AgentPackage.ps1` → self-contained agent (root) +
+  `ToastHelper\` (notifikace v user session) + `tasks\` (definice scheduled tasků). Klient nepotřebuje .NET runtime.
 - Agent: Windows Service, spouštěn pod SYSTEM
+- **ToastHelper:** scheduled task `\USBGuardian\USBGuardian-ToastHelper` (trigger přihlášení + odemčení, běh v user
+  session, least-privilege) – registrace **PS-free** přes `schtasks /XML` (`tasks\USBGuardian-ToastHelper.xml`).
+- **Watchdog:** scheduled task `\USBGuardian\USBGuardian-Watchdog` (à 3 min, PS-free `sc start`).
+- Fleet rozvoz obojího: `Deploy-AgentFleet.ps1` (robocopy balíček + sc.exe create + oba tasky), pod gMSA z `.213`.
 - Server: Windows Service, spouštěn pod gMSA
 - HTTPS certifikát: `scripts\New-Certificate.ps1` na produkčním serveru
 - AD skupiny: `USB-Guardian-Clients` – stroje s nasazeným agentem

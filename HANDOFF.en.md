@@ -29,7 +29,7 @@ The server console aggregates data, keeps a station inventory from AD and shows 
 | **Live commit (console)** | `5940eb6` (footer / `/api/version`) · **API live `19e4018`** |
 | **Console – pages** | Overview (filter+aggregation+sortable "Detailed"), Stations (AD inventory + "Agents gone silent" tile + "Request data"), Whitelist, Settings (enforcement/access/email/alerts/communication monitoring/**auto-enrollment**), Documentation |
 | **Deploy account (auto-enroll)** | **gMSA `AXINETWORK\gmsa-USBGdep$`** – in `PC Admins` (admin on clients) **and local admin on SQL-04** (API deploy); installed on `.213`; deploy task `USBGuardian-AutoDeploy` (under gMSA, via CIM) |
-| **Agent (test) .181** | **PILOT SUCCESSFUL** – `.181` = **TRNKAMW11** (own workstation); service "USB Guardian" RUNNING, heartbeat + **incidents flowing into DB**. Agent live **`428a262`** – **user attribution LIVE** (`AXINETWORK\trnkam`). Remaining: watchdog task (see 5.3). Updating the agent there needs elevation (UAC) → run by the user |
+| **Agent (test) .181** | **PILOT SUCCESSFUL** – `.181` = **TRNKAMW11** (own workstation); service "USB Guardian" RUNNING, heartbeat + **incidents flowing into DB**. Agent live **`428a262`** – **user attribution LIVE** (`AXINETWORK\trnkam`). **Client 100%:** watchdog + ToastHelper task (see 5.3). Updating the agent there needs elevation (UAC) → run by the user |
 
 ## 3. Key decisions (why)
 
@@ -97,7 +97,12 @@ Goal: the console, running 24/7 after AD sync, deploys the agent itself onto sta
   `Deploy-AgentFleet.ps1` (runspace pool PS5.1, `sc.exe \\HOST create` via cmd). **.181 installed without any creds**,
   the service runs, heartbeat + incidents flow. Scripts: `New-DeployGmsa.ps1`, `Install-Agent.ps1`/`Uninstall-Agent.ps1`,
   Detail: [docs/auto-deploy-setup.md](docs/auto-deploy-setup.md).
-- **Remaining on .181:** **watchdog task** (PS-free `sc start` schtasks – single-line command for the client, see git history).
+- **Complete client (DONE):** the package now also carries **ToastHelper** (user notifications) + scheduled tasks.
+  Build: `scripts\Build-AgentPackage.ps1` → agent (root) + `ToastHelper\` (self-contained) + `tasks\`.
+  `Deploy-AgentFleet.ps1` registers two **PS-free** tasks on the client: **watchdog** (`schtasks … sc start`, every 3 min)
+  and **ToastHelper** (`schtasks /XML`, logon+unlock trigger, runs in the user session, least-privilege).
+  **Applied and verified on .181** (ToastHelper.exe in `…\ToastHelper\`, both tasks Ready). Without ToastHelper the
+  incidents are still recorded, but the user would not see the warning.
 - **Expand to fleet:** GPO publisher trust on clients (5.4), enable in Settings (dry-run → live), `.181 → .180 → fleet`.
 
 ### 5.4 Environment for PS scripts (IMPORTANT – AXIMA gotchas)
