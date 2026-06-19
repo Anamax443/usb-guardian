@@ -86,6 +86,9 @@ Firewall `:4200` byl vytvořen přes DCOM/CIM. Konfigurace na serveru:
   - **Databáze** (nová stránka): počty v tabulkách, rozsah incidentů, výpis AppSettings, posledních 20 incidentů.
   - **Spolehlivý commit-stamp** ve všech komponentách (konzole/API/agent) — footer/`/api/version` teď ukazují přesně
     nasazený commit i u nesouvisejících změn (generovaný `GitCommit.g.cs`, vynutí recompile při změně commitu).
+- **Lokální konzole agenta (rozšířeno):** `http://127.0.0.1:5080/` (loopback, admin-only, read-only; `localConsole.enabled`).
+  Nově ukazuje **seznam schválených zařízení (whitelist)** + verzi agenta (commit), vedle stavu whitelistu, WMI,
+  fronty, připojených médií a posledních událostí. Diagnostika přímo na stanici (i offline od serveru).
 - **Atribuce uživatele (HOTOVO + ŽIVÉ)** — agent běží jako SYSTEM, dřív hlásil strojový účet (`HOST$`). Nový `SessionUser`
   (WTS API: `WTSGetActiveConsoleSessionId` + enumerace aktivních session, `WTSQuerySessionInformation`) zjistí
   reálného přihlášeného uživatele → `DOMAIN\user` v incidentu, logu i Toastu. Fail-safe: bez přihlášeného uživatele

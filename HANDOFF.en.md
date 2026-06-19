@@ -86,6 +86,9 @@ Firewall `:4200` was created via DCOM/CIM. Configuration on the server:
   - **Database** (new page): table row counts, incident range, AppSettings dump, last 20 incidents.
   - **Reliable commit stamp** across all components (console/API/agent) — footer/`/api/version` now show exactly the
     deployed commit even for unrelated changes (generated `GitCommit.g.cs`, forces recompile when the commit changes).
+- **Agent local console (extended):** `http://127.0.0.1:5080/` (loopback, admin-only, read-only; `localConsole.enabled`).
+  Now shows the **list of approved devices (whitelist)** + agent version (commit), alongside whitelist status, WMI,
+  queue, connected media and recent events. On-station diagnostics (even offline from the server).
 - **User attribution (DONE + LIVE)** — the agent runs as SYSTEM and previously reported the machine account (`HOST$`). The new
   `SessionUser` (WTS API: `WTSGetActiveConsoleSessionId` + active-session enumeration, `WTSQuerySessionInformation`)
   resolves the real logged-in user → `DOMAIN\user` in the incident, the log and the Toast. Fail-safe: with nobody

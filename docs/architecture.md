@@ -106,10 +106,12 @@ SQL Computers + reconciliation: InActiveDirectory; "v AD ⨯ hlásí agenta" = k
 
 ## Lokální admin konzole agenta
 
-`LocalConsoleService` – `HttpListener` na `127.0.0.1` (volitelné, default vypnuto). Admin-only
-(`WindowsPrincipal.IsInRole(Administrator)`), read-only. Živý in-memory stav agenta (whitelist,
-WMI watchdog, fronta, připojená média). `HttpListener` schválně místo Kestrelu – agent
-(`Sdk.Worker`) nepotřebuje ASP.NET Core runtime; loopback → plain HTTP akceptovatelné.
+`LocalConsoleService` – `HttpListener` na `127.0.0.1:5080` (volitelné, `localConsole.enabled`, default vypnuto;
+port `localConsole.port`). Admin-only (`WindowsPrincipal.IsInRole(Administrator)`), read-only. Živý in-memory stav
+agenta: **seznam schválených zařízení (whitelist)** vč. VID/PID/sériák/popis/schválil/platnost, stav+verze
+whitelistu, **verze agenta (commit)**, WMI watchdog, fronta incidentů, právě připojená média a poslední události.
+`HttpListener` schválně místo Kestrelu – agent (`Sdk.Worker`) nepotřebuje ASP.NET Core runtime; loopback → plain
+HTTP akceptovatelné. Endpointy: `GET /` (HTML dashboard, auto-refresh 3 s) · `GET /api/status` (JSON).
 
 ## Identifikace zařízení
 

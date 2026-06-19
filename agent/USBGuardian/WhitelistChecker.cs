@@ -102,6 +102,9 @@ public class WhitelistChecker
             wl?.ValidUntil ?? DateTime.MinValue);
     }
 
+    /// <summary>Read-only seznam schválených zařízení (pro lokální konzoli).</summary>
+    public IReadOnlyList<WhitelistEntry> GetEntries() => LoadWhitelist()?.Devices ?? new List<WhitelistEntry>();
+
     public WhitelistStatus GetStatus()
     {
         var whitelist = LoadWhitelist();

@@ -177,17 +177,32 @@ public class LocalConsoleService : BackgroundService
             })
             .ToList();
 
+        var devices = _whitelist.GetEntries()
+            .Select(e => new
+            {
+                vendorId     = e.VendorId,
+                productId    = e.ProductId,
+                serialNumber = e.SerialNumber,
+                description  = e.Description,
+                approvedBy   = e.ApprovedBy,
+                validUntil   = e.ValidUntil
+            })
+            .OrderBy(e => e.description)
+            .ToList();
+
         return new
         {
             hostname    = Environment.MachineName,
             generatedAt = now,
             policyMode  = _policyMode,
+            agentCommit = AppInfo.Commit,
             whitelist = new
             {
                 version     = wl.Version,
                 status      = wl.Status.ToString(),
                 deviceCount = wl.DeviceCount,
-                validUntil  = wl.ValidUntil == DateTime.MinValue ? (DateTime?)null : wl.ValidUntil
+                validUntil  = wl.ValidUntil == DateTime.MinValue ? (DateTime?)null : wl.ValidUntil,
+                devices     = devices
             },
             monitor = new
             {
@@ -308,10 +323,16 @@ public class LocalConsoleService : BackgroundService
 
             function render(d){
               document.getElementById('meta').textContent =
-                `${d.hostname} · policy: ${d.policyMode} · ${dt(d.generatedAt)}`;
+                `${d.hostname} · policy: ${d.policyMode} · agent ${d.agentCommit||'?'} · ${dt(d.generatedAt)}`;
 
               const wl = d.whitelist, mon = d.monitor, q = d.queue;
               const stale = mon.secondsSinceLastEvent > 600;
+
+              const wlDevices = (wl.devices||[]).map(e =>
+                `<tr><td class="muted">${esc(e.vendorId)}</td><td class="muted">${esc(e.productId)}</td>
+                 <td>${esc(e.serialNumber||'—')}</td><td>${esc(e.description||'—')}</td>
+                 <td class="muted">${esc(e.approvedBy||'—')}</td>
+                 <td>${e.validUntil ? dt(e.validUntil) : '<span class="muted">trvale</span>'}</td></tr>`).join('');
 
               const active = (mon.activeConnections||[]).map(c =>
                 `<tr><td>${esc(c.friendlyName)}</td><td>${dt(c.connectedAt)}</td><td>${dur(c.durationSeconds)}</td></tr>`).join('');
@@ -341,6 +362,11 @@ public class LocalConsoleService : BackgroundService
                   <div class="big">${q.pendingRecords}</div>
                   <div class="row"><span>Záznamů ve frontě</span><span>${q.pendingRecords}</span></div>
                   <div class="row"><span>Souborů</span><span>${q.files}</span></div>
+                </div>
+                <div class="card full">
+                  <h2>Schválená zařízení – whitelist (${(wl.devices||[]).length})</h2>
+                  ${wlDevices ? `<table><tr><th>VID</th><th>PID</th><th>Sériové číslo</th><th>Popis</th><th>Schválil</th><th>Platnost</th></tr>${wlDevices}</table>`
+                              : '<div class="empty">whitelist je prázdný nebo nedostupný</div>'}
                 </div>
                 <div class="card full">
                   <h2>Právě připojená média (${(mon.activeConnections||[]).length})</h2>
