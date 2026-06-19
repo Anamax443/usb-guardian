@@ -139,6 +139,10 @@ public class LocalConsoleService : BackgroundService
             {
                 _policy.ClearOverride();
                 _logger.LogWarning("Break-glass: override ručně zrušen ({By}).", ctx.User?.Identity?.Name ?? "?");
+                // Zapnutí blokování zpět → OKAMŽITĚ znovu zablokovat připojená neschválená média
+                // (jinak by médium vrácené break-glassem zůstalo viditelné až do dalšího reconcile cyklu).
+                if (_policy.EffectiveMode(_policyMode) == "block")
+                    _monitor.ReEnforceConnectedDevices();
                 WriteJson(ctx, BuildStatus());
             }
             else if (method == "POST" && path.Equals("/api/unblock-all", StringComparison.OrdinalIgnoreCase))

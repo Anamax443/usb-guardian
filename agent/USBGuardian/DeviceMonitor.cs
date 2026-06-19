@@ -35,6 +35,7 @@ public class DeviceMonitor : BackgroundService
     private readonly WhitelistChecker _whitelistChecker;
     private readonly PolicyEnforcer _policyEnforcer;
     private readonly IncidentLogger _incidentLogger;
+    private readonly DeviceBlocker _blocker;
 
     // Tři WMI watchers
     private ManagementEventWatcher? _diskWatcher;
@@ -65,12 +66,14 @@ public class DeviceMonitor : BackgroundService
         ILogger<DeviceMonitor> logger,
         WhitelistChecker whitelistChecker,
         PolicyEnforcer policyEnforcer,
-        IncidentLogger incidentLogger)
+        IncidentLogger incidentLogger,
+        DeviceBlocker blocker)
     {
         _logger           = logger;
         _whitelistChecker = whitelistChecker;
         _policyEnforcer   = policyEnforcer;
         _incidentLogger   = incidentLogger;
+        _blocker          = blocker;
     }
 
     // --------------------------------------------------------
@@ -427,6 +430,50 @@ public class DeviceMonitor : BackgroundService
         {
             _logger.LogError(ex, "Startovní sken připojených médií selhal");
         }
+    }
+
+    // --------------------------------------------------------
+    // Re-enforcement: znovu zablokuje JIŽ PŘIPOJENÁ neschválená média, když je blokování zapnuté.
+    // Řeší díru: agent blokuje jen na NOVÉ připojení (WMI). Když se médium vrátí break-glassem a pak
+    // se blokování zapne zpět (override zrušen / enforce=true), médium zůstane připojené a samo se
+    // znovu nezablokuje. Tahle metoda to dožene. Idempotentní: schválená i už-blokovaná přeskakuje,
+    // takže opakované volání (každý reconcile cyklus) v ustáleném stavu nic nedělá (žádný spam).
+    // VOLAT JEN když je efektivní režim "block" (rozhoduje volající).
+    // --------------------------------------------------------
+    public void ReEnforceConnectedDevices()
+    {
+        try
+        {
+            var blocked = _blocker.GetBlocked();
+            using var searcher = new ManagementObjectSearcher(
+                "root\\cimv2",
+                "SELECT * FROM Win32_DiskDrive WHERE InterfaceType='USB' OR InterfaceType='SD'");
+
+            var n = 0;
+            foreach (ManagementBaseObject wmi in searcher.Get())
+            {
+                if (!IsRemovableMedia(wmi)) continue;
+
+                var device = ParseDeviceFromWmi(wmi);
+                if (_whitelistChecker.IsAllowed(device)) continue;        // schválené nech být
+                if (!string.IsNullOrEmpty(device.PnpDeviceId) && blocked.ContainsKey(device.PnpDeviceId))
+                    continue;                                             // už blokované – neřešit znovu
+
+                foreach (var dl in GetDriveLettersForDisk(wmi["DeviceID"]?.ToString() ?? string.Empty))
+                    device.DriveLetters.Add(dl);
+
+                _logger.LogWarning(
+                    "Re-enforcement: blokování zapnuto – blokuji připojené neschválené médium {Device}", device);
+                _policyEnforcer.HandleDevice(device, _whitelistChecker.GetVersion(), false, _whitelistChecker.GetStatus());
+
+                if (!string.IsNullOrEmpty(device.PnpDeviceId))
+                    _activeConnections.TryAdd(device.PnpDeviceId, (device.FriendlyName, DateTime.UtcNow));
+                n++;
+            }
+
+            if (n > 0) _logger.LogWarning("Re-enforcement dokončen: znovu zablokováno {N} připojených médií", n);
+        }
+        catch (Exception ex) { _logger.LogError(ex, "Re-enforcement připojených médií selhal"); }
     }
 
     // Drive letters fyzického disku: DiskDrive → DiskPartition → LogicalDisk

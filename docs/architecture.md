@@ -48,7 +48,7 @@
 
 | Komponenta | Popis |
 |-----------|-------|
-| `DeviceMonitor` | WMI subscriber – Win32_DiskDrive connect/disconnect eventy + **startovní sken** už-připojených médií (watchers chytají jen nová připojení) |
+| `DeviceMonitor` | WMI subscriber – Win32_DiskDrive connect/disconnect eventy + **startovní sken** už-připojených médií (watchers chytají jen nová připojení) + **`ReEnforceConnectedDevices()`** (znovu zablokuje připojená neschválená média při zapnutí blokování) |
 | `WhitelistChecker` | Čte lokální `whitelist.json`, ověřuje RSA-4096 podpis |
 | `PolicyEnforcer` | Rozhoduje o akci dle `policy.mode` (warn / block) |
 | `NotificationService` | Windows Toast notifikace pro přihlášeného uživatele |
@@ -382,6 +382,13 @@ false → `warn`. Před prvním heartbeatem fallback na lokální config.
 blokování zapnuté → vrátí média, která jsou **mezitím na whitelistu** (schválená); jinak nechá blokované.
 **Lokální break-glass vrací média OKAMŽITĚ** (synchronně z konzole 5080, nečeká na cyklus); serverový `enforce=false`
 se propíše dalším heartbeatem (≤ interval). Vrací jen disky zakázané agentem (ne ručně zakázané jinde).
+
+**Re-blokace připojených médií (symetrie k auto-re-enable):** agent blokuje jen na **nové** připojení (WMI event).
+Když se médium vrátí break-glassem a pak se blokování **zapne zpět** (override zrušen / `enforce=true`), médium zůstane
+připojené a samo se znovu nezablokuje. `DeviceMonitor.ReEnforceConnectedDevices()` to dožene: projde připojená USB/SD
+média a **znovu zablokuje** ta neschválená, která ještě nejsou blokovaná (idempotentní – schválená i už-blokovaná
+přeskočí). Volá se **každý reconcile cyklus, když je blokování ON** (self-healing) a **okamžitě** při „Zapnout blokování
+zpět" v lokální konzoli.
 
 **Spolehlivost vracení (`UnblockDevice`):** Enable se hledá nejdřív **přesnou shodou** `Get-PnpDevice -InstanceId`
 (jako ruční `Enable-PnpDevice -InstanceId '…'`), pak fallbackem `-like`. Výsledek: `ENABLED` (povoleno → odebrat ze

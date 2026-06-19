@@ -158,7 +158,8 @@ if (!string.IsNullOrEmpty(syncUrl))
         return new WhitelistSync(logger, syncUrl, wlPath, interval, validateTls, pinnedThumbprint, signals,
             sp.GetRequiredService<PolicyState>(),
             sp.GetRequiredService<WhitelistChecker>(),
-            sp.GetRequiredService<DeviceBlocker>());
+            sp.GetRequiredService<DeviceBlocker>(),
+            sp.GetRequiredService<DeviceMonitor>());
     });
 
     builder.Services.AddHostedService(sp =>

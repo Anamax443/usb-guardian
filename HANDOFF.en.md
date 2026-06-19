@@ -155,7 +155,13 @@ a server-side `enforce=false` still propagates via heartbeat, which is fine). `U
 **exact `-InstanceId`** (like a manual `Enable-PnpDevice`), with a `-like` fallback; it distinguishes
 `ENABLED`/`GONE` (an unplugged device is dropped from the list so it doesn't linger)/`FAILED` (logged + kept for retry).
 The local console now shows the **blocked count** + a **"Return all media now"** button (`POST /api/unblock-all`).
-Note: if `.181` runs an agent older than `a590916`, auto-re-enable is physically absent there → redeploy needed (UAC).
+
+**Symmetry – re-enable blocking = re-block connected media (fix, agent redeploy):** the agent only blocks on a NEW
+connect (WMI), so media returned via break-glass stayed connected and visible after blocking was turned back on
+("BLOCKING, yet I can see the flash drive, Blocked now: 0"). `DeviceMonitor.ReEnforceConnectedDevices()` now scans
+connected USB/SD media and **re-blocks** the unauthorized ones (idempotent – skips authorized and already-blocked).
+Called **every reconcile cycle while blocking is ON** (self-healing) + **immediately** on "Re-enable blocking" in the
+local console.
 
 ### 5.5 Roadmap (pending)
 - **Monitoring of signing cert expiry** – `CN=powershell.axinetwork.loc` valid until 2028-06-17; alert via e-mail from the console.

@@ -152,8 +152,13 @@ dočasně vypne blokování pro **offline** práci. Perzistované (`override.jso
 `enforce=false` se propíše až heartbeatem, to je OK). `UnblockDevice` zrobustněn: Enable přes **přesný `-InstanceId`**
 (jako ruční `Enable-PnpDevice`), fallback `-like`; rozlišuje `ENABLED`/`GONE` (odpojené médium odebere ze seznamu, ať
 nezůstane viset)/`FAILED` (zaloguje + ponechá na retry). Lokální konzole nově ukazuje **počet blokovaných** +
-tlačítko **„Vrátit všechna média hned"** (`POST /api/unblock-all`). Pozn.: pokud na `.181` běží agent starší než
-`a590916`, auto-re-enable tam fyzicky NENÍ → nutný redeploy (UAC).
+tlačítko **„Vrátit všechna média hned"** (`POST /api/unblock-all`).
+
+**Symetrie – zapnout blokování = znovu zablokovat připojené (oprava, redeploy agenta):** agent blokuje jen na NOVÉ
+připojení (WMI), takže médium vrácené break-glassem zůstalo po zapnutí blokování zpět připojené a viditelné
+(„BLOKUJE, ale flashku vidím, Zablokováno teď: 0"). Nově `DeviceMonitor.ReEnforceConnectedDevices()` projde připojená
+USB/SD média a **znovu zablokuje** neschválená (idempotentní – schválená i už-blokovaná přeskočí). Volá se **každý
+reconcile cyklus když je blokování ON** (self-healing) + **okamžitě** při „Zapnout blokování zpět" v lokální konzoli.
 
 ### 5.5 Roadmapa (pending)
 - **Monitoring expirace podpisového certu** – `CN=powershell.axinetwork.loc` platí do 2028-06-17; alert e-mailem z konzole.
