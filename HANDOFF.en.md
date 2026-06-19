@@ -163,6 +163,12 @@ connected USB/SD media and **re-blocks** the unauthorized ones (idempotent – s
 Called **every reconcile cycle while blocking is ON** (self-healing) + **immediately** on "Re-enable blocking" in the
 local console.
 
+**Previously blocked device added to the whitelist → it gets returned (cache fix):** `ReconcileBlocked` returns the
+device when `IsAllowedKey`=true even while blocking is on. **Bug:** `WhitelistChecker` cached the whitelist for 5 min and
+a new-version download didn't invalidate that cache → approval took effect only after ~5 min (and `ReEnforce` could
+re-block the device meanwhile). Fix: `WhitelistSync` calls `WhitelistChecker.Reload()` after download → the new version
+applies immediately, unblock in the same reconcile cycle.
+
 ### 5.5 Roadmap (pending)
 - **Monitoring of signing cert expiry** – `CN=powershell.axinetwork.loc` valid until 2028-06-17; alert via e-mail from the console.
 - **"Everything on the server .213":** move the API runtime from SQL-04 to .213 (console+API on .213, DB on SQL-04, agent repoint to

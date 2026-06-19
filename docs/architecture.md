@@ -383,6 +383,12 @@ blokování zapnuté → vrátí média, která jsou **mezitím na whitelistu** 
 **Lokální break-glass vrací média OKAMŽITĚ** (synchronně z konzole 5080, nečeká na cyklus); serverový `enforce=false`
 se propíše dalším heartbeatem (≤ interval). Vrací jen disky zakázané agentem (ne ručně zakázané jinde).
 
+**Dříve blokované médium se objeví na whitelistu:** schválení proběhne v konzoli → nová podepsaná verze → agent ji
+stáhne (≤ heartbeat) a **invaliduje 5min cache** (`WhitelistChecker.Reload()` z `WhitelistSync` hned po stažení – jinak
+by se nově schválené médium rozpoznalo až po vypršení cache). `ReconcileBlocked` v témž cyklu zjistí `IsAllowedKey` =
+true a médium **vrátí i při zapnutém blokování**. (Klíč `VID:PID:SN` blokace = klíč indexu whitelistu, `OrdinalIgnoreCase`,
+sériák trimovaný na obou stranách.)
+
 **Re-blokace připojených médií (symetrie k auto-re-enable):** agent blokuje jen na **nové** připojení (WMI event).
 Když se médium vrátí break-glassem a pak se blokování **zapne zpět** (override zrušen / `enforce=true`), médium zůstane
 připojené a samo se znovu nezablokuje. `DeviceMonitor.ReEnforceConnectedDevices()` to dožene: projde připojená USB/SD

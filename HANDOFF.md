@@ -160,6 +160,11 @@ připojení (WMI), takže médium vrácené break-glassem zůstalo po zapnutí b
 USB/SD média a **znovu zablokuje** neschválená (idempotentní – schválená i už-blokovaná přeskočí). Volá se **každý
 reconcile cyklus když je blokování ON** (self-healing) + **okamžitě** při „Zapnout blokování zpět" v lokální konzoli.
 
+**Dříve blokované médium zařazeno na whitelist → vrátí se (oprava cache):** `ReconcileBlocked` při `IsAllowedKey`=true
+vrátí médium i při zapnutém blokování. **Bug:** `WhitelistChecker` cachoval whitelist 5 min a stažení nové verze cache
+neinvalidovalo → schválení se projevilo až za ~5 min (a `ReEnforce` mezitím mohl médium znovu zablokovat). Fix:
+`WhitelistSync` po stažení volá `WhitelistChecker.Reload()` → nová verze platí ihned, unblock v témž reconcile cyklu.
+
 ### 5.5 Roadmapa (pending)
 - **Monitoring expirace podpisového certu** – `CN=powershell.axinetwork.loc` platí do 2028-06-17; alert e-mailem z konzole.
 - **„Vše server na .213":** přesun API runtime z SQL-04 na .213 (konzole+API na .213, DB na SQL-04, agent repoint na

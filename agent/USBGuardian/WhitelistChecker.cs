@@ -131,6 +131,18 @@ public class WhitelistChecker
 
     public string GetVersion()  => LoadWhitelist()?.Version ?? "unknown";
 
+    /// <summary>
+    /// Vynutí znovunačtení whitelistu z disku při příštím dotazu (zahodí 5min cache).
+    /// Volá WhitelistSync hned po stažení nové verze – jinak by se nově schválené médium
+    /// rozpoznalo (a vrátilo z blokace) až po vypršení cache, ne ihned v témž reconcile cyklu.
+    /// </summary>
+    public void Reload()
+    {
+        _cachedWhitelist = null;
+        _lastLoaded      = DateTime.MinValue;
+        _logger.LogInformation("Whitelist cache invalidována – příští dotaz načte aktuální verzi");
+    }
+
     /// <summary>Je klíč VID:PID:SN aktuálně na whitelistu? (Pro reconciliaci zablokovaných médií.)</summary>
     public bool IsAllowedKey(string deviceKey)
     {

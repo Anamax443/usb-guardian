@@ -223,6 +223,10 @@ public class WhitelistSync : BackgroundService
         File.Move(tempSig,  SignaturePath,          overwrite: true);
         File.Move(tempJson, _localWhitelistPath,    overwrite: true);
 
+        // Zahodit 5min cache WhitelistCheckeru → nová verze platí OKAMŽITĚ (důležité pro reconcile
+        // hned po stažení: dříve blokované, mezitím schválené médium se vrátí v témž cyklu, ne až za ~5 min).
+        _whitelistChecker?.Reload();
+
         _logger.LogInformation(
             "Whitelist + podpis synchronizovány: {Path}", _localWhitelistPath);
     }
