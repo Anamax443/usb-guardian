@@ -187,3 +187,5 @@ neinvalidovalo → schválení se projevilo až za ~5 min (a `ReEnforce` mezití
 | `HANDOFF.md` / `.en.md` | Tento dokument – předávka + živý stav |
 | `docs/architecture.md` | Technická architektura, datový tok, bezpečnostní vrstvy |
 | `docs/auto-deploy-setup.md` | Nastavení deploy gMSA + GPO + scheduled task pro auto-enrollment |
+| `docs/oponentura.md` | Komplexní technický dokument k oponentuře (kontext, NIS2, obhajoba rozhodnutí, bezpečnost, omezení) |
+| `docs/oponentura-komercni.md` | Komerční oponentní posudek (business/product readiness) + reakce autora |
