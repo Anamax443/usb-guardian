@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>USB Guardian — jak to funguje (animace)</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#161b22; --panel2:#1c2333; --line:#30363d; --ink:#e6edf3; --muted:#8b949e;
+    --brand:#3b82f6; --ok:#22c55e; --warn:#f59e0b; --bad:#ef4444; --rsa:#a855f7; --tls:#22d3ee;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:Segoe UI,Arial,sans-serif;background:var(--bg);color:var(--ink);}
+  header{padding:18px 24px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+  header h1{font-size:18px;margin:0}
+  header .tag{font-size:12px;color:var(--muted)}
+  .wrap{display:grid;grid-template-columns:1fr 340px;gap:0;min-height:calc(100vh - 61px)}
+  @media(max-width:980px){.wrap{grid-template-columns:1fr}}
+  .stage{position:relative;padding:18px;overflow:auto}
+  svg{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:1}
+  .canvas{position:relative;width:1000px;height:660px;margin:0 auto}
+  .zone{position:absolute;border:1px dashed var(--line);border-radius:14px}
+  .zone .zlbl{position:absolute;top:-10px;left:14px;background:var(--bg);padding:0 8px;font-size:11px;color:var(--muted);letter-spacing:.08em;text-transform:uppercase}
+  .zone.client{left:0;top:24px;width:470px;height:600px;background:rgba(59,130,246,.04)}
+  .zone.server{left:600px;top:24px;width:400px;height:470px;background:rgba(34,197,94,.04)}
+  .zone.offline{left:600px;top:520px;width:400px;height:104px;background:rgba(168,85,247,.05)}
+  .node{position:absolute;z-index:2;background:var(--panel);border:1px solid var(--line);border-radius:10px;
+        padding:8px 10px;width:150px;transition:.35s;box-shadow:0 1px 0 rgba(0,0,0,.3)}
+  .node .t{font-size:12.5px;font-weight:600}
+  .node .d{font-size:10.5px;color:var(--muted);margin-top:2px;line-height:1.25}
+  .node.active{border-color:var(--brand);box-shadow:0 0 0 2px rgba(59,130,246,.35),0 0 22px rgba(59,130,246,.25);transform:translateY(-1px)}
+  .node.ok{border-color:var(--ok)} .node.warn{border-color:var(--warn)} .node.bad{border-color:var(--bad)}
+  .node.rsa.active{box-shadow:0 0 0 2px rgba(168,85,247,.4),0 0 22px rgba(168,85,247,.3);border-color:var(--rsa)}
+  .dot{position:absolute;z-index:3;width:13px;height:13px;border-radius:50%;background:var(--brand);
+       box-shadow:0 0 12px var(--brand);opacity:0;transition:opacity .2s}
+  .edge{stroke:var(--line);stroke-width:2;fill:none}
+  .edge.lit{stroke:var(--brand);stroke-width:2.5;filter:drop-shadow(0 0 4px var(--brand))}
+  .edge.tls{stroke-dasharray:6 5}
+  /* side panel */
+  .side{border-left:1px solid var(--line);background:var(--panel);padding:18px;display:flex;flex-direction:column}
+  .step-no{font-size:11px;color:var(--muted);letter-spacing:.1em}
+  .step-title{font-size:17px;font-weight:700;margin:4px 0 8px}
+  .step-body{font-size:13.5px;line-height:1.5;color:#cdd6e0;flex:0 0 auto;min-height:120px}
+  .step-body code{background:var(--panel2);padding:1px 5px;border-radius:4px;font-size:12px}
+  .chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px}
+  .chip{font-size:11px;border:1px solid var(--line);border-radius:20px;padding:3px 9px;color:var(--muted);cursor:pointer}
+  .chip.on{border-color:var(--brand);color:var(--ink);background:rgba(59,130,246,.12)}
+  .controls{margin-top:auto;display:flex;gap:8px;align-items:center;padding-top:16px;border-top:1px solid var(--line)}
+  .btn{font:inherit;font-size:13px;padding:8px 12px;border:1px solid var(--line);background:var(--panel2);
+       color:var(--ink);border-radius:8px;cursor:pointer}
+  .btn.primary{border-color:var(--brand);background:var(--brand)}
+  .btn:disabled{opacity:.4;cursor:default}
+  .progress{height:4px;background:var(--panel2);border-radius:3px;overflow:hidden;margin-top:12px}
+  .progress > i{display:block;height:100%;background:var(--brand);width:0;transition:.35s}
+  .legend{display:flex;gap:14px;flex-wrap:wrap;font-size:11px;color:var(--muted);margin-left:auto}
+  .legend b{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:4px;vertical-align:middle}
+</style>
+</head>
+<body>
+<header>
+  <h1>USB Guardian — jak to funguje</h1>
+  <span class="tag">monitoring paměťových médií (NIS2) · agent → API → DB → konzole</span>
+  <div class="legend">
+    <span><b style="background:var(--brand)"></b>data/flow</span>
+    <span><b style="background:var(--tls)"></b>TLS (pinning)</span>
+    <span><b style="background:var(--rsa)"></b>RSA podpis</span>
+    <span><b style="background:var(--ok)"></b>OK</span>
+    <span><b style="background:var(--warn)"></b>varování</span>
+    <span><b style="background:var(--bad)"></b>blok</span>
+  </div>
+</header>
+
+<div class="wrap">
+  <div class="stage">
+    <div class="canvas" id="canvas">
+      <div class="zone client"><span class="zlbl">Klientská stanice (Windows, agent = SYSTEM)</span></div>
+      <div class="zone server"><span class="zlbl">Server (.213 konzole · SQL-04 API+DB)</span></div>
+      <div class="zone offline"><span class="zlbl">Offline (privátní klíč)</span></div>
+
+      <svg id="svg"></svg>
+
+      <!-- client nodes -->
+      <div class="node" id="n_usb"    style="left:20px;top:70px"><div class="t">🔌 USB / SD / disk</div><div class="d">uživatel připojí médium</div></div>
+      <div class="node" id="n_mon"    style="left:20px;top:150px"><div class="t">DeviceMonitor</div><div class="d">WMI watcher + startovní sken</div></div>
+      <div class="node" id="n_wl"     style="left:20px;top:235px"><div class="t">WhitelistChecker</div><div class="d">VID:PID:SN vs. lokální whitelist</div></div>
+      <div class="node" id="n_pol"    style="left:20px;top:320px"><div class="t">PolicyEnforcer</div><div class="d">warn / block dle politiky</div></div>
+      <div class="node" id="n_toast"  style="left:250px;top:320px"><div class="t">🔔 ToastHelper</div><div class="d">notifikace v user session</div></div>
+      <div class="node" id="n_block"  style="left:20px;top:405px"><div class="t">DeviceBlocker</div><div class="d">Disable-PnpDevice (block režim)</div></div>
+      <div class="node" id="n_log"    style="left:250px;top:405px"><div class="t">IncidentLogger</div><div class="d">JSON fronta + atribuce uživatele (WTS)</div></div>
+      <div class="node" id="n_sync"   style="left:250px;top:235px"><div class="t">Whitelist/IncidentSync</div><div class="d">heartbeat · stáhni WL · pošli incidenty</div></div>
+      <div class="node" id="n_wd"     style="left:250px;top:150px"><div class="t">🐕 Watchdog</div><div class="d">scheduled task à 3 min → sc start</div></div>
+
+      <!-- server nodes -->
+      <div class="node" id="n_api"    style="left:620px;top:70px"><div class="t">USB Guardian API</div><div class="d">Kestrel :5443 (TLS self-cert)</div></div>
+      <div class="node" id="n_queue"  style="left:620px;top:160px"><div class="t">IncidentQueue</div><div class="d">in-memory fronta (202 Accepted)</div></div>
+      <div class="node" id="n_worker" style="left:620px;top:250px"><div class="t">IncidentQueueWorker</div><div class="d">async zápis do DB</div></div>
+      <div class="node ok" id="n_sql" style="left:620px;top:340px"><div class="t">🗄️ SQL Server</div><div class="d">USBGuardian · Incidents…</div></div>
+      <div class="node" id="n_con"    style="left:820px;top:250px"><div class="t">🖥️ Konzole (Blazor)</div><div class="d">Přehled · Whitelist · export · retence</div></div>
+
+      <!-- offline -->
+      <div class="node rsa" id="n_sign" style="left:620px;top:548px"><div class="t">🔑 WhitelistSigner</div><div class="d">RSA-4096 podpis katalogu (offline)</div></div>
+      <div class="node" id="n_admin"    style="left:820px;top:548px"><div class="t">👤 IT admin</div><div class="d">schválí médium → vydá verzi</div></div>
+
+      <div class="dot" id="dot"></div>
+    </div>
+  </div>
+
+  <div class="side">
+    <div class="step-no" id="stepNo">KROK 1 / 10</div>
+    <div class="step-title" id="stepTitle">—</div>
+    <div class="step-body" id="stepBody">—</div>
+    <div class="chips" id="chips"></div>
+    <div class="progress"><i id="bar"></i></div>
+    <div class="controls">
+      <button class="btn" id="prev">‹ Zpět</button>
+      <button class="btn primary" id="play">▶ Přehrát</button>
+      <button class="btn" id="next">Další ›</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const steps = [
+  { t:"Připojení média", nodes:["n_usb","n_mon"], edge:["n_usb","n_mon"],
+    b:"Uživatel připojí USB/SD/disk. <b>DeviceMonitor</b> ho zachytí přes WMI watcher; už připojená média odhalí <b>startovní sken</b> při startu služby. Sériák se hned <code>trim</code>ne (WMI vrací koncové mezery)." },
+  { t:"Kontrola whitelistu", nodes:["n_mon","n_wl"], edge:["n_mon","n_wl"],
+    b:"<b>WhitelistChecker</b> složí klíč <code>VID:PID:SÉRIÁK</code> a porovná s lokálním <code>whitelist.json</code>. U podepsaného whitelistu navíc ověří <b>RSA-4096</b> podpis (fail-secure)." },
+  { t:"Rozhodnutí politiky", nodes:["n_wl","n_pol"], edge:["n_wl","n_pol"], cls:{n_pol:"warn"},
+    b:"<b>PolicyEnforcer</b> rozhodne dle režimu: <code>warn</code> (médium funguje, jen varuje) nebo <code>block</code>. Schválené médium → jen tichý audit záznam (Allowed)." },
+  { t:"Blokace (režim block)", nodes:["n_pol","n_block"], edge:["n_pol","n_block"], cls:{n_block:"bad"},
+    b:"V režimu <code>block</code> <b>DeviceBlocker</b> deaktivuje zařízení (<code>Disable-PnpDevice</code> dle PNPDeviceID). V režimu warn se tento krok přeskočí." },
+  { t:"Notifikace uživateli", nodes:["n_pol","n_toast"], edge:["n_pol","n_toast"], cls:{n_toast:"warn"},
+    b:"Agent běží jako SYSTEM a nemůže zobrazit Toast přímo → zapíše zprávu do fronty. <b>ToastHelper</b> (scheduled task v user session, trigger přihlášení/odemčení) ji zobrazí jako Windows notifikaci." },
+  { t:"Záznam incidentu + atribuce", nodes:["n_pol","n_log"], edge:["n_pol","n_log"],
+    b:"<b>IncidentLogger</b> uloží incident do denní JSON fronty. Skutečného uživatele zjistí přes <b>WTS API</b> (aktivní session) → <code>DOMÉNA\\uživatel</code>, ne strojový účet (agent = SYSTEM)." },
+  { t:"Odeslání na API (TLS)", nodes:["n_log","n_sync","n_api"], edge:["n_sync","n_api"], tls:true,
+    b:"<b>IncidentSync</b> pošle frontu na API přes HTTPS. Bez CA — agent ověří server <b>pinningem otisku</b> certifikátu. <b>Heartbeat</b> nese verzi/online; přibalené příkazy umí vyžádat data hned (<code>ReportNow</code>)." },
+  { t:"Příjem → fronta → DB", nodes:["n_api","n_queue","n_worker","n_sql"], edge:["n_queue","n_worker"],
+    b:"API vrátí <b>202 Accepted</b> a vloží do <b>IncidentQueue</b> (sám do DB nepíše → odolnost při náporech). <b>IncidentQueueWorker</b> asynchronně zapisuje do SQL tabulky <code>Incidents</code>." },
+  { t:"Konzole, export, retence", nodes:["n_sql","n_con"], edge:["n_sql","n_con"], cls:{n_con:"ok"},
+    b:"<b>Blazor konzole</b> (.213) agreguje incidenty, drží AD inventář stanic, spravuje whitelist a nastavení. Umí <b>CSV/manažerský export</b> a <b>retenci</b> (API maže staré incidenty). Footer hlásí živý commit = kontrola aktuálnosti." },
+  { t:"Podpis whitelistu (offline)", nodes:["n_admin","n_sign","n_api","n_sync","n_wl"], edge:["n_sign","n_api"], rsa:true,
+    b:"IT admin schválí médium v konzoli. Vydání podepsané verze whitelistu je <b>offline</b> krok (<b>WhitelistSigner</b>, privátní RSA klíč nikdy na serveru). Agent si ji stáhne při heartbeatu (≤2 min) a teprve pak vynucuje/blokuje „naostro". Službu hlídá <b>Watchdog</b>." },
+];
+
+const svg = document.getElementById('svg'), dot = document.getElementById('dot');
+const stepNo=document.getElementById('stepNo'), stepTitle=document.getElementById('stepTitle'),
+      stepBody=document.getElementById('stepBody'), bar=document.getElementById('bar'), chips=document.getElementById('chips');
+let cur=0, playing=false, timer=null;
+
+function center(id){ const n=document.getElementById(id), c=document.getElementById('canvas');
+  const r=n.getBoundingClientRect(), b=c.getBoundingClientRect();
+  return { x:r.left-b.left+r.width/2, y:r.top-b.top+r.height/2 }; }
+
+function drawEdges(){
+  svg.innerHTML='';
+  steps.forEach((s,i)=>{ if(!s.edge) return;
+    const a=center(s.edge[0]), b=center(s.edge[1]);
+    const p=document.createElementNS('http://www.w3.org/2000/svg','path');
+    p.setAttribute('d',`M ${a.x} ${a.y} L ${b.x} ${b.y}`);
+    p.setAttribute('class','edge'+(s.tls?' tls':'')); p.id='edge'+i; svg.appendChild(p);
+  });
+}
+
+function render(){
+  const s=steps[cur];
+  stepNo.textContent=`KROK ${cur+1} / ${steps.length}`;
+  stepTitle.textContent=s.t; stepBody.innerHTML=s.b;
+  bar.style.width=((cur+1)/steps.length*100)+'%';
+
+  document.querySelectorAll('.node').forEach(n=>n.className=n.className.replace(/\s*(active|warn|bad|ok)\b/g,'').replace(/\s+/g,' ').trim());
+  // restore base ok class for sql
+  document.getElementById('n_sql').classList.add('ok');
+  (s.nodes||[]).forEach(id=>document.getElementById(id).classList.add('active'));
+  if(s.cls) for(const k in s.cls) document.getElementById(k).classList.add(s.cls[k]);
+
+  document.querySelectorAll('.edge').forEach(e=>e.classList.remove('lit'));
+  const eEl=document.getElementById('edge'+cur);
+  if(eEl){ eEl.classList.add('lit'); if(s.tls) eEl.setAttribute('stroke','var(--tls)'); else if(s.rsa) eEl.setAttribute('stroke','var(--rsa)'); else eEl.setAttribute('stroke',''); }
+
+  chips.innerHTML='';
+  steps.forEach((x,i)=>{ const c=document.createElement('span'); c.className='chip'+(i===cur?' on':'');
+    c.textContent=(i+1); c.title=x.t; c.onclick=()=>{ go(i); }; chips.appendChild(c); });
+
+  animateDot(s);
+}
+
+function animateDot(s){
+  dot.style.opacity=0;
+  if(!s.edge){ return; }
+  const a=center(s.edge[0]), b=center(s.edge[1]);
+  let col = s.tls?'var(--tls)': s.rsa?'var(--rsa)':'var(--brand)';
+  dot.style.background=col; dot.style.boxShadow='0 0 12px '+col;
+  const start=performance.now(), dur=1100;
+  dot.style.opacity=1;
+  function frame(t){ let k=Math.min(1,(t-start)/dur);
+    const ease=k<.5?2*k*k:1-Math.pow(-2*k+2,2)/2;
+    dot.style.left=(a.x+(b.x-a.x)*ease-6)+'px';
+    dot.style.top =(a.y+(b.y-a.y)*ease-6)+'px';
+    if(k<1) requestAnimationFrame(frame); else dot.style.opacity=0;
+  }
+  requestAnimationFrame(frame);
+}
+
+function go(i){ cur=(i+steps.length)%steps.length; render(); }
+function next(){ go(cur+1); }
+function prev(){ go(cur-1); }
+function play(){ playing=!playing;
+  document.getElementById('play').textContent=playing?'⏸ Pauza':'▶ Přehrát';
+  if(playing) timer=setInterval(()=>{ if(cur===steps.length-1){ clearInterval(timer); playing=false; document.getElementById('play').textContent='▶ Přehrát'; return;} next(); },2600);
+  else clearInterval(timer);
+}
+
+document.getElementById('next').onclick=()=>{ next(); };
+document.getElementById('prev').onclick=()=>{ prev(); };
+document.getElementById('play').onclick=play;
+window.addEventListener('resize',()=>{ drawEdges(); render(); });
+window.addEventListener('keydown',e=>{ if(e.key==='ArrowRight')next(); if(e.key==='ArrowLeft')prev(); });
+
+drawEdges(); render();
+</script>
+</body>
+</html>
