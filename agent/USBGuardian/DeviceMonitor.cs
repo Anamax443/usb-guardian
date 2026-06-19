@@ -124,7 +124,7 @@ public class DeviceMonitor : BackgroundService
         {
             var query = new WqlEventQuery(
                 "__InstanceCreationEvent",
-                TimeSpan.FromSeconds(2),
+                TimeSpan.FromSeconds(1),
                 "TargetInstance ISA 'Win32_DiskDrive'");
 
             _diskWatcher = new ManagementEventWatcher(query);
@@ -148,7 +148,7 @@ public class DeviceMonitor : BackgroundService
         {
             var query = new WqlEventQuery(
                 "__InstanceCreationEvent",
-                TimeSpan.FromSeconds(2),
+                TimeSpan.FromSeconds(1),
                 "TargetInstance ISA 'Win32_LogicalDisk'");
 
             _logicalWatcher = new ManagementEventWatcher(query);
@@ -172,7 +172,7 @@ public class DeviceMonitor : BackgroundService
         {
             var query = new WqlEventQuery(
                 "__InstanceDeletionEvent",
-                TimeSpan.FromSeconds(2),
+                TimeSpan.FromSeconds(1),
                 "TargetInstance ISA 'Win32_DiskDrive'");
 
             _disconnectWatcher = new ManagementEventWatcher(query);
@@ -272,37 +272,14 @@ public class DeviceMonitor : BackgroundService
             _logger.LogInformation("Detekováno médium: {Device} (DiskIndex={Index})",
                 device, diskIndex);
 
-            if (diskIndex < 0)
-            {
-                ProcessDevice(device);
-                return;
-            }
-
-            // Scénář B: LogicalDisk čekal
-            if (_pendingDriveLetters.TryRemove(diskIndex, out var pendingDrive))
-            {
+            // ENFORCEMENT HNED na připojení disku – NEČEKAT na spárování s drive-letterem.
+            // (Dřív agent čekal až na drive letter / 30s timeout → médium se mezitím namountovalo a stihlo
+            //  se otevřít v Exploreru = okno přístupu. Blok/varování proto provádíme okamžitě; drive letter,
+            //  pokud už dorazil, jen doplníme do logu.)
+            if (diskIndex >= 0 && _pendingDriveLetters.TryRemove(diskIndex, out var pendingDrive))
                 device.DriveLetters.Add(pendingDrive.DriveLetter);
-                _logger.LogInformation(
-                    "Spárováno (LogicalDisk čekal): drive letter {Letter}: → {Device}",
-                    pendingDrive.DriveLetter, device.FriendlyName);
-                ProcessDevice(device);
-                return;
-            }
 
-            // Scénář A: DiskDrive přišel první
-            _pendingDevices[diskIndex] = (device, DateTime.UtcNow);
-
-            _ = Task.Run(async () =>
-            {
-                await Task.Delay(PairingTimeoutSeconds * 1000);
-                if (_pendingDevices.TryRemove(diskIndex, out var timedOut))
-                {
-                    _logger.LogWarning(
-                        "Drive letter nepřišel do {Sec}s pro {Device} – zpracovávám bez něj",
-                        PairingTimeoutSeconds, timedOut.Device.FriendlyName);
-                    ProcessDevice(timedOut.Device);
-                }
-            });
+            ProcessDevice(device);
         }
         catch (Exception ex)
         {

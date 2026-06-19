@@ -378,6 +378,13 @@ stanice nedosáhne na .213. Override je **perzistovaný** (`C:\ProgramData\USBGu
 spojení se serverem se override ZRUŠÍ** (úspěšný heartbeat → `PolicyState.OnServerHeartbeat` → server reasertuje politiku).
 Efektivní režim: `override aktivní ? warn : (server přijat ? enforce : lokální default)`.
 
+**Latence blokace + notifikace:** agent vynucuje **hned na `Win32_DiskDrive` connect** (nečeká na spárování drive-letteru
+→ minimalizuje okno, kdy se médium stihne namountovat) a po zápisu toastu **okamžitě spustí ToastHelper task**
+(`schtasks /Run`), takže hláška „médium nebylo schváleno" vyskočí do pár sekund. **Limit (user-mode agent je reaktivní):**
+Windows removable storage mountuje velmi rychle, takže krátký okamžik před `Disable-PnpDevice` nelze plně eliminovat.
+Pro **garantované zabránění připojení** (médium se vůbec neobjeví v Exploreru) je třeba doplnit Windows **Device
+Installation Restrictions / Removable Storage Access GPO** nebo kernel storage filter driver – roadmap.
+
 ## Watchdog – Task Scheduler
 
 ```

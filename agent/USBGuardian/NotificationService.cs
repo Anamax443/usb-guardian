@@ -70,12 +70,36 @@ public class NotificationService
                 new JsonSerializerOptions { WriteIndented = true });
 
             File.WriteAllText(filePath, json);
+            TriggerToastHelper();
 
             _logger.LogInformation("Toast notifikace zobrazena: {Title}", title);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Chyba při zápisu Toast zprávy do fronty");
+        }
+    }
+
+    // --------------------------------------------------------
+    // Okamžité zobrazení: agent (SYSTEM) spustí ToastHelper task v user session HNED po zápisu
+    // (jinak by se toast ukázal až při příštím přihlášení/odemčení). Best-effort.
+    // --------------------------------------------------------
+    private void TriggerToastHelper()
+    {
+        try
+        {
+            var psi = new System.Diagnostics.ProcessStartInfo
+            {
+                FileName        = "schtasks.exe",
+                Arguments       = "/Run /TN \"\\USBGuardian\\USBGuardian-ToastHelper\"",
+                UseShellExecute = false,
+                CreateNoWindow  = true
+            };
+            System.Diagnostics.Process.Start(psi);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Nelze spustit ToastHelper task (toast se ukáže při dalším odemčení)");
         }
     }
 
@@ -115,6 +139,7 @@ public class NotificationService
                 new JsonSerializerOptions { WriteIndented = true });
 
             File.WriteAllText(filePath, json);
+            TriggerToastHelper();
 
             _logger.LogInformation("Toast notifikace zobrazena: {Title}", title);
         }
