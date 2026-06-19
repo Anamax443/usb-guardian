@@ -50,6 +50,11 @@ builder.Services.AddDbContext<AppDbContext>(options =>
         builder.Configuration.GetConnectionString("DefaultConnection"),
         sql => sql.CommandTimeout(30)));
 
+// ── Fronta incidentů (controller zařadí batch → worker zapisuje do DB async) ──
+// BEZ TÉTO REGISTRACE: IncidentsController nejde postavit (DI) → 500 na /api/incidents.
+builder.Services.AddSingleton<USBGuardian.Api.Queue.IncidentQueue>();
+builder.Services.AddHostedService<USBGuardian.Api.Queue.IncidentQueueWorker>();
+
 // ── Controllers + Swagger ─────────────────────────────────────
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
