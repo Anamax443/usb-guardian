@@ -26,11 +26,11 @@ Serverová konzole agreguje data, drží inventář stanic z AD a ukazuje, kam c
 | **Autorizace konzole** | AD `AXINETWORK\SQL Admins2` + whitelist `AXINETWORK\trnkam` (+ DB seznam z Nastavení) |
 | **Šifrování agent↔API** | HTTPS + **pinning otisku** (bez CA) — ověřeno end-to-end (heartbeat OK z .181) |
 | **AD sync** | zapnutý 60 min + on-demand; **213 v AD, ~212 bez agenta** |
-| **Live commit (konzole)** | **`aa8376a`** (patička / `/api/version`) · **API live `6f48153`** (heartbeat nese `Enforce`; stage `aa8376a`) · **agent `aa8376a`** (po redeployi .181). Stamp spolehlivý = footer = git HEAD |
+| **Live commit (konzole)** | **`aa8376a`** (patička / `/api/version`) · **API live `6f48153`** (heartbeat nese `Enforce`; stage `aa8376a`) · **agent `f2bb194`** (po redeployi .181 19.6. 13:18 – spolehlivý unblock + re-blokace připojených; ověřeno z Event Logu). Stamp spolehlivý = footer = git HEAD |
 | **Konzole – stránky** | Přehled (filtr+kumulace+řazení, kapacita, **export CSV + manažerský report s grafy**), Stanice (AD inventář + „Zmlklo agentů" + „Vyžádat data" + **Nasazení / hromadné vyřadit-zařadit**), Whitelist (**kapacita + filtr katalogu + auto-publish podepsané verze**), Nastavení (vynucování/přístup/email/alerty/dohled/auto-enrollment+default PC/retence/**Údržba: reload nastavení**), **Databáze**, Dokumentace (+HTML animace) |
 | **Enforcement (F1-3)** | **whitelist 1:1** (auto-podpis serverem, interní RSA klíč na .213) → **vynucování** server→agent (`policy.enforce` v heartbeatu) → **break-glass** (lokální konzole 5080, offline, logováno, zruší se při sync) + **auto-re-enable** + reconciliace s whitelistem. Lokální konzole: restart služby, break-glass, seznam whitelistu |
 | **Deploy účet (auto-enroll)** | **gMSA `AXINETWORK\gmsa-USBGdep$`** – v `PC Admins` (admin na klientech) **i lokální admin na SQL-04** (deploy API); nainstalován na `.213`; deploy task `USBGuardian-AutoDeploy` (pod gMSA, přes CIM) |
-| **Agent (test) .181** | **PILOT ÚSPĚŠNÝ** – `.181` = **TRNKAMW11** (vlastní workstation); služba „USB Guardian" RUNNING, heartbeat + **incidenty tečou do DB**. Agent live **`aa8376a`** – atribuce uživatele, klient 100% (watchdog+toast), **enforcement F1-3 + auto-re-enable**. Update agenta chce elevaci (UAC) → spustí uživatel (build staged na .213) |
+| **Agent (test) .181** | **PILOT ÚSPĚŠNÝ** – `.181` = **TRNKAMW11** (vlastní workstation); služba „USB Guardian" RUNNING, heartbeat + **incidenty tečou do DB**. Agent live **`f2bb194`** – atribuce uživatele, klient 100% (watchdog+toast), **enforcement F1-3 + auto-re-enable + spolehlivý unblock + re-blokace připojených médií**. Update agenta chce elevaci (UAC) → spustí uživatel (build staged na .213) |
 
 ## 3. Klíčová rozhodnutí (proč)
 
