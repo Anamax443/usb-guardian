@@ -201,7 +201,7 @@ else
             _disabled = _devices.Count(d => !d.IsActive);
             _error = null;
         }
-        catch (Exception ex) { _error = ex.Message; }
+        catch (Exception ex) { _error = Detail(ex); }
     }
 
     private static async Task Backfill(AppDbContext db)
@@ -252,7 +252,7 @@ else
                 : $"Přidáno a aktivní: {serial} — VID/PID se dotáhnou, až se médium objeví na síti", false);
             await Load();
         }
-        catch (Exception ex) { Msg("Chyba: " + ex.Message, true); }
+        catch (Exception ex) { Msg("Chyba: " + Detail(ex), true); }
         finally { _busy = false; }
     }
 
@@ -285,7 +285,7 @@ else
             Msg($"Import: +{added} přidáno (aktivní), {dup} už v katalogu.", false);
             await Load();
         }
-        catch (Exception ex) { Msg("Chyba importu: " + ex.Message, true); }
+        catch (Exception ex) { Msg("Chyba importu: " + Detail(ex), true); }
         finally { _busy = false; }
     }
 
@@ -299,7 +299,7 @@ else
             if (e is not null) { e.IsActive = !e.IsActive; await db.SaveChangesAsync(); await AutoPublish(db); }
             await Load();
         }
-        catch (Exception ex) { Msg("Chyba: " + ex.Message, true); }
+        catch (Exception ex) { Msg("Chyba: " + Detail(ex), true); }
         finally { _busy = false; }
     }
 
@@ -328,7 +328,7 @@ else
             _editId = null;
             await Load();
         }
-        catch (Exception ex) { Msg("Chyba uložení: " + ex.Message, true); }
+        catch (Exception ex) { Msg("Chyba uložení: " + Detail(ex), true); }
         finally { _busy = false; }
     }
 
@@ -341,12 +341,22 @@ else
             var d = await db.WhitelistDevices.FindAsync(id);
             if (d is not null) { db.WhitelistDevices.Remove(d); await db.SaveChangesAsync(); await AutoPublish(db); await Load(); }
         }
-        catch (Exception ex) { Msg("Chyba: " + ex.Message, true); }
+        catch (Exception ex) { Msg("Chyba mazání: " + Detail(ex), true); }
         finally { _busy = false; }
     }
 
     private void Msg(string text, bool bad) { _msg = text; _msgBad = bad; }
     private void Pub(string text, bool bad) { _pubMsg = text; _pubBad = bad; }
+
+    // EF DbUpdateException má v .Message jen „See the inner exception" – rozbalíme celý řetězec,
+    // ať je v UI vidět reálná příčina (např. SQL „The DELETE permission was denied on … WhitelistDevices").
+    private static string Detail(Exception ex)
+    {
+        var parts = new List<string>();
+        for (Exception? e = ex; e is not null; e = e.InnerException)
+            parts.Add(e.Message);
+        return string.Join(" → ", parts.Distinct());
+    }
 
     // Ruční „Publikovat nyní" – vydá a podepíše novou verzi (server-side).
     private async Task RepublishNow()
@@ -359,7 +369,7 @@ else
             Pub(msg, !ok);
             await Load();
         }
-        catch (Exception ex) { Pub("Chyba publikace: " + ex.Message, true); }
+        catch (Exception ex) { Pub("Chyba publikace: " + Detail(ex), true); }
         finally { _busy = false; }
     }
 

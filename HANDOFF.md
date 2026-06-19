@@ -22,7 +22,7 @@ Serverová konzole agreguje data, drží inventář stanic z AD a ukazuje, kam c
 | **API** | `B-S-W-SQL-04`, Windows služba „USB Guardian API", install `C:\USBGuardian.Api`, gMSA `AXINETWORK\gmsa-SQL$`; **HTTPS `:5443`** (self-signed, **PIN `E6F6B4FCE0BB627F564E85D6509DE7C4B82CF2F0`**) + HTTP `:5050`. **Živá verze přes `GET /api/version`** |
 | **Verze/commit (kontrola)** | konzole patička + `:4200/api/version`; API `:5050/api/version`; agent hlásí commit → konzole „Agent verze". Vše stampuje `git rev-parse` (MSBuild) |
 | **Admin konzole** | **živá** `http://10.8.2.213:4200/` (`B-S-W-MIKOS`), služba `USBGuardianConsole`, `C:\Apps\USBGuardianConsole`, self-contained |
-| **Účet konzole** | **LocalSystem** = `AXINETWORK\B-S-W-MIKOS$` (SQL grant: read vše + write Computers/WhitelistDevices/WhitelistVersions/AppSettings) |
+| **Účet konzole** | **LocalSystem** = `AXINETWORK\B-S-W-MIKOS$` (SQL grant: read vše + write Computers/WhitelistDevices/WhitelistVersions/AppSettings; **+ DELETE na `WhitelistDevices`** – mazání z katalogu, jinak ✕ hodí „DELETE permission denied") |
 | **Autorizace konzole** | AD `AXINETWORK\SQL Admins2` + whitelist `AXINETWORK\trnkam` (+ DB seznam z Nastavení) |
 | **Šifrování agent↔API** | HTTPS + **pinning otisku** (bez CA) — ověřeno end-to-end (heartbeat OK z .181) |
 | **AD sync** | zapnutý 60 min + on-demand; **213 v AD, ~212 bez agenta** |
