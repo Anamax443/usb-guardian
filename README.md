@@ -26,9 +26,16 @@ technické opatření pro **NIS2 / zákon 181/2014 Sb. / ISO 27001**.
 | 16 | **Startovní sken** už-připojených médií; whitelist poll 2 min; centrální `onExpired`/`enforce` | ✅ |
 | 17 | **Auto-enrollment agenta** – konzole sama nasadí agenta na stanice bez něj (gMSA + scheduled task, dry-run/opt-in); **PILOT ÚSPĚŠNÝ na .181 (bez creds, přes gMSA)** | ✅ pilot OK |
 | 18 | **DB/incidenty tečou** (agent→API→DB→konzole) | ✅ |
-| 19 | **Verze/commit na všech komponentách** (`/api/version`, agent hlásí commit) | ✅ |
+| 19 | **Verze/commit na všech komponentách** (`/api/version`, agent hlásí commit; **spolehlivý stamp** = footer/`/api/version` = git HEAD) | ✅ |
+| 20 | **Atribuce uživatele** – reálný přihlášený uživatel přes **WTS API** (agent=SYSTEM → ne strojový účet); ověřeno živě | ✅ |
+| 21 | **Kompletní klient** – ToastHelper (notifikace, logon+unlock) + **PS-free watchdog**, vše ve `Build-AgentPackage`; ověřeno na .181 | ✅ |
+| 22 | **Kapacita média** v Přehledu i Whitelistu; **export CSV** + **manažerský report** s grafy (inline SVG, 1–2 A4) | ✅ |
+| 23 | **Retence dat** – Nastavení (konzole) + `RetentionService` v API (maže staré incidenty); **stránka Databáze** (přehled obsahu DB) | ✅ |
+| 24 | **Deploy targeting** – default pro nové PC (Nastavení) + per-stanice a hromadné zařazení/vyřazení v Stanicích | ✅ |
+| 25 | **Lokální konzole agenta** ukazuje i seznam schválených zařízení (whitelist) + verzi agenta | ✅ |
+| 26 | **HTML animace** fungování systému (`/how-it-works.html`, 10 kroků datového toku) | ✅ |
 | – | Zavřít nešifrované HTTP 5050 (jen HTTPS) | 🔜 NIS2 |
-| – | **Podpisový/publikační workflow** whitelistu → vynucování + blocklist „naostro" k agentům | 🔜 |
+| – | **Podpisový/publikační workflow** whitelistu → klient 1:1 kopie serveru → vynucování + blocklist „naostro" + break-glass override | 🔜 další velký krok |
 | – | Per-serial **blocklist** + blokace už-připojeného média | 🔜 |
 | – | Monitoring expirace podpisového certu | 🔜 |
 
@@ -72,22 +79,26 @@ dark/light přepínač `axima.theme` bez FOUC, tisk = light, semafor stavů). St
 - **Přehled** – dlaždicový souhrn napříč listy (Stanic v AD / Chybí agent / Schválených médií /
   Deaktivovaných / Incidentů / Blokováno / Varování, prokliky na listy). **Filtr** (období
   30/90/rok/vše, akce, fulltext) + **kumulace** (seskupení médium+stanice+uživatel s počtem) +
-  identifikátory **VID/PID/sériové číslo** + sloupec **„Schváleno"** (aktuálně dle whitelistu).
-  Tabulka **„Detailně" má řaditelné hlavičky** (řazení v DB přes query-string).
+  identifikátory **VID/PID/sériové číslo** + **velikost média** + sloupec **„Schváleno"** (aktuálně dle whitelistu).
+  Tabulka **„Detailně" má řaditelné hlavičky**. **Export:** `⬇ CSV` (Excel) a `📊 Report` =
+  **manažerský souhrn** (KPI + grafy: vývoj incidentů, donut akcí, top uživatelé/stanice + sekce Databáze;
+  inline SVG, tisknutelné na **1–2 A4**) – oba dědí aktivní filtr.
 - **Stanice** – inventář z AD; dlaždice filtrují (vše / hlásí / **zmlklo agentů** / chybí agent),
   **hledání**, **cesta v AD** (OU) vedle hostname, **ikona komunikace** (zelená ≤ práh / žlutá zmlkl
   / šedá žádný kontakt; práh `comm.silentAfterMinutes` v Nastavení), tlačítko **Aktualizovat z AD**
-  a **„Vyžádat data"** (řádek/hromadně) – vynutí odevzdání dat při nejbližším heartbeatu.
+  a **„Vyžádat data"** (řádek/hromadně). Sloupec **„Nasazení"** + hromadné **„Vyřadit / Zařadit vše"** =
+  řízení auto-enrollmentu per stanice (výjimka proti výchozímu `deploy.defaultEnroll`).
 - **Whitelist** – schválená média; **stačí zadat sériové číslo** (VID/PID/název se dotáhnou
-  z incidentů, i zpětně), **hromadný import**, **editace polí** inline, **checkbox Aktivní**
-  (dočasná deaktivace bez mazání).
-- **Nastavení** (centrální, v DB) – **vynucování** (vyžadovat jen schválená média), **dohled
-  komunikace** (práh „zmlklého agenta"), **whitelist přístupu** do konzole (uživatelé/skupiny;
-  appsettings = lockout-safe bootstrap), **e-mail** (SMTP relay/Direct Send + test) a **alerty
-  nad incidenty** (interval), **auto-enrollment agenta** (master vypínač + dry-run + cíle),
+  z incidentů, i zpětně), **kapacita** (z incidentů), **hromadný import**, **editace polí** inline,
+  **checkbox Aktivní** (dočasná deaktivace bez mazání).
+- **Nastavení** (centrální, v DB) – **vynucování**, **dohled komunikace** (práh „zmlklého agenta"),
+  **whitelist přístupu** do konzole, **e-mail** + **alerty nad incidenty**, **auto-enrollment agenta**
+  (master + dry-run + **výchozí pro nové PC** + cíle), **retence dat** (kolik dní uchovat incidenty),
   AD sync / DB / build info.
-- **Dokumentace** – rozcestník + **tisknutelné HTML** stránky (render `.md` přes Markdig, žádné
-  externí odkazy).
+- **Databáze** – read-only přehled obsahu DB (počty v tabulkách, rozsah incidentů pro kontrolu retence,
+  výpis `AppSettings`, posledních 20 incidentů).
+- **Dokumentace** – rozcestník + **tisknutelné HTML** stránky (render `.md` přes Markdig) +
+  **interaktivní animace** „Jak to funguje" (`/how-it-works.html`).
 
 Patička (servisní řádek dle standardu): **živé hodiny + klikací commit hash + DB health + © Milan Trnka**.
 Kontrakt **`GET /api/version`**.
@@ -100,7 +111,9 @@ Všechny komponenty hlásí svůj git commit, takže operátor ověří, co pře
 - **API** – endpoint `:5050/api/version` (NOVĚ).
 - **Agent** – hlásí commit (heartbeat) → konzole ho zobrazí jako **„Agent verze"**.
 
-Commit se razítkuje při buildu přes MSBuild (`git rev-parse`).
+Commit se razítkuje při buildu přes MSBuild (`git rev-parse`) – **spolehlivě** (generovaný `GitCommit.g.cs`
+přepsaný jen při změně commitu vynutí recompile), takže footer/`/api/version` přesně odpovídá nasazenému gitu
+(= kontrola aktuálnosti řešení).
 
 **Autorizace:** Windows Auth, dovnitř jen členové `Authorization:AdminGroups` / účty
 `Authorization:AllowedUsers` (appsettings) **nebo** DB seznam z Nastavení. Pro tiché SSO chodit přes hostname, ne IP.
@@ -115,9 +128,10 @@ automaticky podle serveru (`new DirectoryEntry()`, nic natvrdo). Reconciliation:
 ## Lokální admin konzole agenta
 
 Volitelná (default vypnutá), `localConsole.enabled` v `agent.config.local.json`. `HttpListener`
-na `127.0.0.1`, **admin-only, read-only** – živý stav agenta (whitelist, WMI, fronta, připojená
-média) pro ověření funkčnosti a offline diagnostiku. Použit `HttpListener` (ne Kestrel), aby agent
-nepotřeboval ASP.NET Core runtime.
+na `127.0.0.1:5080`, **admin-only, read-only** – živý stav agenta: **seznam schválených zařízení (whitelist)**,
+stav+verze whitelistu, **verze agenta (commit)**, WMI watchdog, fronta, připojená média a poslední události.
+Pro ověření funkčnosti a offline diagnostiku. Použit `HttpListener` (ne Kestrel), aby agent
+nepotřeboval ASP.NET Core runtime. Heslo netřeba (loopback + Windows auth + jen lokální admin + read-only).
 
 ## Šifrovaná komunikace agent ↔ API (self-contained TLS)
 
@@ -137,14 +151,17 @@ Agent prod config: `whitelist.syncUrl = https://SERVER:5443` + `tls.pinnedThumbp
 
 Stanice bez agenta jsou vidět na **Stanicích** (dlaždice „Chybí agent"). Nasazení:
 
-- **Lokální instalace:** `scripts\Install-Agent.ps1 -SourcePath <publish>` (vytvoří službu „USB Guardian"
-  + recovery + watchdog, nasadí per-machine `agent.config.local.json`), `scripts\Uninstall-Agent.ps1`.
+- **Balíček klienta:** `scripts\Build-AgentPackage.ps1` složí kompletního klienta = self-contained agent +
+  `ToastHelper\` (notifikace v user session) + `tasks\` (definice scheduled tasků). Klient nepotřebuje .NET runtime.
+- **Lokální instalace:** `scripts\Install-Agent.ps1 -SourcePath <balíček>` (vytvoří službu „USB Guardian"
+  + recovery, nasadí per-machine `agent.config.local.json`), `scripts\Uninstall-Agent.ps1`.
 - **Hromadně:** `scripts\Deploy-AgentFleet.ps1 -TargetsFile … -SourcePath …` – paralelní rollout přes
-  `\\HOST\C$` + `sc.exe \\HOST create` + watchdog; přeskočí offline/už-nainstalované; audit CSV. (PS 5.1 i 7.)
-- **Auto-enrollment (konzole nasazuje sama):** `AgentDeployService` v konzoli po AD syncu najde stanice bez
-  agenta a (v ostrém režimu) zapíše seznam do `deploy.targetsFile`; instalaci provede **scheduled task na .213
-  pod dedikovaným gMSA** (least-privilege – jen ten účet má admin na klientech). **Default VYPNUTO + dry-run.**
-  Nastavení účtu: [docs/auto-deploy-setup.md](docs/auto-deploy-setup.md) (+ `scripts\New-DeployGmsa.ps1`).
+  `\\HOST\C$` + `sc.exe \\HOST create`; registruje **PS-free** scheduled tasky (watchdog à 3 min `sc start`
+  + **ToastHelper** logon/unlock přes `schtasks /XML`); přeskočí offline/už-nainstalované; audit CSV. (PS 5.1 i 7.)
+- **Auto-enrollment (konzole nasazuje sama):** `AgentDeployService` po AD syncu najde stanice bez agenta,
+  uplatní **výchozí `deploy.defaultEnroll` + výjimky** (`includeHosts`/`excludeHosts` spravované v Stanicích) a
+  (v ostrém režimu) zapíše cíle do `deploy.targetsFile`; instalaci provede **scheduled task na .213 pod dedikovaným
+  gMSA** (least-privilege). **Default VYPNUTO + dry-run.** Nastavení: [docs/auto-deploy-setup.md](docs/auto-deploy-setup.md).
 
 > **Prostředí AXIMA:** PS skripty co běží na strojích **musí být podepsané** (execution policy AllSigned přes GPO)
 > prod certem `CN=powershell.axinetwork.loc` a publisher musí být v `LocalMachine\TrustedPublisher`
@@ -188,7 +205,7 @@ SQL skripty v `database/` (spustit v pořadí):
 | `03_add_sourcefile.sql` | SourceFile + DisconnectedAt |
 | `04_adsync_columns.sql` | LastSeen nullable + OperatingSystem / InActiveDirectory / AdSyncedAt |
 | `05_adpath.sql` | AdPath (cesta v AD) |
-| `06_appsettings.sql` | AppSettings (centrální nastavení: vynucování, přístup, e-mail) + grant |
+| `06_appsettings.sql` | AppSettings (centrální nastavení: vynucování, přístup, e-mail, retence, deploy) + grant; `Value` = `NVARCHAR(MAX)` (dlouhé seznamy) |
 
 ## Rychlý start (vývoj)
 
@@ -251,18 +268,22 @@ usb-guardian/
 ├── agent/USBGuardian/        # .NET 8 Windows Service agent
 │   ├── LocalConsole/         # lokální admin konzole (HttpListener)
 │   ├── Config/ Models/ Security/
+│   ├── Security/ SessionUser.cs  # reálný uživatel přes WTS API
 ├── server/
 │   ├── USBGuardian.Api/      # ASP.NET Core API (příjem incidentů, whitelist)
+│   │   └── Retention/        # RetentionService (úklid starých incidentů)
 │   └── USBGuardian.Admin/    # Blazor Server admin konzole (.213)
-│       ├── Components/        # Pages (Home, Computers, Settings, Docs), Layout
+│       ├── Components/        # Pages (Home, Computers, Whitelist, Settings, Database, Docs), Layout
 │       ├── AdSync/            # AdSyncRunner + AdSyncService
 │       ├── Deploy/            # AgentDeployService (auto-enrollment orchestrátor)
+│       ├── Export/            # ExportEndpoints (CSV + manažerský report)
 │       ├── Notifications/     # IncidentAlertService + EmailSender
 │       └── appsettings.local.json.example
+├── tools/WhitelistSigner/    # offline RSA podpis whitelistu (generate/sign/verify)
 ├── database/                 # 01–06 SQL skripty
-├── scripts/                  # certifikáty, watchdog, ToastHelper, Install/Uninstall-Agent,
-│                             #   Deploy-AgentFleet, New-DeployGmsa
-├── docs/architecture.md, docs/auto-deploy-setup.md
+├── scripts/                  # certifikáty, Build-AgentPackage, watchdog, ToastHelper,
+│                             #   Install/Uninstall-Agent, Deploy-AgentFleet, New-DeployGmsa, tasks/
+├── docs/architecture.md, docs/auto-deploy-setup.md, docs/how-it-works.html (animace)
 ├── README.md / README.en.md
 └── HANDOFF.md / HANDOFF.en.md
 ```

@@ -25,9 +25,9 @@ The server console aggregates data, keeps a station inventory from AD and shows 
 | **Console account** | **LocalSystem** = `AXINETWORK\B-S-W-MIKOS$` (SQL grant: read all + write Computers/WhitelistDevices/WhitelistVersions/AppSettings) |
 | **Console authorization** | AD `AXINETWORK\SQL Admins2` + whitelist `AXINETWORK\trnkam` (+ DB list from Settings) |
 | **Agent↔API encryption** | HTTPS + **thumbprint pinning** (no CA) — verified end-to-end (heartbeat OK from .181) |
-| **AD sync** | enabled 60 min + on-demand; **211 in AD, ~210 without agent** |
-| **Live commit (console)** | `5940eb6` (footer / `/api/version`) · **API live `19e4018`** |
-| **Console – pages** | Overview (filter+aggregation+sortable "Detailed"), Stations (AD inventory + "Agents gone silent" tile + "Request data"), Whitelist, Settings (enforcement/access/email/alerts/communication monitoring/**auto-enrollment**), Documentation |
+| **AD sync** | enabled 60 min + on-demand; **213 in AD, ~212 without agent** |
+| **Live commit (console)** | **`4c031d4`** (footer / `/api/version`) · **API live `9801f2d`** (code unchanged since; staged `4c031d4`). Reliable stamp = footer = git HEAD |
+| **Console – pages** | Overview (filter+aggregation+sort, **capacity**, **CSV export + manager report with charts**), Stations (AD inventory + "Agents gone silent" + "Request data" + **Deployment column / bulk exclude-include**), Whitelist (**+capacity**), Settings (enforcement/access/email/alerts/monitoring/**auto-enrollment + default for new PCs**/**retention**), **Database** (DB content overview), Documentation (**+HTML animation**) |
 | **Deploy account (auto-enroll)** | **gMSA `AXINETWORK\gmsa-USBGdep$`** – in `PC Admins` (admin on clients) **and local admin on SQL-04** (API deploy); installed on `.213`; deploy task `USBGuardian-AutoDeploy` (under gMSA, via CIM) |
 | **Agent (test) .181** | **PILOT SUCCESSFUL** – `.181` = **TRNKAMW11** (own workstation); service "USB Guardian" RUNNING, heartbeat + **incidents flowing into DB**. Agent live **`428a262`** – **user attribution LIVE** (`AXINETWORK\trnkam`). **Client 100%:** watchdog + ToastHelper task (see 5.3). Updating the agent there needs elevation (UAC) → run by the user |
 

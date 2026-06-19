@@ -25,9 +25,9 @@ Serverová konzole agreguje data, drží inventář stanic z AD a ukazuje, kam c
 | **Účet konzole** | **LocalSystem** = `AXINETWORK\B-S-W-MIKOS$` (SQL grant: read vše + write Computers/WhitelistDevices/WhitelistVersions/AppSettings) |
 | **Autorizace konzole** | AD `AXINETWORK\SQL Admins2` + whitelist `AXINETWORK\trnkam` (+ DB seznam z Nastavení) |
 | **Šifrování agent↔API** | HTTPS + **pinning otisku** (bez CA) — ověřeno end-to-end (heartbeat OK z .181) |
-| **AD sync** | zapnutý 60 min + on-demand; **211 v AD, ~210 bez agenta** |
-| **Live commit (konzole)** | `5940eb6` (patička / `/api/version`) · **API live `19e4018`** |
-| **Konzole – stránky** | Přehled (filtr+kumulace+řazení Detailně), Stanice (AD inventář + dlaždice „Zmlklo agentů" + „Vyžádat data"), Whitelist, Nastavení (vynucování/přístup/email/alerty/dohled komunikace/**auto-enrollment**), Dokumentace |
+| **AD sync** | zapnutý 60 min + on-demand; **213 v AD, ~212 bez agenta** |
+| **Live commit (konzole)** | **`4c031d4`** (patička / `/api/version`) · **API live `9801f2d`** (kód beze změny od té doby; stage `4c031d4`). Stamp spolehlivý = footer = git HEAD |
+| **Konzole – stránky** | Přehled (filtr+kumulace+řazení, **kapacita**, **export CSV + manažerský report s grafy**), Stanice (AD inventář + „Zmlklo agentů" + „Vyžádat data" + **sloupec Nasazení / hromadné vyřadit-zařadit**), Whitelist (**+kapacita**), Nastavení (vynucování/přístup/email/alerty/dohled/**auto-enrollment + default nového PC**/**retence**), **Databáze** (přehled obsahu DB), Dokumentace (**+HTML animace**) |
 | **Deploy účet (auto-enroll)** | **gMSA `AXINETWORK\gmsa-USBGdep$`** – v `PC Admins` (admin na klientech) **i lokální admin na SQL-04** (deploy API); nainstalován na `.213`; deploy task `USBGuardian-AutoDeploy` (pod gMSA, přes CIM) |
 | **Agent (test) .181** | **PILOT ÚSPĚŠNÝ** – `.181` = **TRNKAMW11** (vlastní workstation); služba „USB Guardian" RUNNING, heartbeat + **incidenty tečou do DB**. Agent live **`428a262`** – **atribuce uživatele ŽIVÁ** (`AXINETWORK\trnkam`). **Klient 100%:** watchdog + ToastHelper task (viz 5.3). Update agenta tam chce elevaci (UAC) → spustí uživatel |
 

@@ -26,9 +26,16 @@ Unapproved media are warned or blocked. Designed as a technical control for
 | 16 | **Startup scan** of already-connected media; whitelist poll 2 min; central `onExpired`/`enforce` | ✅ |
 | 17 | **Agent auto-enrollment** – the console deploys the agent itself onto stations without it (gMSA + scheduled task, dry-run/opt-in); **PILOT SUCCESSFUL on .181 (no creds, via gMSA)** | ✅ pilot OK |
 | 18 | **DB/incidents flowing** (agent→API→DB→console) | ✅ |
-| 19 | **Version/commit on all components** (`/api/version`, agent reports commit) | ✅ |
+| 19 | **Version/commit on all components** (`/api/version`, agent reports commit; **reliable stamp** = footer/`/api/version` = git HEAD) | ✅ |
+| 20 | **User attribution** – the real logged-in user via the **WTS API** (agent=SYSTEM → not the machine account); verified live | ✅ |
+| 21 | **Complete client** – ToastHelper (notifications, logon+unlock) + **PS-free watchdog**, all in `Build-AgentPackage`; verified on .181 | ✅ |
+| 22 | **Media capacity** in Overview and Whitelist; **CSV export** + **manager report** with charts (inline SVG, 1–2 A4) | ✅ |
+| 23 | **Data retention** – Settings (console) + `RetentionService` in the API (purges old incidents); **Database page** (DB content overview) | ✅ |
+| 24 | **Deploy targeting** – default for new PCs (Settings) + per-station and bulk include/exclude in Stations | ✅ |
+| 25 | **Agent local console** also shows the list of approved devices (whitelist) + agent version | ✅ |
+| 26 | **HTML animation** of how the system works (`/how-it-works.html`, 10 steps of the data flow) | ✅ |
 | – | Close unencrypted HTTP 5050 (HTTPS only) | 🔜 NIS2 |
-| – | **Signing/publishing workflow** for the whitelist → enforcement + blocklist live to agents | 🔜 |
+| – | **Signing/publishing workflow** for the whitelist → client a 1:1 copy of the server → enforcement + blocklist live + break-glass override | 🔜 next big step |
 | – | Per-serial **blocklist** + blocking of an already-connected device | 🔜 |
 | – | Signing certificate expiry monitoring | 🔜 |
 
@@ -72,21 +79,27 @@ dark/light toggle `axima.theme` without FOUC, print = light, status traffic-ligh
 - **Overview** – cross-page tile summary (Stations in AD / Missing agent / Approved media /
   Deactivated / Incidents / Blocked / Warned, click-through to lists). **Filter** (period
   30/90/year/all, action, full-text) + **aggregation** (group by media+station+user with count) +
-  device identifiers **VID/PID/serial** + **"Approved"** column (currently per whitelist).
-  The **"Detailed" table has sortable headers** (sorting in the DB via query string).
+  device identifiers **VID/PID/serial** + **media capacity** + **"Approved"** column (currently per whitelist).
+  The **"Detailed" table has sortable headers**. **Export:** `⬇ CSV` (Excel) and `📊 Report` =
+  **manager summary** (KPIs + charts: incident trend, action donut, top users/stations + Database section;
+  inline SVG, printable on **1–2 A4**) – both inherit the active filter.
 - **Stations** – inventory from AD; tiles filter (all / reporting / **silent agents** / missing agent),
   **search**, **AD path** (OU) next to hostname, **communication icon** (green ≤ threshold / amber silent /
   grey no contact; threshold `comm.silentAfterMinutes` in Settings), **Refresh from AD** button
-  and **"Request data"** (per row / bulk) – forces data submission at the next heartbeat.
+  and **"Request data"** (per row / bulk). A **"Deployment"** column + bulk **"Exclude / Include all"** =
+  per-station auto-enrollment control (an exception to the default `deploy.defaultEnroll`).
 - **Whitelist** – approved media; **enter just the serial number** (VID/PID/name autofill from
-  incidents, retroactively too), **bulk import**, **inline field edit**, **Active checkbox**
-  (temporary deactivation without deletion).
+  incidents, retroactively too), **capacity** (from incidents), **bulk import**, **inline field edit**,
+  **Active checkbox** (temporary deactivation without deletion).
 - **Settings** (central, in DB) – **enforcement** (require only approved media), **communication
   oversight** ("silent agent" threshold), **console access whitelist** (users/groups; appsettings
   = lockout-safe bootstrap), **e-mail** (SMTP relay/Direct Send + test) and **incident alerts**
-  (interval), **agent auto-enrollment** (master switch + dry-run + targets),
-  AD sync / DB / build info.
-- **Documentation** – hub + **printable HTML** pages (render `.md` via Markdig, no external links).
+  (interval), **agent auto-enrollment** (master switch + dry-run + **default for new PCs** + targets),
+  **data retention** (how many days to keep incidents), AD sync / DB / build info.
+- **Database** – read-only overview of the DB content (table row counts, incident date range for checking
+  retention, `AppSettings` dump, the last 20 incidents).
+- **Documentation** – hub + **printable HTML** pages (render `.md` via Markdig) +
+  **interactive animation** "How it works" (`/how-it-works.html`).
 
 Footer (service line per standard): **live clock + clickable commit hash + DB health + © Milan Trnka**.
 Contract **`GET /api/version`**.
@@ -99,7 +112,9 @@ Every component reports its git commit so the operator can verify exactly what i
 - **API** – endpoint `:5050/api/version` (NEW).
 - **Agent** – reports the commit (heartbeat) → the console shows it as **"Agent version"**.
 
-The commit is stamped at build time via MSBuild (`git rev-parse`).
+The commit is stamped at build time via MSBuild (`git rev-parse`) – **reliably** (the generated `GitCommit.g.cs`,
+rewritten only when the commit changes, forces a recompile), so the footer/`/api/version` exactly matches the deployed git
+(= a currency check for the solution).
 
 **Authorization:** Windows Auth; access only for members of `Authorization:AdminGroups` / accounts
 `Authorization:AllowedUsers` (appsettings) **or** the DB list from Settings. For silent SSO use the hostname, not the IP.
@@ -114,9 +129,10 @@ automatically from the server (`new DirectoryEntry()`, nothing hardcoded). Recon
 ## Agent local admin console
 
 Optional (off by default), `localConsole.enabled` in `agent.config.local.json`. `HttpListener`
-on `127.0.0.1`, **admin-only, read-only** – live agent state (whitelist, WMI, queue, connected
-media) for functional verification and offline diagnostics. Uses `HttpListener` (not Kestrel) so the
-agent needs no ASP.NET Core runtime.
+on `127.0.0.1:5080`, **admin-only, read-only** – live agent state: **the list of approved devices (whitelist)**,
+whitelist status+version, **agent version (commit)**, WMI watchdog, queue, connected media and recent events.
+For functional verification and offline diagnostics. Uses `HttpListener` (not Kestrel) so the
+agent needs no ASP.NET Core runtime. No password needed (loopback + Windows auth + local admin only + read-only).
 
 ## Encrypted agent ↔ API comms (self-contained TLS)
 
@@ -136,14 +152,17 @@ Agent prod config: `whitelist.syncUrl = https://SERVER:5443` + `tls.pinnedThumbp
 
 Stations without an agent are visible under **Stations** (the "Missing agent" tile). Deployment:
 
-- **Local install:** `scripts\Install-Agent.ps1 -SourcePath <publish>` (creates the "USB Guardian" service
-  + recovery + watchdog, deploys the per-machine `agent.config.local.json`), `scripts\Uninstall-Agent.ps1`.
+- **Client package:** `scripts\Build-AgentPackage.ps1` assembles the complete client = self-contained agent +
+  `ToastHelper\` (notifications in the user session) + `tasks\` (scheduled task definitions). The client needs no .NET runtime.
+- **Local install:** `scripts\Install-Agent.ps1 -SourcePath <package>` (creates the "USB Guardian" service
+  + recovery, deploys the per-machine `agent.config.local.json`), `scripts\Uninstall-Agent.ps1`.
 - **Bulk:** `scripts\Deploy-AgentFleet.ps1 -TargetsFile … -SourcePath …` – parallel rollout via
-  `\\HOST\C$` + `sc.exe \\HOST create` + watchdog; skips offline/already-installed; audit CSV. (PS 5.1 and 7.)
-- **Auto-enrollment (the console deploys on its own):** `AgentDeployService` in the console, after AD sync, finds
-  stations without an agent and (in live mode) writes the list into `deploy.targetsFile`; the install is performed by a
-  **scheduled task on .213 under a dedicated gMSA** (least-privilege – only that account has admin on the clients).
-  **Default OFF + dry-run.** Account setup: [docs/auto-deploy-setup.md](docs/auto-deploy-setup.md) (+ `scripts\New-DeployGmsa.ps1`).
+  `\\HOST\C$` + `sc.exe \\HOST create`; registers **PS-free** scheduled tasks (watchdog every 3 min `sc start`
+  + **ToastHelper** logon/unlock via `schtasks /XML`); skips offline/already-installed; audit CSV. (PS 5.1 and 7.)
+- **Auto-enrollment (the console deploys on its own):** `AgentDeployService`, after AD sync, finds stations without an agent,
+  applies the **default `deploy.defaultEnroll` + exceptions** (`includeHosts`/`excludeHosts` managed in Stations) and
+  (in live mode) writes the targets into `deploy.targetsFile`; the install is performed by a **scheduled task on .213 under a
+  dedicated gMSA** (least-privilege). **Default OFF + dry-run.** Account setup: [docs/auto-deploy-setup.md](docs/auto-deploy-setup.md).
 
 > **AXIMA environment:** PS scripts running on machines **must be signed** (execution policy AllSigned via GPO)
 > with the prod cert `CN=powershell.axinetwork.loc`, and the publisher must be in `LocalMachine\TrustedPublisher`
@@ -187,7 +206,7 @@ SQL scripts in `database/` (run in order):
 | `03_add_sourcefile.sql` | SourceFile + DisconnectedAt |
 | `04_adsync_columns.sql` | LastSeen nullable + OperatingSystem / InActiveDirectory / AdSyncedAt |
 | `05_adpath.sql` | AdPath (AD path) |
-| `06_appsettings.sql` | AppSettings (central settings: enforcement, access, e-mail) + grant |
+| `06_appsettings.sql` | AppSettings (central settings: enforcement, access, e-mail, retention, deploy) + grant; `Value` = `NVARCHAR(MAX)` (long lists) |
 
 ## Quick start (development)
 
@@ -250,18 +269,22 @@ usb-guardian/
 ├── agent/USBGuardian/        # .NET 8 Windows Service agent
 │   ├── LocalConsole/         # local admin console (HttpListener)
 │   ├── Config/ Models/ Security/
+│   ├── Security/ SessionUser.cs  # real user via the WTS API
 ├── server/
 │   ├── USBGuardian.Api/      # ASP.NET Core API (incident ingestion, whitelist)
+│   │   └── Retention/        # RetentionService (cleanup of old incidents)
 │   └── USBGuardian.Admin/    # Blazor Server admin console (.213)
-│       ├── Components/        # Pages (Home, Computers, Settings, Docs), Layout
+│       ├── Components/        # Pages (Home, Computers, Whitelist, Settings, Database, Docs), Layout
 │       ├── AdSync/            # AdSyncRunner + AdSyncService
 │       ├── Deploy/            # AgentDeployService (auto-enrollment orchestrator)
+│       ├── Export/            # ExportEndpoints (CSV + manager report)
 │       ├── Notifications/     # IncidentAlertService + EmailSender
 │       └── appsettings.local.json.example
+├── tools/WhitelistSigner/    # offline RSA whitelist signing (generate/sign/verify)
 ├── database/                 # 01–06 SQL scripts
-├── scripts/                  # certificates, watchdog, ToastHelper, Install/Uninstall-Agent,
-│                             #   Deploy-AgentFleet, New-DeployGmsa
-├── docs/architecture.md, docs/auto-deploy-setup.md
+├── scripts/                  # certificates, Build-AgentPackage, watchdog, ToastHelper,
+│                             #   Install/Uninstall-Agent, Deploy-AgentFleet, New-DeployGmsa, tasks/
+├── docs/architecture.md, docs/auto-deploy-setup.md, docs/how-it-works.html (animation)
 ├── README.md / README.en.md
 └── HANDOFF.md / HANDOFF.en.md
 ```
