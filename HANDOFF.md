@@ -18,7 +18,7 @@ Serverová konzole agreguje data, drží inventář stanic z AD a ukazuje, kam c
 | | |
 |---|---|
 | **Doména** | `axinetwork.loc` |
-| **DB** | SQL Server `B-S-W-SQL-04` (= `10.8.2.225`), databáze `USBGuardian`, skripty `database/01–06` aplikované |
+| **DB** | SQL Server `B-S-W-SQL-04` (= `10.8.2.225`), databáze `USBGuardian`, skripty `database/01–07` aplikované; **+ `GRANT DELETE ON dbo.WhitelistDevices` účtu konzole** (mazání z katalogu – aplikováno ručně) |
 | **API** | `B-S-W-SQL-04`, Windows služba „USB Guardian API", install `C:\USBGuardian.Api`, gMSA `AXINETWORK\gmsa-SQL$`; **HTTPS `:5443`** (self-signed, **PIN `E6F6B4FCE0BB627F564E85D6509DE7C4B82CF2F0`**) + HTTP `:5050`. **Živá verze přes `GET /api/version`** |
 | **Verze/commit (kontrola)** | konzole patička + `:4200/api/version`; API `:5050/api/version`; agent hlásí commit → konzole „Agent verze". Vše stampuje `git rev-parse` (MSBuild) |
 | **Admin konzole** | **živá** `http://10.8.2.213:4200/` (`B-S-W-MIKOS`), služba `USBGuardianConsole`, `C:\Apps\USBGuardianConsole`, self-contained |
@@ -26,7 +26,7 @@ Serverová konzole agreguje data, drží inventář stanic z AD a ukazuje, kam c
 | **Autorizace konzole** | AD `AXINETWORK\SQL Admins2` + whitelist `AXINETWORK\trnkam` (+ DB seznam z Nastavení) |
 | **Šifrování agent↔API** | HTTPS + **pinning otisku** (bez CA) — ověřeno end-to-end (heartbeat OK z .181) |
 | **AD sync** | zapnutý 60 min + on-demand; **213 v AD, ~212 bez agenta** |
-| **Live commit (konzole)** | **`aa8376a`** (patička / `/api/version`) · **API live `6f48153`** (heartbeat nese `Enforce`; stage `aa8376a`) · **agent `f2bb194`** (po redeployi .181 19.6. 13:18 – spolehlivý unblock + re-blokace připojených; ověřeno z Event Logu). Stamp spolehlivý = footer = git HEAD |
+| **Live commit** | **konzole `fa127ea`** (patička / `/api/version`; staged `cbc7a0a` = rozbalená chybová hláška – čeká na redeploy .213) · **API live `6f48153`** · **agent `f2bb194`** na .181 (spolehlivý unblock + re-blokace připojených – ověřeno z Event Logu; **staged `8b2dcaa`** = invalidace whitelist cache – čeká na redeploy agenta). Repo HEAD = `8b2dcaa`/`cbc7a0a`. Stamp spolehlivý = footer = git HEAD |
 | **Konzole – stránky** | Přehled (filtr+kumulace+řazení, kapacita, **export CSV + manažerský report s grafy**), Stanice (AD inventář + „Zmlklo agentů" + „Vyžádat data" + **Nasazení / hromadné vyřadit-zařadit**), Whitelist (**kapacita + filtr katalogu + auto-publish podepsané verze**), Nastavení (vynucování/přístup/email/alerty/dohled/auto-enrollment+default PC/retence/**Údržba: reload nastavení**), **Databáze**, Dokumentace (+HTML animace) |
 | **Enforcement (F1-3)** | **whitelist 1:1** (auto-podpis serverem, interní RSA klíč na .213) → **vynucování** server→agent (`policy.enforce` v heartbeatu) → **break-glass** (lokální konzole 5080, offline, logováno, zruší se při sync) + **auto-re-enable** + reconciliace s whitelistem. Lokální konzole: restart služby, break-glass, seznam whitelistu |
 | **Deploy účet (auto-enroll)** | **gMSA `AXINETWORK\gmsa-USBGdep$`** – v `PC Admins` (admin na klientech) **i lokální admin na SQL-04** (deploy API); nainstalován na `.213`; deploy task `USBGuardian-AutoDeploy` (pod gMSA, přes CIM) |

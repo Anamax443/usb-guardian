@@ -33,12 +33,13 @@ Unapproved media are warned or blocked. Designed as a technical control for
 | 23 | **Data retention** – Settings (console) + `RetentionService` in the API (purges old incidents); **Database page** (DB content overview) | ✅ |
 | 24 | **Deploy targeting** – default for new PCs (Settings) + per-station and bulk include/exclude in Stations | ✅ |
 | 25 | **Agent local console** also shows the list of approved devices (whitelist) + agent version | ✅ |
-| 26 | **HTML animation** of how the system works (`/how-it-works.html`, 10 steps of the data flow) | ✅ |
+| 26 | **HTML animation** of how the system works (`/how-it-works.html`, 13 steps: data flow + enforcement) | ✅ |
 | 27 | **Whitelist signing/publishing workflow (automatic)** – catalog change → console publishes and **signs internally** (server-side RSA, key on .213) → API serves the signed blob verbatim → **client = a 1:1 copy of the server** within ~2 min; agent O(1) match (scales to 10k) | ✅ |
 | 28 | **Enforcement server→agent (Phase 2)** – heartbeat carries `policy.enforce` (.213 = truth) → agent really **blocks/warns** per the server | ✅ |
 | 29 | **Local break-glass (Phase 3)** – station admin temporarily disables blocking offline (local console), persisted, **logged** → server; cleared on reconnect | ✅ |
 | 30 | **Auto-re-enable + reconciliation** – on blocking off / break-glass the agent restores previously blocked media; a now-approved medium is restored even while blocking is on | ✅ |
 | 31 | **Client service restart** (local console, agent self-restart) + **settings reload** (server console, AccessCache) | ✅ |
+| 32 | **Reliable enforcement (symmetry)** – disable blocking = return **everything at once** (exact `Enable-PnpDevice`, unplugged-media cleanup); re-enable = re-block **already-connected** unauthorized media; a newly approved medium applies **immediately after download** (whitelist cache invalidation); ✕ delete from catalog (DELETE grant); console error message unwrapped | ✅ |
 | – | Close unencrypted HTTP 5050 (HTTPS only) | 🔜 NIS2 |
 | – | Per-serial **blocklist** + blocking of an already-connected device | 🔜 |
 | – | Signing certificate expiry monitoring | 🔜 |
@@ -253,8 +254,8 @@ USE USBGuardian;
 CREATE USER [DOMENA\B-S-W-MIKOS$] FOR LOGIN [DOMENA\B-S-W-MIKOS$];
 ALTER ROLE db_datareader ADD MEMBER [DOMENA\B-S-W-MIKOS$];
 GRANT INSERT, UPDATE, DELETE ON dbo.Computers TO [DOMENA\B-S-W-MIKOS$];
-GRANT INSERT, UPDATE ON dbo.WhitelistDevices TO [DOMENA\B-S-W-MIKOS$];
-GRANT INSERT, UPDATE ON dbo.WhitelistVersions TO [DOMENA\B-S-W-MIKOS$];
+GRANT INSERT, UPDATE, DELETE ON dbo.WhitelistDevices TO [DOMENA\B-S-W-MIKOS$];  -- DELETE = remove from catalog (✕)
+GRANT INSERT, UPDATE ON dbo.WhitelistVersions TO [DOMENA\B-S-W-MIKOS$];          -- no DELETE (versions = append-only audit)
 ```
 
 ## Security
@@ -286,7 +287,7 @@ usb-guardian/
 │       ├── Notifications/     # IncidentAlertService + EmailSender
 │       └── appsettings.local.json.example
 ├── tools/WhitelistSigner/    # offline RSA whitelist signing (generate/sign/verify)
-├── database/                 # 01–06 SQL scripts
+├── database/                 # 01–07 SQL scripts
 ├── scripts/                  # certificates, Build-AgentPackage, watchdog, ToastHelper,
 │                             #   Install/Uninstall-Agent, Deploy-AgentFleet, New-DeployGmsa, tasks/
 ├── docs/architecture.md, docs/auto-deploy-setup.md, docs/how-it-works.html (animation)

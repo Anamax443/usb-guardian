@@ -101,7 +101,7 @@
   </div>
 
   <div class="side">
-    <div class="step-no" id="stepNo">KROK 1 / 10</div>
+    <div class="step-no" id="stepNo">KROK 1 / 13</div>
     <div class="step-title" id="stepTitle">—</div>
     <div class="step-body" id="stepBody">—</div>
     <div class="chips" id="chips"></div>
@@ -141,7 +141,9 @@
     { t:"Vynucování server→agent", nodes:["n_con","n_api","n_sync","n_pol"], edge:["n_api","n_sync"], color:"bad", cls:{n_pol:"bad"},
       b:'Centrální politika <code>policy.enforce</code> (.213 = zdroj pravdy) jde k agentovi v <b>heartbeatu</b>. Když je zapnuté vynucování, agent neschválené médium <b>reálně zablokuje</b> (Disable-PnpDevice). Schválené médium se mezitím samo vrátí (reconciliace s whitelistem).' },
     { t:"Break-glass (offline) + watchdog", nodes:["n_pol","n_wd"], edge:["n_pol","n_wd"], color:"warn", cls:{n_pol:"warn"},
-      b:'Lokální <b>admin</b> stanice může v lokální konzoli (127.0.0.1:5080) <b>dočasně vypnout blokování</b> pro práci mimo síť — <b>logováno</b> + nahlášeno na .213, při příštím spojení se serverem se <b>zruší</b> (server = pravda). Službu hlídá <b>Watchdog</b> (à 3 min), lze ji i restartovat z lokální konzole.' },
+      b:'Lokální <b>admin</b> stanice může v lokální konzoli (127.0.0.1:5080) <b>dočasně vypnout blokování</b> pro práci mimo síť — <b>vrátí všechna zablokovaná média hned</b>, <b>logováno</b> + nahlášeno na .213, při příštím spojení se serverem se <b>zruší</b> (server = pravda). Službu hlídá <b>Watchdog</b> (à 3 min), lze ji i restartovat z lokální konzole.' },
+    { t:"Vrácení a re-blokace médií", nodes:["n_pol","n_block","n_wl"], edge:["n_pol","n_block"], color:"ok", cls:{n_block:"ok"},
+      b:'Symetrie vynucování: <b>vypnutí blokování</b> (break-glass/server) vrátí <b>všechna</b> média, která agent zakázal, <b>okamžitě</b> (přesný <code>Enable-PnpDevice -InstanceId</code>; odpojené médium se uklidí ze seznamu). <b>Zapnutí zpět</b> znovu zablokuje už připojená neschválená média. Médium <b>mezitím schválené na whitelistu</b> se vrátí i při zapnutém blokování — po stažení nové verze se zahodí 5min cache, takže platí <b>ihned</b>.' },
   ];
   var COLORS = { brand:'#3b82f6', tls:'#22d3ee', rsa:'#a855f7', ok:'#22c55e', warn:'#f59e0b', bad:'#ef4444' };
 

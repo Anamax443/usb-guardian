@@ -18,7 +18,7 @@ The server console aggregates data, keeps a station inventory from AD and shows 
 | | |
 |---|---|
 | **Domain** | `axinetwork.loc` |
-| **DB** | SQL Server `B-S-W-SQL-04` (= `10.8.2.225`), database `USBGuardian`, scripts `database/01–06` applied |
+| **DB** | SQL Server `B-S-W-SQL-04` (= `10.8.2.225`), database `USBGuardian`, scripts `database/01–07` applied; **+ `GRANT DELETE ON dbo.WhitelistDevices` to the console account** (catalog deletion – applied manually) |
 | **API** | `B-S-W-SQL-04`, Windows service "USB Guardian API", install `C:\USBGuardian.Api`, gMSA `AXINETWORK\gmsa-SQL$`; **HTTPS `:5443`** (self-signed, **PIN `E6F6B4FCE0BB627F564E85D6509DE7C4B82CF2F0`**) + HTTP `:5050`. **Live version via `GET /api/version`** |
 | **Version/commit (check)** | console footer + `:4200/api/version`; API `:5050/api/version`; agent reports commit → console "Agent version". All stamped by `git rev-parse` (MSBuild) |
 | **Admin console** | **live** `http://10.8.2.213:4200/` (`B-S-W-MIKOS`), service `USBGuardianConsole`, `C:\Apps\USBGuardianConsole`, self-contained |
@@ -26,7 +26,7 @@ The server console aggregates data, keeps a station inventory from AD and shows 
 | **Console authorization** | AD `AXINETWORK\SQL Admins2` + whitelist `AXINETWORK\trnkam` (+ DB list from Settings) |
 | **Agent↔API encryption** | HTTPS + **thumbprint pinning** (no CA) — verified end-to-end (heartbeat OK from .181) |
 | **AD sync** | enabled 60 min + on-demand; **213 in AD, ~212 without agent** |
-| **Live commit (console)** | **`aa8376a`** (footer / `/api/version`) · **API live `6f48153`** (heartbeat carries `Enforce`; staged `aa8376a`) · **agent `f2bb194`** (after .181 redeploy 19 Jun 13:18 – reliable unblock + re-block of connected media; verified from Event Log). Reliable stamp = footer = git HEAD |
+| **Live commit** | **console `fa127ea`** (footer / `/api/version`; staged `cbc7a0a` = unwrapped error message – pending .213 redeploy) · **API live `6f48153`** · **agent `f2bb194`** on .181 (reliable unblock + re-block of connected media – verified from Event Log; **staged `8b2dcaa`** = whitelist cache invalidation – pending agent redeploy). Repo HEAD = `8b2dcaa`/`cbc7a0a`. Reliable stamp = footer = git HEAD |
 | **Console – pages** | Overview (filter+aggregation+sort, capacity, **CSV export + manager report with charts**), Stations (AD inventory + "Agents gone silent" + "Request data" + **Deployment / bulk exclude-include**), Whitelist (**capacity + catalog filter + auto-published signed version**), Settings (enforcement/access/email/alerts/monitoring/auto-enrollment+default PC/retention/**Maintenance: reload settings**), **Database**, Documentation (+HTML animation) |
 | **Enforcement (P1-3)** | **whitelist 1:1** (server-side auto-sign, internal RSA key on .213) → **enforcement** server→agent (`policy.enforce` in heartbeat) → **break-glass** (local console 5080, offline, logged, cleared on sync) + **auto-re-enable** + whitelist reconciliation. Local console: service restart, break-glass, whitelist list |
 | **Deploy account (auto-enroll)** | **gMSA `AXINETWORK\gmsa-USBGdep$`** – in `PC Admins` (admin on clients) **and local admin on SQL-04** (API deploy); installed on `.213`; deploy task `USBGuardian-AutoDeploy` (under gMSA, via CIM) |
