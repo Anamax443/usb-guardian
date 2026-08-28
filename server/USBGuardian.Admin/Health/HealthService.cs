@@ -72,22 +72,40 @@ public sealed class HealthService
         _config = config;
     }
 
-    public async Task<HealthReport> RunAsync(CancellationToken ct = default)
+    /// <summary>
+    /// Kolik kontrol běh provede. Drží se u samotného výčtu v <see cref="RunAsync"/>,
+    /// aby ukazatel průběhu neukazoval jiné číslo, než co se doopravdy počítá.
+    /// </summary>
+    public const int TotalChecks = 15;
+
+    /// <param name="progress">
+    /// Hlásí každou dokončenou kontrolu hned, jak je hotová. Stránka díky tomu
+    /// ukazuje průběh, místo aby několik vteřin mlčela — dotaz na API má timeout
+    /// až 8 s a bez zpětné vazby to vypadá, že se nic neděje.
+    /// </param>
+    public async Task<HealthReport> RunAsync(IProgress<HealthCheck>? progress = null,
+                                             CancellationToken ct = default)
     {
         var sw = Stopwatch.StartNew();
         var checks = new List<HealthCheck>();
+
+        void Done(HealthCheck c)
+        {
+            checks.Add(c);
+            progress?.Report(c);
+        }
 
         AppDbContext? db = null;
         try
         {
             db = await _dbFactory.CreateDbContextAsync(ct);
-            checks.Add(await CheckDatabaseAsync(db, ct));
+            Done(await CheckDatabaseAsync(db, ct));
         }
         catch (Exception ex)
         {
             db?.Dispose();
             db = null;
-            checks.Add(new HealthCheck
+            Done(new HealthCheck
             {
                 Group = "Sběr dat",
                 Name = "Databáze",
@@ -105,22 +123,22 @@ public sealed class HealthService
             {
                 var cfg = await HealthConfig.LoadAsync(db, ct);
 
-                checks.Add(await CheckApiAsync(cfg, ct));
-                checks.Add(await CheckIncidentFlowAsync(db, cfg, ct));
-                checks.Add(await CheckAgentsSilentAsync(db, cfg, ct));
-                checks.Add(await CheckCoverageAsync(db, ct));
+                Done(await CheckApiAsync(cfg, ct));
+                Done(await CheckIncidentFlowAsync(db, cfg, ct));
+                Done(await CheckAgentsSilentAsync(db, cfg, ct));
+                Done(await CheckCoverageAsync(db, ct));
 
-                checks.Add(await CheckWhitelistVersionAsync(db, ct));
-                checks.Add(await CheckWhitelistCatalogFreshAsync(db, ct));
-                checks.Add(CheckSigningKey());
-                checks.Add(await CheckEnforceAsync(db, ct));
+                Done(await CheckWhitelistVersionAsync(db, ct));
+                Done(await CheckWhitelistCatalogFreshAsync(db, ct));
+                Done(CheckSigningKey());
+                Done(await CheckEnforceAsync(db, ct));
 
-                checks.Add(await CheckEmailAsync(db, ct));
-                checks.Add(await CheckRetentionAsync(db, ct));
-                checks.Add(CheckAdSync());
-                checks.Add(await CheckAutoDeployAsync(db, ct));
-                checks.Add(await CheckServiceRestartAsync(db, ct));
-                checks.Add(await CheckVersionsAsync(db, cfg, ct));
+                Done(await CheckEmailAsync(db, ct));
+                Done(await CheckRetentionAsync(db, ct));
+                Done(CheckAdSync());
+                Done(await CheckAutoDeployAsync(db, ct));
+                Done(await CheckServiceRestartAsync(db, ct));
+                Done(await CheckVersionsAsync(db, cfg, ct));
             }
         }
 

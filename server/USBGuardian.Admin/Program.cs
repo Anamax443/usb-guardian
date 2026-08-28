@@ -148,7 +148,7 @@ app.MapGet("/api/version", () => Results.Json(new
 // (kontrakt, na který umí reagovat externí dohled).
 app.MapGet("/api/health", async (USBGuardian.Admin.Health.HealthService health, CancellationToken ct) =>
 {
-    var report = await health.RunAsync(ct);
+    var report = await health.RunAsync(progress: null, ct);
     var payload = new
     {
         state = report.Overall.ToString().ToLowerInvariant(),

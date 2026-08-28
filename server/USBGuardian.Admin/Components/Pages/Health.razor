@@ -9,11 +9,21 @@
 a že nastavené mechanismy (whitelist, vynucování, alerty, údržba) nejsou tiše vypnuté.
 Každá kontrola říká, <em>co naměřila</em>, <em>proč na tom záleží</em> a <em>co s tím</em>.</p>
 
-@if (_report is null)
+@* Průběh musí být vidět: dotaz na API má timeout až 8 s a bez tohohle pruhu
+   stránka celou dobu mlčí a vypadá, že se nic neděje. Hotové kontroly se
+   přitom vypisují hned, jak doběhnou — ne až na konci. *@
+@if (_running)
 {
-    <p class="muted">Kontroluji…</p>
+    <div class="banner running">
+        <span class="spinner"></span>
+        <strong>Kontroluji…</strong>
+        hotovo @_live.Count z @HealthService.TotalChecks
+        @if (_lastDone is not null) { <span class="muted"> · naposledy: @_lastDone</span> }
+        <div class="progress"><span style="width:@Percent()%"></span></div>
+    </div>
 }
-else
+
+@if (_report is not null && !_running)
 {
     <div class="cards">
         <div class="card @(_report.Bad > 0 ? "bad" : "")"><div class="num">@_report.Bad</div><div class="lbl">Chyby</div></div>
@@ -21,66 +31,99 @@ else
         <div class="card"><div class="num">@_report.Ok</div><div class="lbl">V pořádku</div></div>
         <div class="card"><div class="num">@_report.Off</div><div class="lbl">Vypnuto / čeká</div></div>
     </div>
+}
 
-    <div class="toolbar">
-        <button class="btn" @onclick="Run" disabled="@_busy" title="Spustit všechny kontroly znovu">↻ Zkontrolovat znovu</button>
+<div class="toolbar">
+    <button class="btn" @onclick="Run" disabled="@_running"
+            title="Spustit všechny kontroly znovu">
+        @(_running ? "⏳ Kontroluji…" : "↻ Zkontrolovat znovu")
+    </button>
+    @if (_report is not null && !_running)
+    {
         <span class="muted">
             Proběhlo @_report.RanAt.ToString("dd.MM.yyyy HH:mm:ss") · trvalo @($"{_report.Duration.TotalSeconds:F1}") s
         </span>
-    </div>
-
-    @if (_report.Bad == 0 && _report.Warn == 0)
-    {
-        <div class="banner ok">Všechny aktivní kontroly prošly. Položky ve stavu „vypnuto“ nejsou chyba — jen se dělají vědomě.</div>
     }
+</div>
 
-    @foreach (var group in _report.Checks.GroupBy(c => c.Group))
-    {
-        <h2>@group.Key</h2>
-        <table>
-            <thead>
-                <tr>
-                    <th style="width:170px">Stav</th>
-                    <th style="width:210px">Kontrola</th>
-                    <th>Zjištěno</th>
-                </tr>
-            </thead>
-            <tbody>
-                @foreach (var c in group.OrderBy(x => Rank(x.State)))
-                {
-                    <tr>
-                        <td><span class="pill @PillClass(c.State)">@Label(c.State)</span></td>
-                        <td>@c.Name</td>
-                        <td>
-                            <div>@c.Value</div>
-                            <div class="muted" style="margin-top:3px">@c.Detail</div>
-                            @if (!string.IsNullOrEmpty(c.Fix))
-                            {
-                                <div style="margin-top:3px"><strong>Náprava:</strong> @c.Fix</div>
-                            }
-                        </td>
-                    </tr>
-                }
-            </tbody>
-        </table>
-    }
-
-    <p class="muted">Strojově čitelná podoba téhož: <a href="api/health"><code>/api/health</code></a>
-        (JSON pro externí dohled — vrací HTTP 200 když je vše v pořádku, 503 když některá kontrola hlásí chybu).</p>
+@if (_report is not null && !_running && _report.Bad == 0 && _report.Warn == 0)
+{
+    <div class="banner ok">Všechny aktivní kontroly prošly. Položky ve stavu „vypnuto“ nejsou chyba — jen se dělají vědomě.</div>
 }
+
+@foreach (var group in Shown.GroupBy(c => c.Group))
+{
+    <h2>@group.Key</h2>
+    <table>
+        <thead>
+            <tr>
+                <th style="width:170px">Stav</th>
+                <th style="width:210px">Kontrola</th>
+                <th>Zjištěno</th>
+            </tr>
+        </thead>
+        <tbody>
+            @* Během běhu se pořadí NEPŘEROVNÁVÁ – řádky by uskakovaly pod rukama.
+               Seřadí se až hotový výsledek, aby bylo nahoře to, co hoří. *@
+            @foreach (var c in (_running ? group.AsEnumerable() : group.OrderBy(x => Rank(x.State))))
+            {
+                <tr>
+                    <td class="wrap"><span class="pill @PillClass(c.State)">@Label(c.State)</span></td>
+                    <td class="wrap">@c.Name</td>
+                    <td class="wrap">
+                        <div>@c.Value</div>
+                        <div class="muted" style="margin-top:3px">@c.Detail</div>
+                        @if (!string.IsNullOrEmpty(c.Fix))
+                        {
+                            <div style="margin-top:3px"><strong>Náprava:</strong> @c.Fix</div>
+                        }
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+<p class="muted">Strojově čitelná podoba téhož: <a href="api/health"><code>/api/health</code></a>
+    (JSON pro externí dohled — vrací HTTP 200 když je vše v pořádku, 503 když některá kontrola hlásí chybu).</p>
 
 @code {
     private HealthReport? _report;
-    private bool _busy;
+    private readonly List<HealthCheck> _live = new();
+    private bool _running;
+    private string? _lastDone;
+
+    /// <summary>Za běhu se ukazují průběžné výsledky, po doběhnutí hotový report.</summary>
+    private IEnumerable<HealthCheck> Shown => _running ? _live : (_report?.Checks ?? Enumerable.Empty<HealthCheck>());
 
     protected override Task OnInitializedAsync() => Run();
 
     private async Task Run()
     {
-        _busy = true;
-        try { _report = await Checks.RunAsync(); }
-        finally { _busy = false; }
+        _running = true;
+        _live.Clear();
+        _lastDone = null;
+        _report = null;
+        StateHasChanged();
+
+        var progress = new Progress<HealthCheck>(c =>
+        {
+            _live.Add(c);
+            _lastDone = c.Name;
+            StateHasChanged();
+        });
+
+        try { _report = await Checks.RunAsync(progress); }
+        finally
+        {
+            _running = false;
+            StateHasChanged();
+        }
     }
+
+    private int Percent() =>
+        HealthService.TotalChecks == 0 ? 0
+        : Math.Min(100, _live.Count * 100 / HealthService.TotalChecks);
 
     private static string PillClass(HealthState s) => s switch
     {
