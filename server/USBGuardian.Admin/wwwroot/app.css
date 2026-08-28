@@ -15,7 +15,17 @@
 
 * { box-sizing: border-box; }
 html, body { height: 100%; }
-body { margin: 0; }
+
+/* Nativní prvky (posuvníky, checkboxy, <select>, <input type=time>) kreslí prohlížeč,
+   ne banka. Bez color-scheme by ve světlém motivu zůstaly tmavé a naopak — přesně to
+   dělalo přepínání dark/light rozbité. Bez uložené volby jde konzole za systémem. */
+:root { color-scheme: light dark; }
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"]  { color-scheme: dark; }
+
+/* Tokeny banky žijí uvnitř .ui, na <body> nedosáhnou. Systémové barvy Canvas/CanvasText
+   se řídí color-scheme výše, takže podklad pod aplikací sedí s motivem a nic neprobliká. */
+body { margin: 0; background: Canvas; color: CanvasText; }
 
 /* Banka si výšku sama nenastaví – kostra je mřížka a dostane ji odsud. */
 .ui { height: 100vh; }
@@ -162,7 +172,19 @@ body { margin: 0; }
 
 /* ── tisk: chrom pryč, obsah zůstane ── */
 @media print {
-  .ui { height: auto; display: block; }
+  /* NA PAPÍR SE TISKNE VŽDYCKY SVĚTLE, i když má člověk zvolenou tmu. Tokeny se musí
+     přebít stejně silným selektorem jako volba motivu — samotné `.ui` prohraje
+     s `:root[data-theme="dark"] .ui` a z tiskárny by lezly černé plochy. */
+  :root .ui, :root[data-theme="dark"] .ui, :root[data-theme="light"] .ui {
+    --pane: var(--l-pane); --chrome: var(--l-chrome); --chromehi: var(--l-chromehi);
+    --head: var(--l-head); --zebra: var(--l-zebra); --hover: var(--l-hover);
+    --border: var(--l-border); --bordersoft: var(--l-bordersoft);
+    --text: var(--l-text); --dim: var(--l-dim); --faint: var(--l-faint);
+    --accent: var(--l-accent); --accsoft: var(--l-accsoft); --accfg: var(--l-accfg);
+    --ok: var(--l-ok); --warn: var(--l-warn); --crit: var(--l-crit);
+  }
+  html, body { height: auto; background: #fff; color: #000; }
+  .ui { height: auto; display: block; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
   .ui .p-title, .ui .p-nav, .ui .p-topnav, .ui .p-status,
   .no-print, [data-no-print] { display: none !important; }
   .ui .p-gridwrap { overflow: visible; }

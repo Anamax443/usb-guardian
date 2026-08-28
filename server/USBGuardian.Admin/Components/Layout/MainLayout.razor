@@ -28,7 +28,10 @@
         <AuthorizeView>
             <Authorized><span class="p-field">@context.User.Identity?.Name</span></Authorized>
         </AuthorizeView>
-        <button class="p-btn" onclick="aximaToggleTheme()" title="Přepnout téma (světlé / tmavé)">🌓</button>
+        <button class="p-btn" id="themebtn" onclick="aximaToggleTheme()"
+                title="Přepnout vzhled — volba se pamatuje v tomhle prohlížeči">
+            <span id="themelbl">Vzhled</span>
+        </button>
     </div>
 
     <nav class="p-topnav" aria-label="Hlavní nabídka">
@@ -59,13 +62,34 @@
 </div>
 
 <script>
+  /* Motiv: bez uložené volby jde konzole za systémem (atribut data-theme se
+     vůbec nenastavuje). Kliknutí volbu teprve zapíše — pak už platí ona.
+     Popisek tlačítka říká, KAM se přepne, ne kde jsme; jinak se to čte obráceně. */
+  function aximaIsDark() {
+    var d = document.documentElement.dataset.theme;
+    if (d === 'dark') return true;
+    if (d === 'light') return false;
+    return window.matchMedia('(prefers-color-scheme: dark)').matches;
+  }
+  function aximaThemeLabel() {
+    var lbl = document.getElementById('themelbl');
+    var btn = document.getElementById('themebtn');
+    var toLight = aximaIsDark();
+    if (lbl) lbl.textContent = toLight ? '☀ Světlý' : '🌙 Tmavý';
+    if (btn) btn.title = (toLight ? 'Přepnout na světlý vzhled' : 'Přepnout na tmavý vzhled')
+                       + ' — volba se pamatuje v tomhle prohlížeči';
+  }
   function aximaToggleTheme() {
-    var h = document.documentElement;
-    var t = h.dataset.theme === 'light' ? 'dark' : 'light';
-    h.dataset.theme = t;
+    var t = aximaIsDark() ? 'light' : 'dark';
+    document.documentElement.dataset.theme = t;
     try { localStorage.setItem('axima.theme', t); } catch (e) {}
+    aximaThemeLabel();
   }
   (function () {
+    aximaThemeLabel();
+    /* Když si člověk nic nevybral, přepnutí tmy v systému se projeví hned. */
+    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', aximaThemeLabel);
+
     function tick() { var e = document.getElementById('liveclock'); if (e) e.textContent = new Date().toLocaleString('cs-CZ'); }
     tick(); setInterval(tick, 1000);
   })();
