@@ -1,119 +1,128 @@
 @page "/kontroly"
-@rendermode @(new InteractiveServerRenderMode(prerender: false))
+@rendermode @(new InteractiveServerRenderMode(prerender: true))
 @using USBGuardian.Admin.Health
 @inject HealthService Checks
+
+@* Seznam kontrol je vidět DŘÍV, než se cokoli spustí, a položky se odškrtávají
+   jedna po druhé. Hotová tabulka ✔ vypadá stejně, ať se dnes spustila, nebo ne —
+   proto se tady kontroly doopravdy pouštějí pokaždé, když se sem člověk podívá. *@
 
 <h1>Kontroly stavu</h1>
 
 <p class="intro">Ověření, že celý řetěz <strong>agent → API → databáze → konzole</strong> opravdu funguje,
 a že nastavené mechanismy (whitelist, vynucování, alerty, údržba) nejsou tiše vypnuté.
-Každá kontrola říká, <em>co naměřila</em>, <em>proč na tom záleží</em> a <em>co s tím</em>.</p>
+U každé kontroly je věta <em>proč</em> tam je — bez ní je seznam ✔ jen ozdoba.</p>
 
-@* Průběh musí být vidět: dotaz na API má timeout až 8 s a bez tohohle pruhu
-   stránka celou dobu mlčí a vypadá, že se nic neděje. Hotové kontroly se
-   přitom vypisují hned, jak doběhnou — ne až na konci. *@
-@if (_running)
-{
-    <div class="banner running">
-        <span class="spinner"></span>
-        <strong>Kontroluji…</strong>
-        hotovo @_live.Count z @HealthService.TotalChecks
-        @if (_lastDone is not null) { <span class="muted"> · naposledy: @_lastDone</span> }
-        <div class="progress"><span style="width:@Percent()%"></span></div>
-    </div>
-}
-
-@if (_report is not null && !_running)
-{
-    <div class="cards">
-        <div class="card @(_report.Bad > 0 ? "bad" : "")"><div class="num">@_report.Bad</div><div class="lbl">Chyby</div></div>
-        <div class="card @(_report.Warn > 0 ? "warn" : "")"><div class="num">@_report.Warn</div><div class="lbl">Varování</div></div>
-        <div class="card"><div class="num">@_report.Ok</div><div class="lbl">V pořádku</div></div>
-        <div class="card"><div class="num">@_report.Off</div><div class="lbl">Vypnuto / čeká</div></div>
-    </div>
-}
-
-<div class="toolbar">
-    <button class="btn" @onclick="Run" disabled="@_running"
-            title="Spustit všechny kontroly znovu">
-        @(_running ? "⏳ Kontroluji…" : "↻ Zkontrolovat znovu")
+<div class="verdikt @VerdictClass">
+    <span class="znak">@VerdictSign</span>
+    <span>
+        <span class="hlavni @(_running ? "bezi" : "")">@VerdictTitle</span><br />
+        <span class="muted">@VerdictSub</span>
+    </span>
+    <span class="spacer"></span>
+    <button class="btn" @onclick="Run" disabled="@_running" title="Pustí všechny kontroly znovu">
+        Spustit znovu
     </button>
-    @if (_report is not null && !_running)
+    @if (_running)
     {
-        <span class="muted">
-            Proběhlo @_report.RanAt.ToString("dd.MM.yyyy HH:mm:ss") · trvalo @($"{_report.Duration.TotalSeconds:F1}") s
-        </span>
+        <i class="pruh" style="width:@Percent()%"></i>
     }
 </div>
 
-@if (_report is not null && !_running && _report.Bad == 0 && _report.Warn == 0)
+@if (!_running && _problems.Count > 0)
 {
-    <div class="banner ok">Všechny aktivní kontroly prošly. Položky ve stavu „vypnuto“ nejsou chyba — jen se dělají vědomě.</div>
+    <div class="chyby">
+        <b>@_problems.Count @(_problems.Count == 1 ? "kontrola vyžaduje pozornost" : "kontrol vyžaduje pozornost")</b>
+        @foreach (var p in _problems)
+        {
+            <div class="chyba">
+                <span class="kde"><span class="pill @PillClass(p.State)">@Label(p.State)</span> @p.Name</span>
+                <span>@p.Value</span>
+                @if (!string.IsNullOrEmpty(p.Fix))
+                {
+                    <span class="rozdil">@p.Fix</span>
+                }
+            </div>
+        }
+    </div>
 }
 
-@foreach (var group in Shown.GroupBy(c => c.Group))
+@foreach (var group in HealthService.Plan.GroupBy(p => p.Group))
 {
-    <h2>@group.Key</h2>
-    <table>
-        <thead>
-            <tr>
-                <th style="width:170px">Stav</th>
-                <th style="width:210px">Kontrola</th>
-                <th>Zjištěno</th>
-            </tr>
-        </thead>
-        <tbody>
-            @* Během běhu se pořadí NEPŘEROVNÁVÁ – řádky by uskakovaly pod rukama.
-               Seřadí se až hotový výsledek, aby bylo nahoře to, co hoří. *@
-            @foreach (var c in (_running ? group.AsEnumerable() : group.OrderBy(x => Rank(x.State))))
-            {
-                <tr>
-                    <td class="wrap"><span class="pill @PillClass(c.State)">@Label(c.State)</span></td>
-                    <td class="wrap">@c.Name</td>
-                    <td class="wrap">
-                        <div>@c.Value</div>
-                        <div class="muted" style="margin-top:3px">@c.Detail</div>
-                        @if (!string.IsNullOrEmpty(c.Fix))
-                        {
-                            <div style="margin-top:3px"><strong>Náprava:</strong> @c.Fix</div>
-                        }
-                    </td>
-                </tr>
-            }
-        </tbody>
-    </table>
+    <div class="skupina">
+        <div class="hlava">
+            <b>@group.Key</b>
+            <span class="spacer"></span>
+            <span class="stav @GroupClass(group.Key)">@GroupState(group.Key)</span>
+        </div>
+        @foreach (var item in group)
+        {
+            var done = Result(item.Name);
+            <div class="pripad @(done is null ? (IsRunningNow(item.Name) ? "bezi" : "ceka") : StateClass(done.State))">
+                <span class="znak">@Sign(done)</span>
+                <span class="nazev">@item.Name</span>
+                <span class="vysledek">
+                    @if (done is null)
+                    {
+                        <span class="muted">@(IsRunningNow(item.Name) ? "kontroluji…" : "čeká")</span>
+                    }
+                    else
+                    {
+                        <span class="pill @PillClass(done.State)">@Label(done.State)</span>
+                    }
+                </span>
+                <span class="proc">@item.Why</span>
+                @if (done is not null)
+                {
+                    <span class="hodnota">@done.Value</span>
+                    @if (!string.IsNullOrEmpty(done.Fix))
+                    {
+                        <span class="naprava"><strong>Náprava:</strong> @done.Fix</span>
+                    }
+                }
+            </div>
+        }
+    </div>
 }
 
 <p class="muted">Strojově čitelná podoba téhož: <a href="api/health"><code>/api/health</code></a>
     (JSON pro externí dohled — vrací HTTP 200 když je vše v pořádku, 503 když některá kontrola hlásí chybu).</p>
 
 @code {
+    private readonly Dictionary<string, HealthCheck> _done = new(StringComparer.Ordinal);
+    private readonly List<HealthCheck> _problems = new();
     private HealthReport? _report;
-    private readonly List<HealthCheck> _live = new();
     private bool _running;
-    private string? _lastDone;
 
-    /// <summary>Za běhu se ukazují průběžné výsledky, po doběhnutí hotový report.</summary>
-    private IEnumerable<HealthCheck> Shown => _running ? _live : (_report?.Checks ?? Enumerable.Empty<HealthCheck>());
-
-    protected override Task OnInitializedAsync() => Run();
+    // Seznam kontrol se vykreslí SERVEROVĚ hned (prerender) – je vidět, co se bude
+    // kontrolovat, ještě než naskočí interaktivní spojení. Samotný běh se spouští až
+    // po prvním vykreslení, jinak by se kontroly pustily dvakrát: v prerenderu i v okruhu.
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender) await Run();
+    }
 
     private async Task Run()
     {
         _running = true;
-        _live.Clear();
-        _lastDone = null;
+        _done.Clear();
+        _problems.Clear();
         _report = null;
         StateHasChanged();
 
         var progress = new Progress<HealthCheck>(c =>
         {
-            _live.Add(c);
-            _lastDone = c.Name;
+            _done[c.Name] = c;
             StateHasChanged();
         });
 
-        try { _report = await Checks.RunAsync(progress); }
+        try
+        {
+            _report = await Checks.RunAsync(progress);
+            _problems.AddRange(_report.Checks
+                .Where(c => c.State is HealthState.Bad or HealthState.Warn)
+                .OrderBy(c => c.State == HealthState.Bad ? 0 : 1));
+        }
         finally
         {
             _running = false;
@@ -121,9 +130,78 @@ Každá kontrola říká, <em>co naměřila</em>, <em>proč na tom záleží</em
         }
     }
 
+    private HealthCheck? Result(string name) => _done.TryGetValue(name, out var c) ? c : null;
+
+    /// <summary>Kontroly běží v pořadí seznamu, takže první nehotová je ta právě běžící.</summary>
+    private bool IsRunningNow(string name) =>
+        _running && _done.Count < HealthService.Plan.Count && HealthService.Plan[_done.Count].Name == name;
+
     private int Percent() =>
-        HealthService.TotalChecks == 0 ? 0
-        : Math.Min(100, _live.Count * 100 / HealthService.TotalChecks);
+        HealthService.Plan.Count == 0 ? 0
+        : Math.Min(100, _done.Count * 100 / HealthService.Plan.Count);
+
+    // ── verdikt ──────────────────────────────────────────────────
+    private string VerdictSign => _running ? "▸" : _report is null ? "▸" : _report.Bad > 0 ? "✕" : _report.Warn > 0 ? "!" : "✔";
+
+    private string VerdictClass => _running || _report is null ? ""
+        : _report.Bad > 0 ? "spatne" : _report.Warn > 0 ? "varovne" : "ok";
+
+    private string VerdictTitle => _running
+        ? "kontroluji"
+        : _report is null ? "čeká na spuštění"
+        : _report.Bad > 0 ? $"{_report.Bad} × CHYBA"
+        : _report.Warn > 0 ? $"{_report.Warn} × varování"
+        : "všechno prošlo";
+
+    private string VerdictSub => _running
+        ? $"hotovo {_done.Count} z {HealthService.Plan.Count} — pouštím kontroly v běžící konzoli, verze {AppInfo.Commit}"
+        : _report is null ? ""
+        : $"{_report.Ok} v pořádku · {_report.Warn} varování · {_report.Bad} chyb · {_report.Off} vypnuto — "
+        + $"proběhlo {_report.RanAt:dd.MM.yyyy HH:mm:ss}, trvalo {_report.Duration.TotalSeconds:F1} s, verze {AppInfo.Commit}";
+
+    // ── stav skupiny ─────────────────────────────────────────────
+    private IEnumerable<HealthCheck> GroupResults(string group) =>
+        HealthService.Plan.Where(p => p.Group == group)
+                          .Select(p => Result(p.Name))
+                          .Where(c => c is not null)!;
+
+    private string GroupState(string group)
+    {
+        var total = HealthService.Plan.Count(p => p.Group == group);
+        var results = GroupResults(group).ToList();
+        if (results.Count < total) return _running ? $"{results.Count}/{total}" : "čeká";
+        if (results.Any(c => c.State == HealthState.Bad)) return "chyba";
+        if (results.Any(c => c.State == HealthState.Warn)) return "varování";
+        return "v pořádku";
+    }
+
+    private string GroupClass(string group)
+    {
+        var total = HealthService.Plan.Count(p => p.Group == group);
+        var results = GroupResults(group).ToList();
+        if (results.Count < total) return "bezi";
+        if (results.Any(c => c.State == HealthState.Bad)) return "spatne";
+        if (results.Any(c => c.State == HealthState.Warn)) return "varovne";
+        return "ok";
+    }
+
+    // ── jednotlivá kontrola ──────────────────────────────────────
+    private static string Sign(HealthCheck? c) => c is null ? "▸" : c.State switch
+    {
+        HealthState.Ok => "✔",
+        HealthState.Warn => "!",
+        HealthState.Bad => "✕",
+        HealthState.Off => "○",
+        _ => "?",
+    };
+
+    private static string StateClass(HealthState s) => s switch
+    {
+        HealthState.Ok => "hotovo",
+        HealthState.Warn => "varovne",
+        HealthState.Bad => "spatne",
+        _ => "vypnuto",
+    };
 
     private static string PillClass(HealthState s) => s switch
     {
@@ -140,15 +218,5 @@ Každá kontrola říká, <em>co naměřila</em>, <em>proč na tom záleží</em
         HealthState.Bad => "CHYBA",
         HealthState.Off => "vypnuto",
         _ => "čeká na data",
-    };
-
-    // Nejdřív to, co hoří.
-    private static int Rank(HealthState s) => s switch
-    {
-        HealthState.Bad => 0,
-        HealthState.Warn => 1,
-        HealthState.Unknown => 2,
-        HealthState.Ok => 3,
-        _ => 4,
     };
 }

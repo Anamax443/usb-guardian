@@ -141,26 +141,92 @@ body { margin: 0; background: Canvas; color: CanvasText; }
 .ui .banner.bad { background: color-mix(in srgb, var(--crit) 14%, transparent); color: var(--crit); border-color: var(--crit); }
 .ui .banner.ok  { background: color-mix(in srgb, var(--ok) 14%, transparent);   color: var(--ok);   border-color: var(--ok); }
 
-/* ── běžící kontrola: musí být poznat, že se pracuje ──
-      Neurčitý pruh (nevíme, jak dlouho potrvá dotaz na API) + počitadlo hotových. */
-.ui .banner.running { border-color: var(--accent); background: var(--accsoft); color: var(--text); }
-.ui .banner.running .progress {
-  margin-top: 8px; height: 4px; background: var(--bordersoft); overflow: hidden;
+/* ── stránka Kontroly: seznam je vidět dopředu a odškrtává se ──
+      Verdikt nahoře, pod ním skupiny a v nich jednotlivé kontroly. Dokud běh
+      neskončí, po spodní hraně verdiktu jede pruh — bez něj se nepozná,
+      jestli se čeká, nebo se to zaseklo. */
+.ui .verdikt {
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  padding: 12px; margin: 14px 0 12px; position: relative; overflow: hidden;
+  border: var(--border-w) solid var(--border); border-radius: var(--radius);
+  background: var(--chromehi);
 }
-.ui .banner.running .progress > span {
-  display: block; height: 100%; background: var(--accent); transition: width .25s ease;
+.ui .verdikt .znak { font-size: 24px; line-height: 1; width: 26px; text-align: center; color: var(--accent); }
+.ui .verdikt .hlavni { font-size: 15px; font-weight: 650; }
+.ui .verdikt .spacer { flex: 1; }
+.ui .verdikt.ok { border-color: var(--ok); }
+.ui .verdikt.ok .znak { color: var(--ok); }
+.ui .verdikt.varovne { border-color: var(--warn); }
+.ui .verdikt.varovne .znak { color: var(--warn); }
+.ui .verdikt.spatne { border-color: var(--crit); }
+.ui .verdikt.spatne .znak { color: var(--crit); }
+.ui .verdikt .pruh {
+  position: absolute; left: 0; bottom: 0; height: 3px;
+  background: var(--accent); transition: width .12s linear;
 }
-.ui .spinner {
-  display: inline-block; width: 11px; height: 11px; margin-right: 7px; vertical-align: -1px;
-  border: 2px solid var(--accent); border-right-color: transparent; border-radius: 50%;
-  animation: ui-spin .7s linear infinite;
+/* Tečky u „kontroluji" — bez nich se nepozná, jestli se čeká, nebo se to zaseklo. */
+.ui .bezi.hlavni::after { content: '…'; animation: ui-tecky 1.2s steps(4, end) infinite; }
+@keyframes ui-tecky { 0% { content: ''; } 25% { content: '.'; } 50% { content: '..'; } 75% { content: '…'; } }
+
+/* Souhrn problémů: co je potřeba řešit, na jednom místě a nahoře. */
+.ui .chyby {
+  border: var(--border-w) solid var(--crit); border-radius: var(--radius);
+  padding: 9px 11px; margin-bottom: 14px; display: flex; flex-direction: column; gap: 8px;
 }
-@keyframes ui-spin { to { transform: rotate(360deg); } }
-/* Kdo má vypnuté animace, musí stav poznat taky – proto se točení jen zastaví,
-   ukazatel a počitadlo zůstávají. */
+.ui .chyby > b { color: var(--crit); }
+.ui .chyby .chyba { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 2px 10px; }
+.ui .chyby .kde { color: var(--dim); }
+.ui .chyby .rozdil { grid-column: 2; color: var(--dim); }
+@media (max-width: 760px) {
+  .ui .chyby .chyba { grid-template-columns: 1fr; }
+  .ui .chyby .rozdil { grid-column: 1; }
+}
+
+.ui .skupina { border: var(--border-w) solid var(--border); border-radius: var(--radius); margin-bottom: 12px; }
+.ui .skupina .hlava {
+  display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
+  padding: 7px 11px; background: var(--accsoft);
+  border-bottom: var(--border-w) solid var(--border);
+  font-family: var(--font-display);
+}
+.ui .skupina .hlava b { font-size: 13.5px; font-weight: 650; }
+.ui .skupina .hlava .spacer { flex: 1; }
+.ui .skupina .stav {
+  font-size: var(--fs-th); letter-spacing: var(--th-ls); text-transform: uppercase;
+  padding: 1px 7px; border-radius: var(--radius); color: var(--faint); font-family: var(--font-ui);
+}
+.ui .skupina .stav.bezi { color: var(--accent); }
+.ui .skupina .stav.ok { color: var(--ok); }
+.ui .skupina .stav.varovne { color: var(--warn); }
+.ui .skupina .stav.spatne { color: var(--crit); font-weight: 650; }
+
+.ui .pripad {
+  display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; gap: 2px 9px;
+  padding: 7px 11px; border-bottom: 1px solid var(--bordersoft); align-items: baseline;
+}
+.ui .pripad:last-child { border-bottom: 0; }
+.ui .pripad .znak { color: var(--faint); text-align: center; }
+.ui .pripad .nazev { font-weight: 650; }
+.ui .pripad .vysledek { justify-self: end; }
+.ui .pripad .proc { grid-column: 2 / -1; color: var(--dim); max-width: 92ch; }
+.ui .pripad .hodnota { grid-column: 2 / -1; font-family: var(--font-data); font-size: var(--fs-data); margin-top: 2px; }
+.ui .pripad .naprava { grid-column: 2 / -1; margin-top: 2px; }
+.ui .pripad.ceka { opacity: .55; }
+.ui .pripad.bezi { background: var(--accsoft); }
+.ui .pripad.bezi .znak { color: var(--accent); }
+.ui .pripad.hotovo .znak { color: var(--ok); }
+.ui .pripad.varovne .znak { color: var(--warn); }
+.ui .pripad.spatne { background: color-mix(in srgb, var(--crit) 8%, transparent); }
+.ui .pripad.spatne .znak { color: var(--crit); }
+@media (max-width: 620px) {
+  .ui .pripad { grid-template-columns: 18px minmax(0, 1fr); }
+  .ui .pripad .vysledek { grid-column: 2; justify-self: start; }
+}
+
+/* Kdo má vypnuté animace, musí stav poznat taky – tečky i pruh zůstávají, jen se nehýbou. */
 @media (prefers-reduced-motion: reduce) {
-  .ui .spinner { animation: none; }
-  .ui .banner.running .progress > span { transition: none; }
+  .ui .bezi.hlavni::after { content: '…'; animation: none; }
+  .ui .verdikt .pruh { transition: none; }
 }
 
 /* ── definiční seznamy nastavení ── */
