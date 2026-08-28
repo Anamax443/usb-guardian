@@ -222,6 +222,14 @@ denní souhrn) je další krok.</p>
         <input class="inp" style="min-width:90px" @bind="_healthMaxAge" />
         <div class="muted">Nad tímto stářím nejnovějšího incidentu se hlásí chyba (tichý výpadek sběru). Default 48.</div>
     </dd>
+    <dt>Prodleva mezi kontrolami (ms)</dt>
+    <dd>
+        <input class="inp" style="min-width:90px" @bind="_healthStepDelay" />
+        <div class="muted">Kvůli čitelnosti: kontroly jsou hotové za pár milisekund a běh by problikl —
+            co problikne, není vidět. Prodleva dá každému kroku čas se odškrtnout před očima.
+            Platí jen pro stránku; strojové <span class="mono">/api/health</span> běží naplno.
+            0 = bez prodlevy, strop 2000. Default 300 (celý běh ≈ 4,5 s).</div>
+    </dd>
 </dl>
 <div class="toolbar">
     <button class="btn" @onclick="SaveHealth" disabled="@_busy">Uložit kontroly</button>
@@ -279,7 +287,7 @@ denní souhrn) je další krok.</p>
     private string? _uiMsg;
 
     private bool _healthBad;
-    private string _healthApiUrl = "", _healthMaxAge = "48";
+    private string _healthApiUrl = "", _healthMaxAge = "48", _healthStepDelay = "300";
     private string? _healthMsg;
 
     private string? _reloadMsg;
@@ -332,6 +340,7 @@ denní souhrn) je další krok.</p>
 
             _healthApiUrl = await Get(db, "health.apiUrl");
             var hma = await Get(db, "health.maxIncidentAgeHours"); _healthMaxAge = string.IsNullOrEmpty(hma) ? "48" : hma;
+            var hsd = await Get(db, "health.stepDelayMs"); _healthStepDelay = string.IsNullOrEmpty(hsd) ? "300" : hsd;
 
             _dbError = null;
         }
@@ -621,6 +630,9 @@ denní souhrn) je další krok.</p>
         if (!int.TryParse(_healthMaxAge?.Trim(), out var h) || h <= 0)
         { _healthMsg = "Stáří incidentů musí být kladné číslo hodin."; _healthBad = true; return; }
 
+        if (!int.TryParse(_healthStepDelay?.Trim(), out var delay) || delay < 0 || delay > 2000)
+        { _healthMsg = "Prodleva musí být 0 až 2000 ms."; _healthBad = true; return; }
+
         var url = (_healthApiUrl ?? "").Trim();
         if (url.Length > 0 && !Uri.TryCreate(url, UriKind.Absolute, out _))
         { _healthMsg = "Adresa API musí být plná URL včetně schématu, např. https://SQL-SERVER:5443."; _healthBad = true; return; }
@@ -631,7 +643,9 @@ denní souhrn) je další krok.</p>
             await using var db = await DbFactory.CreateDbContextAsync();
             await Set(db, "health.apiUrl", url);
             await Set(db, "health.maxIncidentAgeHours", h.ToString());
+            await Set(db, "health.stepDelayMs", delay.ToString());
             _healthMaxAge = h.ToString();
+            _healthStepDelay = delay.ToString();
             _healthMsg = "Uloženo."; _healthBad = false;
         }
         catch (Exception ex) { _healthMsg = "Chyba: " + ex.Message; _healthBad = true; }

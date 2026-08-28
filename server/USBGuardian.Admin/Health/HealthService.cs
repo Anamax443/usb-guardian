@@ -258,6 +258,14 @@ public sealed class HealthService
                 };
                 checks.Add(check);
                 progress?.Report(check);
+
+                // Kontroly samotné jsou většinou hotové do pár milisekund a celý běh
+                // by problikl — a co problikne, to není vidět. Prodleva je tedy kvůli
+                // ČITELNOSTI: každý krok se stihne odškrtnout před očima.
+                // Platí JEN pro běh ve stránce (je připojený progress). Strojové
+                // /api/health, na které se ptá dohled, běží naplno bez zdržování.
+                if (progress is not null && ctx.Cfg.StepDelayMs > 0 && def != Defs[^1])
+                    await Task.Delay(ctx.Cfg.StepDelayMs, ct);
             }
         }
         finally
@@ -623,6 +631,8 @@ public sealed class HealthService
         public int MaxIncidentAgeHours = 48;
         public int SilentAfterMinutes = 180;
         public int ApiTimeoutSeconds = 8;
+        /// <summary>Prodleva mezi kontrolami při běhu ve stránce (ms) – viz komentář v RunAsync.</summary>
+        public int StepDelayMs = 300;
 
         public static async Task<HealthConfig> LoadAsync(AppDbContext db, CancellationToken ct)
         {
@@ -631,6 +641,8 @@ public sealed class HealthService
                 c.MaxIncidentAgeHours = h;
             if (int.TryParse(await Get(db, "comm.silentAfterMinutes", ct), out var m) && m > 0)
                 c.SilentAfterMinutes = m;
+            if (int.TryParse(await Get(db, "health.stepDelayMs", ct), out var d) && d >= 0)
+                c.StepDelayMs = Math.Min(2000, d);   // strop, ať se z kontrol nestane čekání
             return c;
         }
     }
