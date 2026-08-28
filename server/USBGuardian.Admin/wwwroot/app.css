@@ -83,9 +83,10 @@ body { margin: 0; background: Canvas; color: CanvasText; }
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--pane); color: var(--text);
-  font: inherit; white-space: nowrap; cursor: pointer;
+  font: inherit; white-space: nowrap; cursor: pointer; text-decoration: none;
 }
 .ui .btn:hover { background: var(--hover); }
+.ui a.btn { color: var(--text); }   /* exporty jsou odkazy, ne tlačítka – ať nevypadají jinak */
 .ui .btn:disabled { opacity: .5; cursor: default; }
 .ui .inp, .ui textarea.inp, .ui select.inp, .ui .ta {
   background: var(--pane); color: var(--text);

@@ -20,6 +20,16 @@ U každé kontroly je věta <em>proč</em> tam je — bez ní je seznam ✔ jen 
         <span class="muted">@VerdictSub</span>
     </span>
     <span class="spacer"></span>
+    @* Export pouští kontroly znovu, takže soubor nese aktuální stav, ne to,
+       co bylo na obrazovce. Odkazy schválně, ne tlačítka – jde o stažení souboru. *@
+    <a class="btn" href="export/health.csv" target="_blank" rel="noopener"
+       title="Stáhnout jako CSV pro Excel (středník, UTF-8 BOM)">⬇ CSV</a>
+    <a class="btn" href="export/health.html" target="_blank" rel="noopener"
+       title="Otevřít tisknutelnou stránku s výsledkem">HTML</a>
+    <a class="btn" href="export/health.html?tisk=1" target="_blank" rel="noopener"
+       title="Otevře tisknutelnou stránku a rovnou dialog tisku — tam zvol „Uložit jako PDF“">PDF</a>
+    <a class="btn" href="export/health.txt" target="_blank" rel="noopener"
+       title="Stáhnout jako prostý text (do e-mailu nebo ticketu)">TXT</a>
     <button class="btn" @onclick="Run" disabled="@_running" title="Pustí všechny kontroly znovu">
         Spustit znovu
     </button>
@@ -146,18 +156,15 @@ U každé kontroly je věta <em>proč</em> tam je — bez ní je seznam ✔ jen 
     private string VerdictClass => _running || _report is null ? ""
         : _report.Bad > 0 ? "spatne" : _report.Warn > 0 ? "varovne" : "ok";
 
-    private string VerdictTitle => _running
-        ? "kontroluji"
+    private string VerdictTitle => _running ? "kontroluji"
         : _report is null ? "čeká na spuštění"
-        : _report.Bad > 0 ? $"{_report.Bad} × CHYBA"
-        : _report.Warn > 0 ? $"{_report.Warn} × varování"
-        : "všechno prošlo";
+        : _report.Verdict;
 
     private string VerdictSub => _running
         ? $"hotovo {_done.Count} z {HealthService.Plan.Count} — pouštím kontroly v běžící konzoli, verze {AppInfo.Commit}"
         : _report is null ? ""
-        : $"{_report.Ok} v pořádku · {_report.Warn} varování · {_report.Bad} chyb · {_report.Off} vypnuto — "
-        + $"proběhlo {_report.RanAt:dd.MM.yyyy HH:mm:ss}, trvalo {_report.Duration.TotalSeconds:F1} s, verze {AppInfo.Commit}";
+        : $"{_report.Summary} — proběhlo {_report.RanAt:dd.MM.yyyy HH:mm:ss}, "
+        + $"trvalo {_report.Duration.TotalSeconds:F1} s, verze {AppInfo.Commit}";
 
     // ── stav skupiny ─────────────────────────────────────────────
     private IEnumerable<HealthCheck> GroupResults(string group) =>

@@ -77,6 +77,22 @@ public sealed class HealthReport
     public int Ok => Checks.Count(c => c.State == HealthState.Ok);
     public int Off => Checks.Count(c => c.State is HealthState.Off or HealthState.Unknown);
 
+    /// <summary>Souhrn jednou větou – jedno místo pro stránku i pro exporty.</summary>
+    public string Summary =>
+        $"{Ok} v pořádku · {Warn} {Sklonuj(Warn, "varování", "varování", "varování")} · "
+      + $"{Bad} {Sklonuj(Bad, "chyba", "chyby", "chyb")} · {Off} vypnuto";
+
+    /// <summary>Verdikt jednou větou (co je nejhorší).</summary>
+    public string Verdict =>
+        Bad > 0 ? $"{Bad} × {Sklonuj(Bad, "CHYBA", "CHYBY", "CHYB")}"
+      : Warn > 0 ? $"{Warn} × varování"
+      : Checks.Count == 0 ? "čeká na spuštění"
+      : "všechno prošlo";
+
+    /// <summary>1 chyba / 2 chyby / 5 chyb – jinak z výstupu čiší, že ho psal stroj.</summary>
+    private static string Sklonuj(int n, string jedna, string dve, string pet) =>
+        n == 1 ? jedna : n is >= 2 and <= 4 ? dve : pet;
+
     /// <summary>Celkový verdikt: nejhorší stav vyhrává.</summary>
     public HealthState Overall => Bad > 0 ? HealthState.Bad
                                 : Warn > 0 ? HealthState.Warn

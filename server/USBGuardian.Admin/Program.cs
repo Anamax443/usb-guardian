@@ -175,6 +175,9 @@ app.MapGet("/api/health", async (USBGuardian.Admin.Health.HealthService health, 
 // ── Export incidentů (CSV + manažerský report) – dědí FallbackPolicy ──
 app.MapExportEndpoints();
 
+// Export kontrol stavu: CSV (Excel) / TXT / tisknutelné HTML → PDF
+app.MapHealthExportEndpoints();
+
 app.MapRazorComponents<App>()
    .AddInteractiveServerRenderMode();
 
