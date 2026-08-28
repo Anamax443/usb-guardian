@@ -96,7 +96,9 @@ foreach (var file in queueFiles)
     }
     catch (Exception ex)
     {
-        Console.Error.WriteLine($"Chyba: {Path.GetFileName(file)}: {ex.Message}");
+        // Bez konzole (WinExe) by hláška zmizela úplně. Píše se proto do profilu
+        // uživatele — tam má právo zapisovat i běžný účet, pod kterým task běží.
+        LogError($"{Path.GetFileName(file)}: {ex.Message}");
         processed.Add(file);
     }
 }
@@ -127,3 +129,21 @@ static string EscapeXml(string input) => input
     .Replace(">",  "&gt;")
     .Replace("\"", "&quot;")
     .Replace("'",  "&apos;");
+
+// ── Diagnostika ───────────────────────────────────────────────
+// Chyby ToastHelperu nikdo neuvidí (žádné okno, žádná konzole), takže musí
+// někde zůstat stopa. Log je v profilu uživatele: tam smí zapisovat i účet
+// bez práv, pod kterým task běží.
+static void LogError(string message)
+{
+    try
+    {
+        var dir = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "USBGuardian");
+        Directory.CreateDirectory(dir);
+        File.AppendAllText(Path.Combine(dir, "toasthelper.log"),
+            $"{DateTime.Now:yyyy-MM-dd HH:mm:ss}  {message}{Environment.NewLine}");
+    }
+    catch { /* ani logování nesmí shodit zobrazení toastu */ }
+}

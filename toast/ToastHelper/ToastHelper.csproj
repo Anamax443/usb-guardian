@@ -1,7 +1,11 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>net8.0-windows10.0.17763.0</TargetFramework>
-    <OutputType>Exe</OutputType>
+    <!-- WinExe, ne Exe: ToastHelper startuje scheduled taskem PŘI PŘIHLÁŠENÍ v relaci
+         uživatele. Konzolová aplikace (Exe) při tom vždycky vyrobí černé okno cmd,
+         které problikne přes plochu — vypadá to jako malware a lidi to hlásí.
+         Okenní aplikace žádné okno neotevře; toast kreslí WinRT, konzoli nepotřebuje. -->
+    <OutputType>WinExe</OutputType>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <ApplicationManifest>app.manifest</ApplicationManifest>
