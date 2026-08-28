@@ -17,6 +17,8 @@
     <PackageReference Include="Microsoft.AspNetCore.Authentication.Negotiate" Version="8.0.0" />
     <!-- AD sync (LDAP dotaz na počítače v doméně) -->
     <PackageReference Include="System.DirectoryServices" Version="8.0.0" />
+    <!-- Ovládání Windows služeb (plánovaný restart hlídaných služeb) -->
+    <PackageReference Include="System.ServiceProcess.ServiceController" Version="8.0.0" />
     <!-- Render dokumentace (.md → tisknutelné HTML v konzoli) -->
     <PackageReference Include="Markdig" Version="0.37.0" />
   </ItemGroup>

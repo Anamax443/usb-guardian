@@ -1,0 +1,41 @@
+/* Tokeny stylu turbo-tui
+   GENEROVÁNO skriptem scripts/build-bank.mjs z mockup/ui-styly-katalog.html.
+   Needitovat — změny se přepíšou. Uprav katalog a spusť generátor znovu. */
+
+.ui[data-style="turbo-tui"], .ui {
+    --l-pane:#ffffff; --l-chrome:#c8c8c8; --l-chromehi:#d8d8d8; --l-head:#c8c8c8;
+    --l-zebra:#f2f2f2; --l-hover:#d8d8d8; --l-border:#16161d; --l-bordersoft:#b4b4b4;
+    --l-text:#16161d; --l-dim:#3c3c50; --l-faint:#5c5c70;
+    --l-accent:#0000a8; --l-accsoft:#0000a8; --l-accfg:#ffffff;
+    --l-ok:#007a00; --l-warn:#8a6a00; --l-crit:#a80000;
+
+    --d-pane:#0000a8; --d-chrome:#000087; --d-chromehi:#0000a8; --d-head:#0000a8;
+    --d-zebra:#0000a8; --d-hover:#0054a8; --d-border:#54fcfc; --d-bordersoft:#3838c0;
+    --d-text:#e8e8e8; --d-dim:#a8c8fc; --d-faint:#7878d8;
+    --d-accent:#fcfc54; --d-accsoft:#00a8a8; --d-accfg:#000000;
+    --d-ok:#54fc54; --d-warn:#fcfc54; --d-crit:#fc5454;
+
+    --border-w:3px;
+    --radius:0px; --nav-radius:0px; --sel-bar:0px;
+    /* Dvojity ramecek ubira 3 px z vysky -- listy proto o neco vyssi, jinak
+       se pole na horni liste nevejde a pretece. */
+    --row-h:22px; --title-h:32px; --tb-h:30px; --panehead-h:24px; --status-h:26px;
+    --font-ui:"Cascadia Mono",Consolas,"Lucida Console",monospace;
+    --font-display:var(--font-ui);
+    --font-data:var(--font-ui);
+    --fs-ui:12.5px; --fs-data:12.5px; --fs-th:12.5px;
+    --th-transform:uppercase; --th-ls:.5px; --th-weight:700;
+    --nav-h:22px; --pane-shadow:none; --dot-radius:0px;
+  }
+
+/* strukturální odchylky tohoto stylu */
+.ui[data-style="turbo-tui"] .p-title, .ui[data-style="turbo-tui"] .p-nav, .ui[data-style="turbo-tui"] .p-panehead, .ui[data-style="turbo-tui"] .p-toolbar, .ui[data-style="turbo-tui"] .p-status { border-style: double; }
+.ui[data-style="turbo-tui"] .p-table tbody td { border-bottom-width: 1px; border-bottom-style: solid; }
+.ui[data-style="turbo-tui"] .p-table thead th { border-bottom-style: double; color: var(--accent); }
+.ui[data-style="turbo-tui"] .p-table tbody tr[data-sel="true"] td { background: var(--accsoft); color: var(--accfg); }
+.ui[data-style="turbo-tui"] .p-navitem[aria-current="true"] { background: var(--accsoft); color: var(--accfg); box-shadow: none; }
+.ui[data-style="turbo-tui"] .p-navitem[aria-current="true"] .icon { color: var(--accfg); }
+.ui[data-style="turbo-tui"] .p-field { border-style: solid; }
+.ui[data-style="turbo-tui"] .p-panehead { color: var(--accfg); }
+.ui[data-style="turbo-tui"] .p-panehead .icon, .ui[data-style="turbo-tui"] .p-panehead .n { color: var(--accfg); }
+.ui[data-style="turbo-tui"] .p-table tbody tr[data-sel="true"] td .dim, .ui[data-style="turbo-tui"] .p-table tbody tr[data-sel="true"] td.c-date, .ui[data-style="turbo-tui"] .p-table tbody tr[data-sel="true"] td.c-vs { color: var(--accfg); opacity: .8; }

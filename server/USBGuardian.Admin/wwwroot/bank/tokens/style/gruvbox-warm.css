@@ -1,0 +1,26 @@
+/* Tokeny stylu gruvbox-warm
+   GENEROVÁNO skriptem scripts/build-bank.mjs z mockup/ui-styly-katalog.html.
+   Needitovat — změny se přepíšou. Uprav katalog a spusť generátor znovu. */
+
+.ui[data-style="gruvbox-warm"], .ui {
+    --l-pane:#fbf1c7; --l-chrome:#f2e5bc; --l-chromehi:#f9f5d7; --l-head:#ebdbb2;
+    --l-zebra:#f6ecc4; --l-hover:#ebdbb2; --l-border:#bdae93; --l-bordersoft:#d5c4a1;
+    --l-text:#282828; --l-dim:#665c54; --l-faint:#857767;
+    --l-accent:#076678; --l-accsoft:rgba(7,102,120,.14); --l-accfg:#fbf1c7;
+    --l-ok:#79740e; --l-warn:#b57614; --l-crit:#9d0006;
+
+    --d-pane:#282828; --d-chrome:#1d2021; --d-chromehi:#32302f; --d-head:#3c3836;
+    --d-zebra:#2d2b28; --d-hover:#3c3836; --d-border:#504945; --d-bordersoft:#3c3836;
+    --d-text:#ebdbb2; --d-dim:#bdae93; --d-faint:#928374;
+    --d-accent:#83a598; --d-accsoft:rgba(131,165,152,.16); --d-accfg:#1d2021;
+    --d-ok:#b8bb26; --d-warn:#fabd2f; --d-crit:#fb4934;
+
+    --radius:2px; --nav-radius:2px; --sel-bar:3px;
+    --row-h:26px; --title-h:33px; --tb-h:30px; --panehead-h:26px; --status-h:23px;
+    --font-ui:"Segoe UI","Helvetica Neue",system-ui,sans-serif;
+    --font-display:var(--font-ui);
+    --font-data:"Cascadia Mono",Consolas,monospace;
+    --fs-ui:12.5px; --fs-data:12px; --fs-th:11.5px;
+    --th-transform:none; --th-ls:.2px; --th-weight:600;
+    --nav-h:27px; --pane-shadow:none; --dot-radius:2px;
+  }

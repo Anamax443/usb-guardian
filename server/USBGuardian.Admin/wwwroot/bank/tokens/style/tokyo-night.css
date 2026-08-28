@@ -1,0 +1,28 @@
+/* Tokeny stylu tokyo-night
+   GENEROVÁNO skriptem scripts/build-bank.mjs z mockup/ui-styly-katalog.html.
+   Needitovat — změny se přepíšou. Uprav katalog a spusť generátor znovu. */
+
+.ui[data-style="tokyo-night"], .ui {
+    /* Tokyo Night Day ma text v modre; pro cteni v tabulce je puvodni odstin
+       prilis svetly, takze textove role jdou o stupen dolu. */
+    --l-pane:#e6e7ec; --l-chrome:#d6dae6; --l-chromehi:#eaebef; --l-head:#c9cddc;
+    --l-zebra:#e0e1e8; --l-hover:#ccd0dd; --l-border:#a8aecb; --l-bordersoft:#c4c8da;
+    --l-text:#2b4a94; --l-dim:#43508c; --l-faint:#666f9c;
+    --l-accent:#1f5fc4; --l-accsoft:rgba(31,95,196,.13); --l-accfg:#ffffff;
+    --l-ok:#4a6530; --l-warn:#775a32; --l-crit:#c4114b;
+
+    --d-pane:#1a1b26; --d-chrome:#16161e; --d-chromehi:#1f2030; --d-head:#292e42;
+    --d-zebra:#1c1d2b; --d-hover:#292e42; --d-border:#414868; --d-bordersoft:#292e42;
+    --d-text:#c0caf5; --d-dim:#a9b1d6; --d-faint:#656e98;
+    --d-accent:#7aa2f7; --d-accsoft:rgba(122,162,247,.16); --d-accfg:#16161e;
+    --d-ok:#9ece6a; --d-warn:#e0af68; --d-crit:#f7768e;
+
+    --radius:4px; --nav-radius:4px; --sel-bar:3px;
+    --row-h:27px; --title-h:34px; --tb-h:31px; --panehead-h:27px; --status-h:24px;
+    --font-ui:"Segoe UI Variable Text","Segoe UI",system-ui,sans-serif;
+    --font-display:var(--font-ui);
+    --font-data:"Cascadia Mono",Consolas,monospace;
+    --fs-ui:12.5px; --fs-data:12px; --fs-th:11.5px;
+    --th-transform:none; --th-ls:.2px; --th-weight:600;
+    --nav-h:28px; --pane-shadow:none; --dot-radius:50%;
+  }

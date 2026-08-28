@@ -1,0 +1,26 @@
+/* Tokeny stylu ledger-mono
+   GENEROVÁNO skriptem scripts/build-bank.mjs z mockup/ui-styly-katalog.html.
+   Needitovat — změny se přepíšou. Uprav katalog a spusť generátor znovu. */
+
+.ui[data-style="ledger-mono"], .ui {
+    --l-pane:#ffffff; --l-chrome:#f2f3f5; --l-chromehi:#f8f9fa; --l-head:#e9ebee;
+    --l-zebra:#fafbfc; --l-hover:#eceef1; --l-border:#cdd2d8; --l-bordersoft:#dfe3e7;
+    --l-text:#14171a; --l-dim:#59616a; --l-faint:#7d858e;
+    --l-accent:#35678c; --l-accsoft:rgba(53,103,140,.12); --l-accfg:#ffffff;
+    --l-ok:#1f7a43; --l-warn:#8a6512; --l-crit:#a3392f;
+
+    --d-pane:#16181c; --d-chrome:#101216; --d-chromehi:#1a1d21; --d-head:#1e2126;
+    --d-zebra:#191c20; --d-hover:#23272c; --d-border:#2a2e34; --d-bordersoft:#212429;
+    --d-text:#d6dae0; --d-dim:#8b929b; --d-faint:#626973;
+    --d-accent:#5a8fb8; --d-accsoft:rgba(90,143,184,.15); --d-accfg:#101216;
+    --d-ok:#3fa860; --d-warn:#c99a3a; --d-crit:#cf5b52;
+
+    --radius:1px; --nav-radius:0px; --sel-bar:2px;
+    --row-h:22px; --title-h:28px; --tb-h:26px; --panehead-h:22px; --status-h:20px;
+    --font-ui:"Segoe UI","Helvetica Neue",system-ui,sans-serif;
+    --font-display:var(--font-ui);
+    --font-data:"Cascadia Mono",Consolas,monospace;
+    --fs-ui:11.5px; --fs-data:11.5px; --fs-th:10.5px;
+    --th-transform:uppercase; --th-ls:.6px; --th-weight:700;
+    --nav-h:22px; --pane-shadow:none; --dot-radius:0px;
+  }

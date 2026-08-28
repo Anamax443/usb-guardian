@@ -27,7 +27,7 @@ The server console aggregates data, keeps a station inventory from AD and shows 
 | **Agent↔API encryption** | HTTPS + **thumbprint pinning** (no CA) — verified end-to-end (heartbeat OK from .181) |
 | **AD sync** | enabled 60 min + on-demand; **213 in AD, ~212 without agent** |
 | **Live commit** | **console `fa127ea`** (footer / `/api/version`; staged `cbc7a0a` = unwrapped error message – pending .213 redeploy) · **API live `6f48153`** · **agent `f2bb194`** on .181 (reliable unblock + re-block of connected media – verified from Event Log; **staged `8b2dcaa`** = whitelist cache invalidation – pending agent redeploy). Repo HEAD = `8b2dcaa`/`cbc7a0a`. Reliable stamp = footer = git HEAD |
-| **Console – pages** | Overview (filter+aggregation+sort, capacity, **CSV export + manager report with charts**), Stations (AD inventory + "Agents gone silent" + "Request data" + **Deployment / bulk exclude-include**), Whitelist (**capacity + catalog filter + auto-published signed version**), Settings (enforcement/access/email/alerts/monitoring/auto-enrollment+default PC/retention/**Maintenance: reload settings**), **Database**, Documentation (+HTML animation) |
+| **Console – pages** | Overview (filter+aggregation+sort, capacity, **CSV export + manager report with charts**), Stations (AD inventory + "Agents gone silent" + "Request data" + **Deployment / bulk exclude-include**), Whitelist (**capacity + catalog filter + auto-published signed version**), Settings (enforcement/access/email/alerts/monitoring/auto-enrollment+default PC/retention/**Maintenance: reload settings**), **Database**, **Health checks**, Documentation (+HTML animation) |
 | **Enforcement (P1-3)** | **whitelist 1:1** (server-side auto-sign, internal RSA key on .213) → **enforcement** server→agent (`policy.enforce` in heartbeat) → **break-glass** (local console 5080, offline, logged, cleared on sync) + **auto-re-enable** + whitelist reconciliation. Local console: service restart, break-glass, whitelist list |
 | **Deploy account (auto-enroll)** | **gMSA `AXINETWORK\gmsa-USBGdep$`** – in `PC Admins` (admin on clients) **and local admin on SQL-04** (API deploy); installed on `.213`; deploy task `USBGuardian-AutoDeploy` (under gMSA, via CIM) |
 | **Agent (test) .181** | **PILOT SUCCESSFUL** – `.181` = **TRNKAMW11** (own workstation); service "USB Guardian" RUNNING, heartbeat + **incidents flowing into DB**. Agent live **`f2bb194`** – user attribution, client 100% (watchdog+toast), **enforcement P1-3 + auto-re-enable + reliable unblock + re-block of connected media**. Updating the agent needs elevation (UAC) → run by the user (build staged on .213) |
@@ -168,6 +168,67 @@ device when `IsAllowedKey`=true even while blocking is on. **Bug:** `WhitelistCh
 a new-version download didn't invalidate that cache → approval took effect only after ~5 min (and `ReEnforce` could
 re-block the device meanwhile). Fix: `WhitelistSync` calls `WhitelistChecker.Reload()` after download → the new version
 applies immediately, unblock in the same reconcile cycle.
+
+### 5.6 Health checks + scheduled service restart — DONE (2026-08-28)
+**What it fixed:** on 2026-08-28 the "USB Guardian API" service on SQL-04 turned out to have been **stopped since
+mid-July** (`sc query` → STOPPED, exit code 0 = left down after a deploy/server restart). The agent on `.181` kept
+running and queued incidents locally (7 files, oldest 2026-07-02), but **nothing reached the server for six weeks**.
+The console never said so out loud — the "Agents gone silent" tile showed `1` and nobody looked. After starting the
+service manually the queue drained on its own.
+
+**Health checks (new page `/kontroly`, `Health/HealthService.cs`):** 14 read-only checks in three groups —
+*Data collection* (database, **API reachability**, **age of the newest incident**, silent agents, station coverage),
+*Whitelist and policy* (active version / signature / expiry, catalog vs. publication, signing key, enforcement),
+*Operations* (email, retention, AD sync, auto-enrollment, scheduled restart, console/API/agent version match).
+Every check reports **what it measured + why it matters + what to do**. Four deliberate states so "broken" is never
+confused with "deliberately off": `ok` / `warning` / `ERROR` / `off` (+ `waiting for data`).
+Machine-readable equivalent at **`GET /api/health`** — JSON, **HTTP 200 = fine, 503 = at least one error**
+(a contract external monitoring can act on). Configured in Settings: `health.apiUrl`, `health.maxIncidentAgeHours` (default 48).
+
+**Scheduled service restart (`Maintenance/ServiceRestartService.cs`, Settings):** once a day at the configured time it
+walks a list of `HOST|Service name` targets (empty host = this server). A running service is restarted, **a stopped one
+is started** — that is the safety net for the outage above. Settings: `svc.restart.enabled`, `svc.restart.at` (HH:mm),
+`svc.restart.targets`; the outcome goes to `svc.restart.lastRun` (the health check reads it too). The **"Restart now"**
+button does the same immediately = a check that permissions and service names are right. A missed window is caught up
+for **at most 2 hours**, then it waits for the next day.
+
+> **Permissions:** the restart runs under the **console service account** (`LocalSystem` = the `.213` machine account).
+> On a remote server it needs the right to control that service, otherwise the run returns `CHYBA – přístup odepřen`
+> (visible in the health checks). For the API on SQL-04, grant the console account control of that single service
+> (`sc sdset`), or wait for the API move to `.213` (5.5).
+
+**Same safety net on the client (`agent/USBGuardian/SelfRestart.cs`):** the agent restarts its own service once a day
+(`sc stop` → pause → `sc start` from a detached `cmd.exe`, since a service cannot restart itself from the inside).
+Defaults come from `agent.config.json` (`selfRestart.enabled/at`), switchable from the **local console** (admin-only
+card), state persisted in `C:\ProgramData\USBGuardian\selfrestart.json`.
+
+**Console – runtime info moved up:** clock, deployed commit and the DB availability dot moved from the footer to the top bar.
+
+### 5.7 Console look from the UI bank — switchable in Settings (2026-08-28)
+The console no longer carries its own hand-written palette; the look comes from the **UI bank**
+(repo `Anamax443/Interface-Par`, catalog `mockup/ui-styly-katalog.html`).
+
+- **Copied into `wwwroot/`:** `bank/ui.css`, `bank/fonts.css`, `bank/tokens/style/*.css` (23 styles) and
+  `vendor/fonts/*.woff2` (Cascadia Mono + Inter, latin and **latin-ext** — without it Czech diacritics fall back
+  to another face mid-word). The bank is **never edited**; the catalog generates it (`node scripts/build-bank.mjs`).
+- **`<head>` order** (binding): `fonts.css` → `tokens/style/<style>.css` → `ui.css` → `app.css`.
+- **Skeleton** (`MainLayout.razor`): `.ui[data-style][data-layout]` + `p-title` / `p-nav` / `p-topnav` / `p-main` /
+  `p-status`. Menu items live in one array rendered into both the side and the top nav → **no second source of
+  truth** about navigation. The `.ui` wrapper gets its height from `app.css` (`100vh`).
+- **Switching:** Settings → **Console look** (style + layout), stored in `AppSettings` (`ui.style`, `ui.layout`),
+  read through `UiStyleCache` (singleton, reloaded on save). The value ends up in a **file path**, so it passes a
+  **whitelist** of known styles/layouts — anything else silently falls back to `hmi-slate` / `side-nav`.
+- **Default = `hmi-slate` + `side-nav`** (industrial panel: 2px borders, zero radius, uppercase headers).
+- **`app.css` is now only this app's component layer** and reaches for the bank **roles only**
+  (`--pane`, `--dim`, `--accent`, `--ok`, `--crit`, `--row-h`, `--radius` …). No hard-coded colours, no CSS
+  framework beside the bank.
+- **Verified:** build clean; console run locally against a non-existent DB (no touching of live data) — all seven
+  bank files serve (200), skeleton and menu render, active item highlights. Blazor marks the active `NavLink` with
+  `.active` and `aria-current="page"` while the bank expects `aria-current="true"`, so `app.css` supplies the
+  active-item look.
+
+> **Before adopting another style:** run **Check all styles** in the catalog, in the `side-nav` layout — findings
+> depend on the skeleton, not only on the style.
 
 ### 5.5 Roadmap (pending)
 - **Monitoring of signing cert expiry** – `CN=powershell.axinetwork.loc` valid until 2028-06-17; alert via e-mail from the console.

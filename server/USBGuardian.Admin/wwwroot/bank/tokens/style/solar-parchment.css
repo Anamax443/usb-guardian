@@ -1,0 +1,29 @@
+/* Tokeny stylu solar-parchment
+   GENEROVÁNO skriptem scripts/build-bank.mjs z mockup/ui-styly-katalog.html.
+   Needitovat — změny se přepíšou. Uprav katalog a spusť generátor znovu. */
+
+.ui[data-style="solar-parchment"], .ui {
+    /* Plochy drzi Solarized presne; role, ktere nesou text a znacky, jsou
+       posunute na tmavsi cleny palety -- puvodni base1/yellow maji na base3
+       kontrast pod 3:1 a kontrola je pravem shazovala. */
+    --l-pane:#fdf6e3; --l-chrome:#eee8d5; --l-chromehi:#f5efdc; --l-head:#e6dfc6;
+    --l-zebra:#f7f1de; --l-hover:#e9e2ca; --l-border:#cfc7ad; --l-bordersoft:#e0d9c0;
+    --l-text:#073642; --l-dim:#4c6169; --l-faint:#6f7d7d;
+    --l-accent:#1a6fa8; --l-accsoft:rgba(26,111,168,.14); --l-accfg:#fdf6e3;
+    --l-ok:#6d7f00; --l-warn:#a37a00; --l-crit:#c32724;
+
+    --d-pane:#002b36; --d-chrome:#00212b; --d-chromehi:#073642; --d-head:#073642;
+    --d-zebra:#01303c; --d-hover:#0a4553; --d-border:#14505f; --d-bordersoft:#0c3f4c;
+    --d-text:#eee8d5; --d-dim:#93a1a1; --d-faint:#657b83;
+    --d-accent:#268bd2; --d-accsoft:rgba(38,139,210,.20); --d-accfg:#002b36;
+    --d-ok:#859900; --d-warn:#b58900; --d-crit:#dc322f;
+
+    --radius:2px; --nav-radius:2px; --sel-bar:2px;
+    --row-h:27px; --title-h:34px; --tb-h:31px; --panehead-h:27px; --status-h:23px;
+    --font-ui:"Segoe UI Variable Text","Segoe UI",system-ui,sans-serif;
+    --font-display:var(--font-ui);
+    --font-data:"Cascadia Mono",Consolas,monospace;
+    --fs-ui:12.5px; --fs-data:12px; --fs-th:11.5px;
+    --th-transform:none; --th-ls:.2px; --th-weight:600;
+    --nav-h:28px; --pane-shadow:none; --dot-radius:50%;
+  }

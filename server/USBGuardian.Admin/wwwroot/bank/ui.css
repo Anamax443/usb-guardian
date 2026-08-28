@@ -1,0 +1,461 @@
+/* Vrstva komponent banky — skořápka, tabulka, menu, rozvržení, grafy
+   GENEROVÁNO skriptem scripts/build-bank.mjs z mockup/ui-styly-katalog.html.
+   Needitovat — změny se přepíšou. Uprav katalog a spusť generátor znovu. */
+
+/* Všechno je zanořené pod .ui, takže se to nemíchá se stylem stránky,
+   do které se banka vloží. Tokeny nesou soubory v tokens/. */
+
+.ui {
+    --border-w:1px;
+    --pane:var(--l-pane); --chrome:var(--l-chrome); --chromehi:var(--l-chromehi);
+    --head:var(--l-head); --zebra:var(--l-zebra); --hover:var(--l-hover);
+    --border:var(--l-border); --bordersoft:var(--l-bordersoft);
+    --text:var(--l-text); --dim:var(--l-dim); --faint:var(--l-faint);
+    --accent:var(--l-accent); --accsoft:var(--l-accsoft); --accfg:var(--l-accfg);
+    --ok:var(--l-ok); --warn:var(--l-warn); --crit:var(--l-crit);
+  }
+@media (prefers-color-scheme: dark) {
+  .ui {
+      --pane:var(--d-pane); --chrome:var(--d-chrome); --chromehi:var(--d-chromehi);
+      --head:var(--d-head); --zebra:var(--d-zebra); --hover:var(--d-hover);
+      --border:var(--d-border); --bordersoft:var(--d-bordersoft);
+      --text:var(--d-text); --dim:var(--d-dim); --faint:var(--d-faint);
+      --accent:var(--d-accent); --accsoft:var(--d-accsoft); --accfg:var(--d-accfg);
+      --ok:var(--d-ok); --warn:var(--d-warn); --crit:var(--d-crit);
+    }
+}
+:root[data-theme="light"] .ui {
+    --pane:var(--l-pane); --chrome:var(--l-chrome); --chromehi:var(--l-chromehi);
+    --head:var(--l-head); --zebra:var(--l-zebra); --hover:var(--l-hover);
+    --border:var(--l-border); --bordersoft:var(--l-bordersoft);
+    --text:var(--l-text); --dim:var(--l-dim); --faint:var(--l-faint);
+    --accent:var(--l-accent); --accsoft:var(--l-accsoft); --accfg:var(--l-accfg);
+    --ok:var(--l-ok); --warn:var(--l-warn); --crit:var(--l-crit);
+  }
+:root[data-theme="dark"] .ui {
+    --pane:var(--d-pane); --chrome:var(--d-chrome); --chromehi:var(--d-chromehi);
+    --head:var(--d-head); --zebra:var(--d-zebra); --hover:var(--d-hover);
+    --border:var(--d-border); --bordersoft:var(--d-bordersoft);
+    --text:var(--d-text); --dim:var(--d-dim); --faint:var(--d-faint);
+    --accent:var(--d-accent); --accsoft:var(--d-accsoft); --accfg:var(--d-accfg);
+    --ok:var(--d-ok); --warn:var(--d-warn); --crit:var(--d-crit);
+  }
+/* --------------------------------------------------------------------------
+     Barvy dat. Záměrně NEZÁVISLÉ na stylu: akcent je barva rozhraní, tohle je
+     barva dat. Kdyby se série překreslila při změně stylu, ztratí identitu.
+     Ověřeno scripts/validate_palette.js — všech šest kontrol prošlo v obou
+     režimech i na nejhorších podkladech z katalogu.
+     -------------------------------------------------------------------------- */
+.ui { --viz-1:#2a78d6; --viz-2:#eb6834; --viz-pos:#2a78d6; --viz-neg:#e34948; }
+@media (prefers-color-scheme: dark) {
+  .ui { --viz-1:#3987e5; --viz-2:#d95926; --viz-pos:#3987e5; --viz-neg:#e66767; }
+}
+:root[data-theme="light"] .ui { --viz-1:#2a78d6; --viz-2:#eb6834; --viz-pos:#2a78d6; --viz-neg:#e34948; }
+:root[data-theme="dark"] .ui { --viz-1:#3987e5; --viz-2:#d95926; --viz-pos:#3987e5; --viz-neg:#e66767; }
+/* ==========================================================================
+     4. APLIKACE — jediný markup, mění se jen tokeny
+     ========================================================================== */
+/* Rozvrzeni je druha, nezavisla osa: styl meni tokeny, rozvrzeni meni
+     kostru okna. Obsah je v obou pripadech tentyz -- vodorovne menu se
+     naklonuje z bocniho, detail i konzole jsou v markupu vzdy a jen se
+     odkryvaji. Diky tomu neexistuje druhy zdroj pravdy o polozkach menu. */
+.ui {
+    /* Výšku určuje místo, kam banku vložíš (v katalogu je to náhled 540 px).
+       Obal je mřížka — bez výšky se srazí na obsah. */
+    min-height: 240px;
+    display: grid;
+    grid-template-columns: 186px 1fr;
+    grid-template-rows: var(--title-h) 1fr var(--status-h);
+    grid-template-areas: "t t" "n m" "s s";
+    background: var(--chrome);
+    color: var(--text);
+    font-family: var(--font-ui);
+    font-size: var(--fs-ui);
+    line-height: 1.35;
+  }
+.ui .icon { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.ui .icon-sm { width: 13px; height: 13px; }
+/* --- titulní lišta --- */
+.ui .p-title {
+    grid-area: t;
+    display: flex; align-items: center; gap: 9px;
+    padding: 0 11px;
+    background: var(--chromehi);
+    border-bottom: var(--border-w) solid var(--border);
+  }
+.ui .p-brand {
+    display: flex; align-items: center; gap: 7px;
+    font-family: var(--font-display);
+    font-weight: 650;
+  }
+.ui .p-brand .mark {
+    width: 15px; height: 15px; flex: none;
+    border: 1.5px solid var(--accent);
+    border-radius: var(--radius);
+    position: relative;
+  }
+.ui .p-brand .mark::after {
+    content: ""; position: absolute; inset: 3px 3px auto 3px;
+    height: 1.5px; background: var(--accent); box-shadow: 0 3px 0 var(--accent);
+  }
+.ui .p-brand .sub { color: var(--dim); font-weight: 400; }
+.ui .p-title .vsep { width: 1px; align-self: stretch; margin: 7px 1px; background: var(--border); }
+.ui .p-title .grow { flex: 1; }
+.ui .p-field {
+    display: flex; align-items: center; gap: 6px;
+    padding: 3px 8px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--pane);
+    color: var(--dim);
+    font-size: calc(var(--fs-ui) - .5px);
+  }
+/* --- boční menu --- */
+.ui .p-nav {
+    grid-area: n;
+    background: var(--chrome);
+    border-right: var(--border-w) solid var(--border);
+    padding: 5px 6px;
+    overflow-y: auto;
+  }
+.ui .p-navitem {
+    display: flex; align-items: center; gap: 9px;
+    width: 100%; height: var(--nav-h);
+    padding: 0 8px;
+    border: 0; border-radius: var(--nav-radius);
+    background: none; color: var(--text);
+    font: inherit; text-align: left; cursor: default;
+    /* Vyska je dana tokenem, takze popisek nesmi zalomit -- pri sirsim pismu
+       (mono styly) by druhy radek prekryl nasledujici polozku. */
+    white-space: nowrap; overflow: hidden;
+  }
+.ui .p-navitem .lbl { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ui .p-navitem:hover { background: var(--hover); }
+.ui .p-navitem .icon { color: var(--dim); }
+.ui .p-navitem[aria-current="true"] {
+    background: var(--accsoft);
+    box-shadow: inset var(--sel-bar) 0 0 var(--accent);
+    font-weight: 650;
+  }
+.ui .p-navitem[aria-current="true"] .icon { color: var(--accent); }
+.ui .p-navsec {
+    padding: 12px 8px 4px;
+    font-size: 10px; letter-spacing: .6px; text-transform: uppercase;
+    color: var(--faint);
+  }
+/* --- hlavní panel --- */
+.ui .p-main { grid-area: m; display: flex; flex-direction: column; min-width: 0; background: var(--pane); }
+.ui .p-panehead {
+    display: flex; align-items: center; gap: 8px;
+    height: var(--panehead-h); padding: 0 11px;
+    background: var(--accsoft);
+    border-bottom: var(--border-w) solid var(--border);
+    font-family: var(--font-display);
+    font-weight: 650;
+  }
+.ui .p-panehead .icon { color: var(--accent); }
+.ui .p-panehead .n { margin-left: auto; font-weight: 400; color: var(--dim); font-family: var(--font-ui); font-size: calc(var(--fs-ui) - .5px); }
+.ui .p-toolbar {
+    display: flex; align-items: center; gap: 8px;
+    height: var(--tb-h); padding: 0 8px;
+    background: var(--chromehi);
+    border-bottom: var(--border-w) solid var(--border);
+    overflow-x: auto;
+  }
+.ui .p-btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 4px 10px;
+    border: 1px solid transparent; border-radius: var(--radius);
+    background: none; color: var(--text); font: inherit; white-space: nowrap; cursor: default;
+    box-shadow: var(--pane-shadow);
+  }
+.ui .p-btn:hover { background: var(--pane); border-color: var(--border); }
+.ui .p-btn .icon { color: var(--accent); }
+.ui .p-toolbar .meta { color: var(--dim); font-size: calc(var(--fs-ui) - .5px); white-space: nowrap; }
+.ui .p-toolbar .vsep { width: 1px; height: 15px; background: var(--border); flex: none; }
+.ui .p-gridwrap { flex: 1; overflow: auto; }
+.ui .p-table { border-collapse: collapse; width: 100%; min-width: 880px; }
+.ui .p-table thead th {
+    position: sticky; top: 0; z-index: 3;
+    height: calc(var(--row-h) + 2px);
+    padding: 0 10px;
+    background: var(--head);
+    border-bottom: var(--border-w) solid var(--border);
+    color: var(--dim);
+    font-family: var(--font-ui);
+    font-size: var(--fs-th);
+    font-weight: var(--th-weight);
+    letter-spacing: var(--th-ls);
+    text-transform: var(--th-transform);
+    text-align: left; white-space: nowrap;
+  }
+.ui .p-table tbody td {
+    height: var(--row-h);
+    padding: 0 10px;
+    border-bottom: var(--border-w) solid var(--bordersoft);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+.ui .p-table tbody tr:nth-child(even) td { background: var(--zebra); }
+.ui .p-table tbody tr:hover td { background: var(--hover); }
+.ui .p-table tbody tr[data-sel="true"] td { background: var(--accsoft); }
+.ui .p-table tbody tr[data-sel="true"] td:first-child { box-shadow: inset var(--sel-bar) 0 0 var(--accent); }
+.ui .c-date { font-family: var(--font-data); font-size: var(--fs-data); color: var(--dim); width: 108px; }
+.ui .c-amt { font-family: var(--font-data); font-size: var(--fs-data); text-align: right; width: 108px; font-variant-numeric: tabular-nums; font-weight: 600; }
+.ui .c-vs { font-family: var(--font-data); font-size: var(--fs-data); width: 108px; color: var(--dim); }
+.ui .c-to { width: 168px; }
+.ui .c-state { width: 148px; }
+.ui th.c-amt { text-align: right; }
+.ui .p-state { display: inline-flex; align-items: center; }
+.ui .p-dot {
+    display: inline-block; width: 7px; height: 7px; flex: none;
+    margin-right: 7px; border-radius: var(--dot-radius);
+    background: var(--faint);
+  }
+.ui .st-ok  .p-dot { background: var(--ok); }
+.ui .st-warn .p-dot { background: var(--warn); }
+.ui .st-crit .p-dot { background: var(--crit); }
+.ui .st-man .p-dot { background: var(--accent); }
+.ui .dim { color: var(--dim); }
+/* skutecny text, ne dekorace -- proto --dim, ne --faint */
+/* --- stavový řádek --- */
+.ui .p-status {
+    grid-area: s;
+    display: flex; align-items: center;
+    padding: 0 11px;
+    background: var(--chromehi);
+    border-top: var(--border-w) solid var(--border);
+    color: var(--dim);
+    font-size: calc(var(--fs-ui) - 1px);
+  }
+.ui .p-status > span { padding: 0 10px; border-right: var(--border-w) solid var(--border); }
+.ui .p-status > span:first-child { padding-left: 0; }
+.ui .p-status > span:last-child { border-right: 0; }
+.ui .p-status b { color: var(--text); font-weight: 650; font-variant-numeric: tabular-nums; }
+.ui .p-status .grow { flex: 1; border-right: 0; }
+.ui [hidden] { display: none !important; }
+/* --- vodorovne menu (rozvrzeni bez bocniho panelu) --- */
+.ui .p-topnav {
+    grid-area: n;
+    display: none;
+    align-items: center;
+    gap: 2px;
+    padding: 0 6px;
+    background: var(--chrome);
+    border-bottom: var(--border-w) solid var(--border);
+    /* Na uzsim okne se zalozky nevejdou a objevi se posuvnik. Ten si ukousne
+       kus vysky, takze pas nesmi mit vysku pevne danou -- jinak se do nej
+       zalozka prestane vejit. Rada v mrizce je proto `auto` a tady je jen
+       spodni mez. */
+    min-height: var(--nav-h);
+    overflow-x: auto;
+  }
+.ui .p-topnav .p-navitem {
+    width: auto; flex: none;
+    height: var(--nav-h);
+    padding: 0 12px;
+    border-radius: 0;
+    /* Zalozka se hlasi spodni hranou, ne plochou -- plocha uz nese vyber
+       radku v tabulce a dve stejne vyznamy se pletou. */
+    box-shadow: none;
+  }
+.ui .p-topnav .p-navitem[aria-current="true"] {
+    background: var(--pane);
+    box-shadow: inset 0 calc(-1 * var(--sel-bar, 2px)) 0 var(--accent);
+  }
+.ui .p-topnav .p-navsep { width: 1px; align-self: center; height: 60%; background: var(--border); margin: 0 4px; }
+/* --- detailni panel (rozvrzeni seznam + detail) --- */
+.ui .p-detail {
+    grid-area: d;
+    display: none;
+    flex-direction: column;
+    min-width: 0;
+    background: var(--pane);
+    border-left: var(--border-w) solid var(--border);
+  }
+.ui .p-detail .dhead {
+    display: flex; align-items: center; gap: 8px;
+    height: var(--panehead-h); padding: 0 11px;
+    background: var(--accsoft);
+    border-bottom: var(--border-w) solid var(--border);
+    font-family: var(--font-display); font-weight: 650;
+  }
+.ui .p-detail dl { margin: 0; padding: 10px 12px; overflow: auto; }
+.ui .p-detail dt {
+    color: var(--dim); font-size: calc(var(--fs-ui) - 1.5px);
+    margin-top: 9px;
+  }
+.ui .p-detail dt:first-child { margin-top: 0; }
+.ui .p-detail dd {
+    margin: 1px 0 0;
+    font-family: var(--font-data); font-size: var(--fs-data);
+    font-variant-numeric: tabular-nums;
+  }
+/* --- spodni konzole (rozvrzeni mrizka + log) --- */
+.ui .p-console {
+    grid-area: c;
+    display: none;
+    flex-direction: column;
+    min-height: 0;
+    background: var(--pane);
+    border-top: var(--border-w) solid var(--border);
+  }
+.ui .p-console .chead {
+    display: flex; align-items: center; gap: 8px;
+    height: var(--panehead-h); padding: 0 11px;
+    background: var(--chromehi);
+    border-bottom: var(--border-w) solid var(--bordersoft);
+    font-weight: 650; font-size: calc(var(--fs-ui) - .5px);
+  }
+.ui .p-console .clog {
+    margin: 0; padding: 7px 11px; overflow: auto; flex: 1;
+    font-family: var(--font-data); font-size: var(--fs-data); line-height: 1.5;
+  }
+.ui .p-console .clog span { color: var(--dim); }
+.ui .p-console .clog b { font-weight: 400; color: var(--text); }
+/* ==========================================================================
+     ROZVRZENI
+     ========================================================================== */
+/* bocni panel -- vychozi, definovano vyse */
+/* horni menu: bez bocniho panelu, cela sirka pro data */
+.ui[data-layout="top-tabs"] {
+    grid-template-columns: 1fr;
+    grid-template-rows: var(--title-h) auto 1fr var(--status-h);
+    grid-template-areas: "t" "n" "m" "s";
+  }
+.ui[data-layout="top-tabs"] .p-nav { display: none; }
+.ui[data-layout="top-tabs"] .p-topnav { display: flex; }
+/* uzka lista: jen ikony, popisek nese title */
+.ui[data-layout="rail"] { grid-template-columns: 44px 1fr; }
+.ui[data-layout="rail"] .p-nav { padding: 5px 4px; }
+.ui[data-layout="rail"] .p-navitem { justify-content: center; padding: 0; }
+.ui[data-layout="rail"] .p-navitem .lbl { display: none; }
+.ui[data-layout="rail"] .p-navsec {
+    padding: 10px 0 4px; text-align: center; font-size: 9px; letter-spacing: 0;
+  }
+/* seznam + detail: vybrany radek ma vlastni panel vpravo */
+.ui[data-layout="master-detail"] {
+    grid-template-columns: 186px 1fr 252px;
+    grid-template-areas: "t t t" "n m d" "s s s";
+  }
+.ui[data-layout="master-detail"] .p-detail { display: flex; }
+/* mrizka + konzole: prubeh ulohy je videt zaroven s daty */
+.ui[data-layout="split-console"] {
+    grid-template-rows: var(--title-h) 1fr 132px var(--status-h);
+    grid-template-areas: "t t" "n m" "n c" "s s";
+  }
+.ui[data-layout="split-console"] .p-console { display: flex; }
+@media (max-width: 760px) {
+  .ui[data-layout="master-detail"] {
+      grid-template-columns: 186px 1fr;
+      grid-template-areas: "t t" "n m" "s s";
+    }
+  .ui[data-layout="master-detail"] .p-detail { display: none; }
+}
+/* ==========================================================================
+     5. GRAFY
+     Marks podle specifikace: sloupce ≤24 px se zaoblenou datovou hranou a
+     hranatou patou, čáry 2 px, mezera 2 px v barvě podkladu mezi doteky,
+     mřížka vlasová a ustupující, popisky výběrové. Text nikdy nenosí barvu dat.
+     ========================================================================== */
+.ui .p-charts {
+    flex: 1;
+    overflow: auto;
+    padding: 14px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+    align-content: start;
+    position: relative;
+  }
+.ui .viz-wide { grid-column: 1 / -1; }
+@media (max-width: 780px) {
+  .ui .p-charts { grid-template-columns: 1fr; }
+}
+/* --- pruh ukazatelů --- */
+.ui .viz-kpis {
+    grid-column: 1 / -1;
+    display: flex; flex-wrap: wrap;
+    border: var(--border-w) solid var(--border);
+    border-radius: var(--radius);
+    background: var(--pane);
+  }
+.ui .viz-tile {
+    flex: 1; min-width: 168px;
+    padding: 9px 13px;
+    display: flex; flex-direction: column; gap: 1px;
+    border-right: var(--border-w) solid var(--bordersoft);
+  }
+.ui .viz-tile:last-child { border-right: 0; }
+.ui .viz-label { color: var(--dim); font-size: calc(var(--fs-ui) - 1.5px); }
+.ui .viz-value { font-size: calc(var(--fs-ui) + 9px); font-weight: 650; line-height: 1.25; }
+.ui .viz-delta { font-size: calc(var(--fs-ui) - 1.5px); }
+.ui .viz-delta.good { color: var(--ok); }
+.ui .viz-delta.bad { color: var(--crit); }
+.ui .viz-spark { display: block; width: 100%; height: 34px; margin-top: 5px; overflow: visible; }
+/* --- karta grafu --- */
+.ui .viz-card {
+    margin: 0;
+    padding: 11px 13px 9px;
+    border: var(--border-w) solid var(--border);
+    border-radius: var(--radius);
+    background: var(--pane);
+    box-shadow: var(--pane-shadow);
+    min-width: 0;
+  }
+.ui .viz-card figcaption { display: flex; flex-direction: column; gap: 1px; margin-bottom: 3px; }
+.ui .viz-title { font-family: var(--font-display); font-weight: 650; }
+.ui .viz-sub { color: var(--dim); font-size: calc(var(--fs-ui) - 1.5px); }
+.ui .viz-legend { display: flex; flex-wrap: wrap; gap: 13px; margin: 6px 0 2px; }
+.ui .viz-legend span { display: inline-flex; align-items: center; gap: 6px; color: var(--dim); font-size: calc(var(--fs-ui) - 1.5px); }
+.ui .viz-legend i { width: 10px; height: 10px; flex: none; border-radius: 2px; }
+.ui .viz-legend i.line { height: 3px; border-radius: 2px; }
+.ui .viz-legend i.sw-1 { background: var(--viz-1); }
+.ui .viz-legend i.sw-2 { background: var(--viz-2); }
+.ui .viz-legend i.sw-p { background: var(--viz-pos); }
+.ui .viz-legend i.sw-n { background: var(--viz-neg); }
+.ui .viz-plot { position: relative; }
+.ui .viz-plot svg { display: block; width: 100%; }
+.ui .viz-table { margin-top: 7px; }
+.ui .viz-table summary {
+    cursor: pointer; color: var(--dim);
+    font-size: calc(var(--fs-ui) - 1.5px);
+    padding: 2px 0;
+  }
+.ui .viz-table summary:hover { color: var(--text); }
+.ui .viz-table table { border-collapse: collapse; width: 100%; margin-top: 4px; }
+.ui .viz-table th, .ui .viz-table td {
+    padding: 2px 8px 2px 0; text-align: left;
+    border-bottom: 1px solid var(--bordersoft);
+    font-size: calc(var(--fs-ui) - 1.5px);
+  }
+.ui .viz-table th { color: var(--dim); font-weight: 600; }
+.ui .viz-table td.num { text-align: right; font-family: var(--font-data); font-variant-numeric: tabular-nums; }
+/* --- značky --- */
+.ui .viz-b1 { fill: var(--viz-1); }
+.ui .viz-b2 { fill: var(--viz-2); }
+.ui .viz-bp { fill: var(--viz-pos); }
+.ui .viz-bn { fill: var(--viz-neg); }
+.ui .viz-ref { stroke: var(--viz-2); stroke-width: 2; fill: none; stroke-linecap: round; }
+.ui .viz-grid { stroke: var(--bordersoft); stroke-width: 1; }
+.ui .viz-axis { stroke: var(--border); stroke-width: 1; }
+.ui .viz-tick { fill: var(--faint); font-size: 10px; font-family: var(--font-ui); font-variant-numeric: tabular-nums; }
+.ui .viz-val { fill: var(--dim); font-size: 10.5px; font-family: var(--font-ui); font-variant-numeric: tabular-nums; }
+.ui .viz-cat { fill: var(--text); font-size: 11px; font-family: var(--font-ui); }
+.ui .viz-sparkline { stroke: var(--faint); stroke-width: 2; fill: none; stroke-linejoin: round; stroke-linecap: round; }
+.ui .viz-sparkdot { fill: var(--viz-1); stroke: var(--pane); stroke-width: 2; }
+.ui .viz-hit { fill: transparent; cursor: default; }
+/* --- bublina --- */
+.ui .viz-tip {
+    position: absolute; z-index: 30;
+    pointer-events: none;
+    padding: 5px 9px;
+    background: var(--pane);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: 0 3px 10px rgba(0,0,0,.22);
+    font-size: calc(var(--fs-ui) - 1px);
+    white-space: nowrap;
+    transform: translate(-50%, -100%);
+  }
+.ui .viz-tip[hidden] { display: none !important; }
+.ui .viz-tip b { font-variant-numeric: tabular-nums; }

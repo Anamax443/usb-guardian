@@ -1,0 +1,26 @@
+/* Tokeny stylu admin-common
+   GENEROVÁNO skriptem scripts/build-bank.mjs z mockup/ui-styly-katalog.html.
+   Needitovat — změny se přepíšou. Uprav katalog a spusť generátor znovu. */
+
+.ui[data-style="admin-common"], .ui {
+    --l-pane:#ffffff; --l-chrome:#ffffff; --l-chromehi:#ffffff; --l-head:#fafafa;
+    --l-zebra:#ffffff; --l-hover:#f5f5f5; --l-border:#f0f0f0; --l-bordersoft:#f0f0f0;
+    --l-text:#1f1f1f; --l-dim:#595959; --l-faint:#8c8c8c;
+    --l-accent:#1677ff; --l-accsoft:#e6f4ff; --l-accfg:#ffffff;
+    --l-ok:#389e0d; --l-warn:#d48806; --l-crit:#cf1322;
+
+    --d-pane:#1f1f1f; --d-chrome:#141414; --d-chromehi:#1f1f1f; --d-head:#262626;
+    --d-zebra:#1f1f1f; --d-hover:#262626; --d-border:#303030; --d-bordersoft:#303030;
+    --d-text:#e6e6e6; --d-dim:#a6a6a6; --d-faint:#737373;
+    --d-accent:#1668dc; --d-accsoft:#111a2c; --d-accfg:#ffffff;
+    --d-ok:#49aa19; --d-warn:#d89614; --d-crit:#dc4446;
+
+    --radius:6px; --nav-radius:6px; --sel-bar:0px;
+    --row-h:40px; --title-h:50px; --tb-h:46px; --panehead-h:40px; --status-h:32px;
+    --font-ui:"Segoe UI","Helvetica Neue",system-ui,sans-serif;
+    --font-display:var(--font-ui);
+    --font-data:"Segoe UI","Helvetica Neue",sans-serif;
+    --fs-ui:14px; --fs-data:14px; --fs-th:14px;
+    --th-transform:none; --th-ls:0; --th-weight:600;
+    --nav-h:40px; --pane-shadow:0 2px 6px rgba(0,0,0,.08); --dot-radius:50%;
+  }

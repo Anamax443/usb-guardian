@@ -38,6 +38,7 @@ public class LocalConsoleService : BackgroundService
     private readonly IncidentLogger _incidents;
     private readonly PolicyState _policy;
     private readonly DeviceBlocker _blocker;
+    private readonly SelfRestartManager _selfRestart;
     private readonly string _policyMode;
     private readonly int _port;
 
@@ -50,6 +51,7 @@ public class LocalConsoleService : BackgroundService
         IncidentLogger incidents,
         PolicyState policy,
         DeviceBlocker blocker,
+        SelfRestartManager selfRestart,
         string policyMode,
         int port)
     {
@@ -59,6 +61,7 @@ public class LocalConsoleService : BackgroundService
         _incidents  = incidents;
         _policy     = policy;
         _blocker    = blocker;
+        _selfRestart = selfRestart;
         _policyMode = policyMode;
         _port       = port;
     }
@@ -157,6 +160,10 @@ public class LocalConsoleService : BackgroundService
             {
                 HandleRestart(ctx);
             }
+            else if (method == "POST" && path.Equals("/api/selfrestart", StringComparison.OrdinalIgnoreCase))
+            {
+                HandleSelfRestartConfig(ctx);
+            }
             else if (path.Equals("/api/status", StringComparison.OrdinalIgnoreCase))
             {
                 WriteJson(ctx, BuildStatus());
@@ -223,17 +230,28 @@ public class LocalConsoleService : BackgroundService
         // odpovědět JEŠTĚ před restartem, ať klient dostane potvrzení
         WriteJson(ctx, new { restarting = true, by });
 
-        try
+        // Vlastní provedení je v SelfRestartManageru – stejný kód použije i plánovaný noční restart.
+        _selfRestart.Restart(by, scheduled: false);
+    }
+
+    // --------------------------------------------------------
+    // Nastavení plánovaného (denního) restartu služby z lokální konzole.
+    // Admin-only jako všechno ostatní; stav se perzistuje do ProgramData.
+    // --------------------------------------------------------
+    private void HandleSelfRestartConfig(HttpListenerContext ctx)
+    {
+        var by      = ctx.User?.Identity?.Name ?? "lokální admin";
+        var enabled = string.Equals(ctx.Request.QueryString["enabled"], "true", StringComparison.OrdinalIgnoreCase);
+        var at      = ctx.Request.QueryString["at"] ?? _selfRestart.At;
+
+        if (!SelfRestartManager.TryParseTime(at, out _))
         {
-            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
-            {
-                FileName        = "cmd.exe",
-                Arguments       = "/c sc stop \"USB Guardian\" & ping -n 4 127.0.0.1 >nul & sc start \"USB Guardian\"",
-                UseShellExecute = false,
-                CreateNoWindow  = true
-            });
+            WriteText(ctx, 400, "400 – cas musi byt ve tvaru HH:mm");
+            return;
         }
-        catch (Exception ex) { _logger.LogError(ex, "Restart služby selhal"); }
+
+        _selfRestart.Configure(enabled, at, by);
+        WriteJson(ctx, BuildStatus());
     }
 
     // --------------------------------------------------------
@@ -330,6 +348,15 @@ public class LocalConsoleService : BackgroundService
                 files          = files,
                 pendingRecords = pending
             },
+            selfRestart = new
+            {
+                enabled    = _selfRestart.Enabled,
+                at         = _selfRestart.At,
+                lastResult = _selfRestart.LastResult,
+                changedBy  = _selfRestart.ChangedBy,
+                changedAt  = _selfRestart.ChangedAt,
+                service    = _selfRestart.ServiceName
+            },
             recent
         };
     }
@@ -401,6 +428,7 @@ public class LocalConsoleService : BackgroundService
             .warn { background:#3a2d10; color:#e3b341; }
             .bad { background:#3a1518; color:#f85149; }
             .muted { color:#6e7681; }
+            .muted-pill { background:#21262d; color:#8b949e; }
             .empty { color:#6e7681; font-size:13px; padding:8px 0; }
             .btn { font:inherit; font-size:12px; margin-top:10px; padding:7px 11px; border:1px solid #2a2f37;
                    background:#1c2333; color:#e6e6e6; border-radius:7px; cursor:pointer; }
@@ -441,6 +469,15 @@ public class LocalConsoleService : BackgroundService
               try{ await fetch('/api/unblock-all', {method:'POST'}); }catch(e){}
               refresh();
             }
+            async function saveSelfRestart(){
+              const en = document.getElementById('srEnabled').checked;
+              const at = document.getElementById('srAt').value;
+              try{
+                const r = await fetch('/api/selfrestart?enabled='+en+'&at='+encodeURIComponent(at), {method:'POST'});
+                if(!r.ok){ alert('Nelze uložit: ' + await r.text()); }
+              }catch(e){ alert('Nelze uložit: '+e.message); }
+              refresh();
+            }
             async function restartSvc(){
               if(!confirm('Restartovat klientskou službu USB Guardian? Konzole se na pár sekund odmlčí.')) return;
               try{ await fetch('/api/restart', {method:'POST'}); }catch(e){}
@@ -465,6 +502,7 @@ public class LocalConsoleService : BackgroundService
                 `${d.hostname} · policy: ${d.policyMode} · agent ${d.agentCommit||'?'} · ${dt(d.generatedAt)}`;
 
               const wl = d.whitelist, mon = d.monitor, q = d.queue, enf = d.enforcement || {};
+              const sr = d.selfRestart || {};
               const stale = mon.secondsSinceLastEvent > 600;
               const enfPill = enf.overrideActive
                 ? '<span class="pill warn">BREAK-GLASS (neblokuje)</span>'
@@ -523,6 +561,19 @@ public class LocalConsoleService : BackgroundService
                   <div class="row"><span>Agent</span><span>${esc(d.agentCommit||'?')}</span></div>
                   <div class="row"><span>Stav</span><span>běží</span></div>
                   <button class="btn" onclick="restartSvc()">↻ Restart služby</button>
+                </div>
+                <div class="card">
+                  <h2>Plánovaný restart</h2>
+                  <div class="big">${sr.enabled ? '<span class="pill ok">ZAPNUTO</span>' : '<span class="pill muted-pill">vypnuto</span>'}</div>
+                  <div class="row"><span>Denně v</span>
+                    <span><input id="srAt" type="time" value="${esc(sr.at||'03:30')}"></span></div>
+                  <div class="row"><span>Zapnuto</span>
+                    <span><input id="srEnabled" type="checkbox" ${sr.enabled ? 'checked' : ''}></span></div>
+                  <div class="row"><span>Poslední běh</span><span>${sr.lastResult ? esc(sr.lastResult) : '—'}</span></div>
+                  <button class="btn" onclick="saveSelfRestart()">Uložit plán</button>
+                  <div class="muted" style="font-size:11px;margin-top:6px">
+                    Služba se jednou denně sama restartuje. Když stanice v ten čas neběžela,
+                    dohání se to nejvýš dvě hodiny — pak se počká na další den.</div>
                 </div>
                 <div class="card full">
                   <h2>Schválená zařízení – whitelist (${(wl.devices||[]).length})</h2>

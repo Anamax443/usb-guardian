@@ -1,0 +1,26 @@
+/* Tokeny stylu paper-doc
+   GENEROVÁNO skriptem scripts/build-bank.mjs z mockup/ui-styly-katalog.html.
+   Needitovat — změny se přepíšou. Uprav katalog a spusť generátor znovu. */
+
+.ui[data-style="paper-doc"], .ui {
+    --l-pane:#ffffff; --l-chrome:#f7f6f3; --l-chromehi:#fdfcfa; --l-head:#f2f0ec;
+    --l-zebra:#ffffff; --l-hover:#f2f0ea; --l-border:#d9d5cc; --l-bordersoft:#e8e5de;
+    --l-text:#22201c; --l-dim:#5d574c; --l-faint:#8d8578;
+    --l-accent:#33604a; --l-accsoft:rgba(51,96,74,.10); --l-accfg:#ffffff;
+    --l-ok:#33604a; --l-warn:#8a6212; --l-crit:#8f3128;
+
+    --d-pane:#232220; --d-chrome:#1b1a18; --d-chromehi:#2a2825; --d-head:#2d2b27;
+    --d-zebra:#232220; --d-hover:#302e2a; --d-border:#3b3833; --d-bordersoft:#322f2b;
+    --d-text:#e6e2d9; --d-dim:#a29a8c; --d-faint:#7d7568;
+    --d-accent:#7fb097; --d-accsoft:rgba(127,176,151,.14); --d-accfg:#1b1a18;
+    --d-ok:#7fb097; --d-warn:#c9a24a; --d-crit:#d4796c;
+
+    --radius:0px; --nav-radius:0px; --sel-bar:2px;
+    --row-h:30px; --title-h:42px; --tb-h:34px; --panehead-h:34px; --status-h:26px;
+    --font-ui:"Segoe UI","Helvetica Neue",system-ui,sans-serif;
+    --font-display:Cambria,Constantia,Georgia,"Times New Roman",serif;
+    --font-data:Cambria,Georgia,"Times New Roman",serif;
+    --fs-ui:13.5px; --fs-data:13.5px; --fs-th:11.5px;
+    --th-transform:uppercase; --th-ls:.8px; --th-weight:600;
+    --nav-h:30px; --pane-shadow:none; --dot-radius:0px;
+  }

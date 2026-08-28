@@ -1,0 +1,27 @@
+/* Tokeny stylu contrast-a11y
+   GENEROVÁNO skriptem scripts/build-bank.mjs z mockup/ui-styly-katalog.html.
+   Needitovat — změny se přepíšou. Uprav katalog a spusť generátor znovu. */
+
+.ui[data-style="contrast-a11y"], .ui {
+    --l-pane:#ffffff; --l-chrome:#ffffff; --l-chromehi:#ffffff; --l-head:#ebebeb;
+    --l-zebra:#ffffff; --l-hover:#dedede; --l-border:#000000; --l-bordersoft:#000000;
+    --l-text:#000000; --l-dim:#262626; --l-faint:#4a4a4a;
+    --l-accent:#0b4f9e; --l-accsoft:#d6e4f7; --l-accfg:#ffffff;
+    --l-ok:#0a5c2a; --l-warn:#6b4400; --l-crit:#a80000;
+
+    --d-pane:#000000; --d-chrome:#000000; --d-chromehi:#0a0a0a; --d-head:#1a1a1a;
+    --d-zebra:#000000; --d-hover:#2b2b2b; --d-border:#ffffff; --d-bordersoft:#c4c4c4;
+    --d-text:#ffffff; --d-dim:#e4e4e4; --d-faint:#bcbcbc;
+    --d-accent:#7cc4ff; --d-accsoft:#0a2a45; --d-accfg:#000000;
+    --d-ok:#55d97f; --d-warn:#ffcc4d; --d-crit:#ff7d70;
+
+    --border-w:2px;
+    --radius:0px; --nav-radius:0px; --sel-bar:5px;
+    --row-h:34px; --title-h:44px; --tb-h:40px; --panehead-h:34px; --status-h:28px;
+    --font-ui:"Segoe UI","Helvetica Neue",system-ui,sans-serif;
+    --font-display:var(--font-ui);
+    --font-data:Consolas,"Cascadia Mono",monospace;
+    --fs-ui:15px; --fs-data:14.5px; --fs-th:14px;
+    --th-transform:none; --th-ls:.2px; --th-weight:700;
+    --nav-h:36px; --pane-shadow:none; --dot-radius:0px;
+  }

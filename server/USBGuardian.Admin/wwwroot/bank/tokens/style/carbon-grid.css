@@ -1,0 +1,26 @@
+/* Tokeny stylu carbon-grid
+   GENEROVÁNO skriptem scripts/build-bank.mjs z mockup/ui-styly-katalog.html.
+   Needitovat — změny se přepíšou. Uprav katalog a spusť generátor znovu. */
+
+.ui[data-style="carbon-grid"], .ui {
+    --l-pane:#ffffff; --l-chrome:#f4f4f4; --l-chromehi:#ffffff; --l-head:#f4f4f4;
+    --l-zebra:#ffffff; --l-hover:#e8e8e8; --l-border:#e0e0e0; --l-bordersoft:#e0e0e0;
+    --l-text:#161616; --l-dim:#525252; --l-faint:#8d8d8d;
+    --l-accent:#0f62fe; --l-accsoft:#edf5ff; --l-accfg:#ffffff;
+    --l-ok:#198038; --l-warn:#8e6a00; --l-crit:#da1e28;
+
+    --d-pane:#262626; --d-chrome:#161616; --d-chromehi:#262626; --d-head:#393939;
+    --d-zebra:#262626; --d-hover:#353535; --d-border:#393939; --d-bordersoft:#393939;
+    --d-text:#f4f4f4; --d-dim:#c6c6c6; --d-faint:#8d8d8d;
+    --d-accent:#4589ff; --d-accsoft:#0043ce; --d-accfg:#161616;
+    --d-ok:#42be65; --d-warn:#d2a106; --d-crit:#fa4d56;
+
+    --radius:0px; --nav-radius:0px; --sel-bar:3px;
+    --row-h:32px; --title-h:40px; --tb-h:36px; --panehead-h:32px; --status-h:26px;
+    --font-ui:"Segoe UI","Helvetica Neue",system-ui,sans-serif;
+    --font-display:var(--font-ui);
+    --font-data:Consolas,"Cascadia Mono",monospace;
+    --fs-ui:13.5px; --fs-data:13px; --fs-th:12px;
+    --th-transform:none; --th-ls:.16px; --th-weight:600;
+    --nav-h:32px; --pane-shadow:none; --dot-radius:0px;
+  }

@@ -1,0 +1,32 @@
+/* Tokeny stylu ticker-black
+   GENEROVÁNO skriptem scripts/build-bank.mjs z mockup/ui-styly-katalog.html.
+   Needitovat — změny se přepíšou. Uprav katalog a spusť generátor znovu. */
+
+.ui[data-style="ticker-black"], .ui {
+    --l-pane:#ffffff; --l-chrome:#f2f2f2; --l-chromehi:#fafafa; --l-head:#e8e8e8;
+    --l-zebra:#ffffff; --l-hover:#ffe9c9; --l-border:#cccccc; --l-bordersoft:#e6e6e6;
+    --l-text:#111111; --l-dim:#555555; --l-faint:#888888;
+    --l-accent:#8f4900; --l-accsoft:#fff1dd; --l-accfg:#ffffff;
+    --l-ok:#0a6b2e; --l-warn:#8a5b00; --l-crit:#b3001b;
+
+    --d-pane:#000000; --d-chrome:#000000; --d-chromehi:#0a0a0a; --d-head:#141414;
+    --d-zebra:#000000; --d-hover:#1a1a1a; --d-border:#2f2f2f; --d-bordersoft:#161616;
+    --d-text:#e8e8e8; --d-dim:#9a9a9a; --d-faint:#6a6a6a;
+    --d-accent:#ff9d00; --d-accsoft:#2a1c00; --d-accfg:#000000;
+    --d-ok:#00c853; --d-warn:#ffb300; --d-crit:#ff3b30;
+
+    --radius:0px; --nav-radius:0px; --sel-bar:0px;
+    --row-h:20px; --title-h:26px; --tb-h:24px; --panehead-h:22px; --status-h:20px;
+    --font-ui:"Cascadia Mono",Consolas,monospace;
+    --font-display:var(--font-ui);
+    --font-data:var(--font-ui);
+    --fs-ui:12px; --fs-data:12px; --fs-th:11px;
+    --th-transform:uppercase; --th-ls:.6px; --th-weight:700;
+    --nav-h:21px; --pane-shadow:none; --dot-radius:0px;
+  }
+
+/* strukturální odchylky tohoto stylu */
+.ui[data-style="ticker-black"] .p-table thead th { color: var(--accent); }
+.ui[data-style="ticker-black"] .p-table tbody tr[data-sel="true"] td { background: var(--accsoft); }
+.ui[data-style="ticker-black"] .p-table tbody tr[data-sel="true"] td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+.ui[data-style="ticker-black"] .p-brand .sub { color: var(--accent); }

@@ -1,0 +1,111 @@
+@page "/kontroly"
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+@using USBGuardian.Admin.Health
+@inject HealthService Checks
+
+<h1>Kontroly stavu</h1>
+
+<p class="intro">Ověření, že celý řetěz <strong>agent → API → databáze → konzole</strong> opravdu funguje,
+a že nastavené mechanismy (whitelist, vynucování, alerty, údržba) nejsou tiše vypnuté.
+Každá kontrola říká, <em>co naměřila</em>, <em>proč na tom záleží</em> a <em>co s tím</em>.</p>
+
+@if (_report is null)
+{
+    <p class="muted">Kontroluji…</p>
+}
+else
+{
+    <div class="cards">
+        <div class="card @(_report.Bad > 0 ? "bad" : "")"><div class="num">@_report.Bad</div><div class="lbl">Chyby</div></div>
+        <div class="card @(_report.Warn > 0 ? "warn" : "")"><div class="num">@_report.Warn</div><div class="lbl">Varování</div></div>
+        <div class="card"><div class="num">@_report.Ok</div><div class="lbl">V pořádku</div></div>
+        <div class="card"><div class="num">@_report.Off</div><div class="lbl">Vypnuto / čeká</div></div>
+    </div>
+
+    <div class="toolbar">
+        <button class="btn" @onclick="Run" disabled="@_busy" title="Spustit všechny kontroly znovu">↻ Zkontrolovat znovu</button>
+        <span class="muted">
+            Proběhlo @_report.RanAt.ToString("dd.MM.yyyy HH:mm:ss") · trvalo @($"{_report.Duration.TotalSeconds:F1}") s
+        </span>
+    </div>
+
+    @if (_report.Bad == 0 && _report.Warn == 0)
+    {
+        <div class="banner ok">Všechny aktivní kontroly prošly. Položky ve stavu „vypnuto“ nejsou chyba — jen se dělají vědomě.</div>
+    }
+
+    @foreach (var group in _report.Checks.GroupBy(c => c.Group))
+    {
+        <h2>@group.Key</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th style="width:170px">Stav</th>
+                    <th style="width:210px">Kontrola</th>
+                    <th>Zjištěno</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var c in group.OrderBy(x => Rank(x.State)))
+                {
+                    <tr>
+                        <td><span class="pill @PillClass(c.State)">@Label(c.State)</span></td>
+                        <td>@c.Name</td>
+                        <td>
+                            <div>@c.Value</div>
+                            <div class="muted" style="margin-top:3px">@c.Detail</div>
+                            @if (!string.IsNullOrEmpty(c.Fix))
+                            {
+                                <div style="margin-top:3px"><strong>Náprava:</strong> @c.Fix</div>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+
+    <p class="muted">Strojově čitelná podoba téhož: <a href="api/health"><code>/api/health</code></a>
+        (JSON pro externí dohled — vrací HTTP 200 když je vše v pořádku, 503 když některá kontrola hlásí chybu).</p>
+}
+
+@code {
+    private HealthReport? _report;
+    private bool _busy;
+
+    protected override Task OnInitializedAsync() => Run();
+
+    private async Task Run()
+    {
+        _busy = true;
+        try { _report = await Checks.RunAsync(); }
+        finally { _busy = false; }
+    }
+
+    private static string PillClass(HealthState s) => s switch
+    {
+        HealthState.Ok => "ok",
+        HealthState.Warn => "warn",
+        HealthState.Bad => "bad",
+        _ => "off",
+    };
+
+    private static string Label(HealthState s) => s switch
+    {
+        HealthState.Ok => "v pořádku",
+        HealthState.Warn => "varování",
+        HealthState.Bad => "CHYBA",
+        HealthState.Off => "vypnuto",
+        _ => "čeká na data",
+    };
+
+    // Nejdřív to, co hoří.
+    private static int Rank(HealthState s) => s switch
+    {
+        HealthState.Bad => 0,
+        HealthState.Warn => 1,
+        HealthState.Unknown => 2,
+        HealthState.Ok => 3,
+        _ => 4,
+    };
+}

@@ -1,0 +1,26 @@
+/* Tokeny stylu zinc-mute
+   GENEROVÁNO skriptem scripts/build-bank.mjs z mockup/ui-styly-katalog.html.
+   Needitovat — změny se přepíšou. Uprav katalog a spusť generátor znovu. */
+
+.ui[data-style="zinc-mute"], .ui {
+    --l-pane:#ffffff; --l-chrome:#f4f4f5; --l-chromehi:#fafafa; --l-head:#ececee;
+    --l-zebra:#fafafa; --l-hover:#eaeaec; --l-border:#c8c8cc; --l-bordersoft:#e2e2e5;
+    --l-text:#18181b; --l-dim:#5a5a60; --l-faint:#8b8b92;
+    --l-accent:#3f3f46; --l-accsoft:rgba(63,63,70,.09); --l-accfg:#ffffff;
+    --l-ok:#3f7d4f; --l-warn:#8a6a12; --l-crit:#b03a2e;
+
+    --d-pane:#1c1c1f; --d-chrome:#161618; --d-chromehi:#202023; --d-head:#26262a;
+    --d-zebra:#202023; --d-hover:#2a2a2e; --d-border:#35353a; --d-bordersoft:#2b2b30;
+    --d-text:#e4e4e7; --d-dim:#a1a1aa; --d-faint:#71717a;
+    --d-accent:#d4d4d8; --d-accsoft:rgba(212,212,216,.12); --d-accfg:#18181b;
+    --d-ok:#6cb37d; --d-warn:#c9a24a; --d-crit:#e0736a;
+
+    --radius:2px; --nav-radius:2px; --sel-bar:3px;
+    --row-h:26px; --title-h:33px; --tb-h:30px; --panehead-h:26px; --status-h:23px;
+    --font-ui:"Segoe UI Variable Text","Segoe UI",system-ui,sans-serif;
+    --font-display:var(--font-ui);
+    --font-data:"Cascadia Mono",Consolas,monospace;
+    --fs-ui:12.5px; --fs-data:11.5px; --fs-th:11.5px;
+    --th-transform:none; --th-ls:0; --th-weight:600;
+    --nav-h:27px; --pane-shadow:none; --dot-radius:1px;
+  }

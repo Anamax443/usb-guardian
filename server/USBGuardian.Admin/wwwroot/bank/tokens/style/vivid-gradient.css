@@ -1,0 +1,41 @@
+/* Tokeny stylu vivid-gradient
+   GENEROVÁNO skriptem scripts/build-bank.mjs z mockup/ui-styly-katalog.html.
+   Needitovat — změny se přepíšou. Uprav katalog a spusť generátor znovu. */
+
+.ui[data-style="vivid-gradient"], .ui {
+    --l-pane:#ffffff; --l-chrome:#faf5ff; --l-chromehi:#ffffff; --l-head:#faf5ff;
+    --l-zebra:#ffffff; --l-hover:#f3e8ff; --l-border:#e9d5ff; --l-bordersoft:#f3e8ff;
+    --l-text:#1e1b4b; --l-dim:#6b7280; --l-faint:#a78bfa;
+    --l-accent:#7c3aed; --l-accsoft:#f5f3ff; --l-accfg:#ffffff;
+    --l-ok:#10b981; --l-warn:#f59e0b; --l-crit:#ef4444;
+
+    --d-pane:#1e1b4b; --d-chrome:#130f33; --d-chromehi:#1e1b4b; --d-head:#2e1065;
+    --d-zebra:#1e1b4b; --d-hover:#2e1065; --d-border:#4c1d95; --d-bordersoft:#312e81;
+    --d-text:#ede9fe; --d-dim:#c4b5fd; --d-faint:#a78bfa;
+    --d-accent:#a78bfa; --d-accsoft:#2e1065; --d-accfg:#1e1b4b;
+    --d-ok:#34d399; --d-warn:#fbbf24; --d-crit:#fb7185;
+
+    --radius:12px; --nav-radius:10px; --sel-bar:0px;
+    --row-h:48px; --title-h:60px; --tb-h:56px; --panehead-h:48px; --status-h:36px;
+    --font-ui:Inter,"Segoe UI Variable Text","Segoe UI",system-ui,sans-serif;
+    --font-display:var(--font-ui);
+    --font-data:"Segoe UI Variable Text","Segoe UI",system-ui,sans-serif;
+    --fs-ui:14.5px; --fs-data:14px; --fs-th:12.5px;
+    --th-transform:none; --th-ls:0; --th-weight:500;
+    --nav-h:42px; --pane-shadow:0 4px 14px rgba(124,58,237,.18); --dot-radius:50%;
+  }
+
+/* strukturální odchylky tohoto stylu */
+.ui[data-style="vivid-gradient"] .p-btn {
+    background: linear-gradient(135deg, #7c3aed 0%, #4f46e5 55%, #2563eb 100%);
+    color: #ffffff;
+  }
+.ui[data-style="vivid-gradient"] .p-brand .mark {
+    background: linear-gradient(135deg, #7c3aed, #2563eb);
+    border-color: transparent;
+    border-radius: 7px;
+  }
+.ui[data-style="vivid-gradient"] .p-brand .mark::after { background: #ffffff; box-shadow: 0 3px 0 #ffffff; }
+.ui[data-style="vivid-gradient"] .p-panehead {
+    background: linear-gradient(90deg, var(--accsoft) 0%, transparent 70%);
+  }

@@ -57,6 +57,17 @@
     }
   },
 
+  // ── Plánovaný restart klientské služby ──────────────────────
+  // enabled: false = výchozí. Zapnout lze i z lokální konzole (admin).
+  // at: čas denního restartu "HH:mm". Když stanice v ten čas neběží,
+  // restart se dohání nejvýš 2 h, pak se počká na další den.
+  "selfRestart": {
+    "enabled": false,
+    "at": "03:30",
+    "serviceName": "USB Guardian",
+    "statePath": "C:\\ProgramData\\USBGuardian\\selfrestart.json"
+  },
+
   // ── Lokální admin konzole ───────────────────────────────────
   // enabled: false = výchozí (minimální attack surface, NIS2)
   // Naslouchá jen na 127.0.0.1, vyžaduje lokálního admina, read-only.

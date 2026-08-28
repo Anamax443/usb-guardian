@@ -1,43 +1,60 @@
 @inherits LayoutComponentBase
 @inject IConfiguration Config
 @inject IDbContextFactory<AppDbContext> DbFactory
+@inject USBGuardian.Admin.Ui.UiStyleCache Ui
 
-<div class="page">
-    <header class="topbar">
-        <a class="brand" href="">USB&nbsp;Guardian <span class="sub">konzole</span></a>
-        <nav class="nav">
-            <NavLink href="" Match="NavLinkMatch.All">Přehled</NavLink>
-            <NavLink href="stanice">Stanice</NavLink>
-            <NavLink href="whitelist">Whitelist</NavLink>
-            <NavLink href="nastaveni">Nastavení</NavLink>
-            <NavLink href="databaze">Databáze</NavLink>
-            <NavLink href="dokumentace">Dokumentace</NavLink>
-        </nav>
-        <div class="right">
-            <AuthorizeView>
-                <Authorized><span class="muted">@context.User.Identity?.Name</span></Authorized>
-            </AuthorizeView>
-            <button class="iconbtn" onclick="aximaToggleTheme()" title="Přepnout téma (dark/light)">🌓</button>
-        </div>
-    </header>
+@* Kostra podle předpisu banky UI: .ui[data-style][data-layout] + p-title / p-nav / p-main / p-status.
+   Markup je pro všechna rozvržení týž — vodorovné menu se plní ze stejného seznamu položek
+   jako boční, takže o menu neexistuje druhý zdroj pravdy. *@
+<div class="ui" data-style="@Ui.Style" data-layout="@Ui.Layout">
 
-    <main class="content">
-        @Body
-    </main>
-
-    <footer class="foot">
-        <span id="liveclock">—</span>
+    <div class="p-title">
+        <a class="p-brand" href=""><span class="mark"></span>USB&nbsp;Guardian<span class="sub">— konzole</span></a>
+        <span class="vsep"></span>
+        <span class="p-field" id="liveclock">—</span>
+        <span class="grow"></span>
         @if (!string.IsNullOrEmpty(_repoUrl))
         {
-            <a href="@($"{_repoUrl}/commit/{AppInfo.Commit}")" target="_blank" rel="noopener"
-               title="commit @AppInfo.Commit">commit @AppInfo.Commit</a>
+            <a class="p-field" href="@($"{_repoUrl}/commit/{AppInfo.Commit}")" target="_blank" rel="noopener"
+               title="Nasazený commit @AppInfo.Commit — otevřít v repozitáři">commit @AppInfo.Commit</a>
         }
         else
         {
-            <span class="mono">commit @AppInfo.Commit</span>
+            <span class="p-field" title="Nasazený commit">commit @AppInfo.Commit</span>
         }
-        <span title="Dostupnost databáze"><span class="dot @(_dbOk ? "ok" : "bad")"></span>DB</span>
-        <span class="right">© @DateTime.Now.Year Milan Trnka</span>
+        <span class="p-field p-state @(_dbOk ? "st-ok" : "st-crit")" title="Dostupnost databáze">
+            <span class="p-dot"></span>DB
+        </span>
+        <AuthorizeView>
+            <Authorized><span class="p-field">@context.User.Identity?.Name</span></Authorized>
+        </AuthorizeView>
+        <button class="p-btn" onclick="aximaToggleTheme()" title="Přepnout téma (světlé / tmavé)">🌓</button>
+    </div>
+
+    <nav class="p-topnav" aria-label="Hlavní nabídka">
+        @foreach (var item in NavItems)
+        {
+            <NavLink class="p-navitem" href="@item.Href" Match="@item.Match"><span class="lbl">@item.Label</span></NavLink>
+        }
+    </nav>
+
+    <nav class="p-nav" aria-label="Hlavní nabídka">
+        @foreach (var item in NavItems)
+        {
+            <NavLink class="p-navitem" href="@item.Href" Match="@item.Match"><span class="lbl">@item.Label</span></NavLink>
+        }
+    </nav>
+
+    <main class="p-main">
+        <div class="p-gridwrap">
+            <div class="content">@Body</div>
+        </div>
+    </main>
+
+    <footer class="p-status">
+        <span>USB Guardian</span>
+        <span class="grow"></span>
+        <span>© @DateTime.Now.Year Milan Trnka</span>
     </footer>
 </div>
 
@@ -55,6 +72,18 @@
 </script>
 
 @code {
+    /// <summary>Jediný zdroj pravdy o položkách menu – vykresluje se do bočního i vodorovného.</summary>
+    private static readonly (string Href, string Label, NavLinkMatch Match)[] NavItems =
+    {
+        ("",             "Přehled",     NavLinkMatch.All),
+        ("stanice",      "Stanice",     NavLinkMatch.Prefix),
+        ("whitelist",    "Whitelist",   NavLinkMatch.Prefix),
+        ("nastaveni",    "Nastavení",   NavLinkMatch.Prefix),
+        ("kontroly",     "Kontroly",    NavLinkMatch.Prefix),
+        ("databaze",     "Databáze",    NavLinkMatch.Prefix),
+        ("dokumentace",  "Dokumentace", NavLinkMatch.Prefix),
+    };
+
     private string? _repoUrl;
     private bool _dbOk;
 

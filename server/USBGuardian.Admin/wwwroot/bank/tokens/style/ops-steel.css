@@ -1,0 +1,26 @@
+/* Tokeny stylu ops-steel
+   GENEROVÁNO skriptem scripts/build-bank.mjs z mockup/ui-styly-katalog.html.
+   Needitovat — změny se přepíšou. Uprav katalog a spusť generátor znovu. */
+
+.ui[data-style="ops-steel"], .ui {
+    --l-pane:#ffffff; --l-chrome:#edeff2; --l-chromehi:#f6f7f9; --l-head:#e3e7eb;
+    --l-zebra:#f8f9fb; --l-hover:#e6eaee; --l-border:#c9cfd6; --l-bordersoft:#dde1e6;
+    --l-text:#1a1e22; --l-dim:#5c656e; --l-faint:#7d858d;
+    --l-accent:#31628c; --l-accsoft:rgba(49,98,140,.14); --l-accfg:#ffffff;
+    --l-ok:#3d7f4c; --l-warn:#96700d; --l-crit:#a93b31;
+
+    --d-pane:#1f2226; --d-chrome:#191b1e; --d-chromehi:#212429; --d-head:#262a2f;
+    --d-zebra:#23262b; --d-hover:#2b3036; --d-border:#32373d; --d-bordersoft:#2a2e34;
+    --d-text:#dde2e7; --d-dim:#8a939c; --d-faint:#6b747d;
+    --d-accent:#6a9cce; --d-accsoft:rgba(106,156,206,.18); --d-accfg:#10151a;
+    --d-ok:#63ac72; --d-warn:#c79a33; --d-crit:#dc6b60;
+
+    --radius:2px; --nav-radius:0px; --sel-bar:2px;
+    --row-h:26px; --title-h:33px; --tb-h:30px; --panehead-h:26px; --status-h:23px;
+    --font-ui:"Segoe UI Variable Text","Segoe UI",system-ui,sans-serif;
+    --font-display:var(--font-ui);
+    --font-data:"Cascadia Mono",Consolas,monospace;
+    --fs-ui:12.5px; --fs-data:11.5px; --fs-th:11.5px;
+    --th-transform:none; --th-ls:0; --th-weight:600;
+    --nav-h:27px; --pane-shadow:none; --dot-radius:1px;
+  }

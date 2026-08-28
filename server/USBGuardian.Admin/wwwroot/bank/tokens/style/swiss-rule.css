@@ -1,0 +1,26 @@
+/* Tokeny stylu swiss-rule
+   GENEROVÁNO skriptem scripts/build-bank.mjs z mockup/ui-styly-katalog.html.
+   Needitovat — změny se přepíšou. Uprav katalog a spusť generátor znovu. */
+
+.ui[data-style="swiss-rule"], .ui {
+    --l-pane:#ffffff; --l-chrome:#ffffff; --l-chromehi:#ffffff; --l-head:#ffffff;
+    --l-zebra:#ffffff; --l-hover:#f1f1f1; --l-border:#1a1a1a; --l-bordersoft:#d8d8d8;
+    --l-text:#111111; --l-dim:#555555; --l-faint:#8a8a8a;
+    --l-accent:#d42a20; --l-accsoft:rgba(212,42,32,.08); --l-accfg:#ffffff;
+    --l-ok:#1f6b3a; --l-warn:#8a6100; --l-crit:#d42a20;
+
+    --d-pane:#0d0d0d; --d-chrome:#0d0d0d; --d-chromehi:#0d0d0d; --d-head:#0d0d0d;
+    --d-zebra:#0d0d0d; --d-hover:#1e1e1e; --d-border:#d8d8d8; --d-bordersoft:#2c2c2c;
+    --d-text:#f0f0f0; --d-dim:#a8a8a8; --d-faint:#767676;
+    --d-accent:#ff4438; --d-accsoft:rgba(255,68,56,.14); --d-accfg:#0d0d0d;
+    --d-ok:#5cbd7e; --d-warn:#d6a437; --d-crit:#ff4438;
+
+    --radius:0px; --nav-radius:0px; --sel-bar:4px;
+    --row-h:28px; --title-h:40px; --tb-h:34px; --panehead-h:30px; --status-h:24px;
+    --font-ui:"Helvetica Neue",Arial,"Segoe UI",sans-serif;
+    --font-display:var(--font-ui);
+    --font-data:"Helvetica Neue",Arial,sans-serif;
+    --fs-ui:13px; --fs-data:12.5px; --fs-th:10.5px;
+    --th-transform:uppercase; --th-ls:1.1px; --th-weight:700;
+    --nav-h:28px; --pane-shadow:none; --dot-radius:0px;
+  }

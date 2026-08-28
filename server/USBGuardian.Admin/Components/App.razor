@@ -1,3 +1,4 @@
+@inject USBGuardian.Admin.Ui.UiStyleCache Ui
 <!DOCTYPE html>
 <html lang="cs">
 <head>
@@ -5,6 +6,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <base href="/" />
     <script>(function(){try{document.documentElement.dataset.theme=localStorage.getItem('axima.theme')||'dark';}catch(e){document.documentElement.dataset.theme='dark';}})();</script>
+
+    @* Banka UI (repo Anamax443/Interface-Par): písma → tokeny VYBRANÉHO stylu → vrstva komponent.
+       Pořadí je závazné. Styl se přepíná v Nastavení, hodnota projde whitelistem v UiStyleCache. *@
+    <link rel="stylesheet" href="bank/fonts.css" />
+    <link rel="stylesheet" href="@($"bank/tokens/style/{Ui.Style}.css")" />
+    <link rel="stylesheet" href="bank/ui.css" />
+
+    @* Vlastní vrstva konzole – komponenty této aplikace, výhradně přes role banky. *@
     <link rel="stylesheet" href="app.css" />
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%23161b22'/><path d='M16 4l9 3.2v6.3c0 6.4-3.8 10.8-9 13.5-5.2-2.7-9-7.1-9-13.5V7.2z' fill='%2358a6ff'/><rect x='14.6' y='10' width='2.8' height='9' rx='1' fill='%23161b22'/><circle cx='16' cy='9' r='2' fill='%23161b22'/></svg>" />
     <title>USB Guardian — konzole</title>

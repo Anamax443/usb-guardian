@@ -55,6 +55,9 @@ var devAllowAll  = builder.Configuration.GetValue<bool>("Authorization:DevAllowA
 // DB-spravovaný seznam přístupu (rozšiřuje config bootstrap, viz AccessCache)
 builder.Services.AddSingleton<AccessCache>();
 
+// Vzhled konzole (styl + rozvržení z banky UI). Cache – čte se při každém renderu <head>.
+builder.Services.AddSingleton<USBGuardian.Admin.Ui.UiStyleCache>();
+
 builder.Services.AddAuthorization(options =>
 {
     options.FallbackPolicy = new AuthorizationPolicyBuilder()
@@ -108,6 +111,14 @@ builder.Services.AddHostedService<USBGuardian.Admin.Notifications.IncidentAlertS
 // ── Auto-enrollment agenta (běží, jen když deploy.enabled=true; default dry-run) ──
 builder.Services.AddHostedService<USBGuardian.Admin.Deploy.AgentDeployService>();
 
+// ── Kontroly stavu (stránka /kontroly + /api/health pro externí dohled) ──
+builder.Services.AddSingleton<USBGuardian.Admin.Health.HealthService>();
+
+// ── Plánovaný restart hlídaných služeb (běží, jen když svc.restart.enabled=true) ──
+// Runner je singleton, ať ho umí spustit i tlačítko "Restartovat teď" v Nastavení.
+builder.Services.AddSingleton<USBGuardian.Admin.Maintenance.ServiceRestartRunner>();
+builder.Services.AddHostedService<USBGuardian.Admin.Maintenance.ServiceRestartService>();
+
 // ── Blazor Server ─────────────────────────────────────────────
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
@@ -116,6 +127,7 @@ var app = builder.Build();
 
 // Načíst DB-spravovaný seznam přístupu (bez pádu, když tabulka ještě není)
 await app.Services.GetRequiredService<AccessCache>().ReloadAsync();
+await app.Services.GetRequiredService<USBGuardian.Admin.Ui.UiStyleCache>().ReloadAsync();
 
 app.UseStaticFiles();
 app.UseRouting();
@@ -130,6 +142,32 @@ app.MapGet("/api/version", () => Results.Json(new
     commit    = USBGuardian.Admin.AppInfo.Commit,
     startedAt
 })).AllowAnonymous();
+
+// ── Kontroly stavu strojově (/api/health) – dědí FallbackPolicy jako zbytek konzole.
+// 200 = vše OK nebo jen varování, 503 = aspoň jedna kontrola hlásí chybu
+// (kontrakt, na který umí reagovat externí dohled).
+app.MapGet("/api/health", async (USBGuardian.Admin.Health.HealthService health, CancellationToken ct) =>
+{
+    var report = await health.RunAsync(ct);
+    var payload = new
+    {
+        state = report.Overall.ToString().ToLowerInvariant(),
+        ranAt = report.RanAt,
+        bad = report.Bad,
+        warn = report.Warn,
+        ok = report.Ok,
+        off = report.Off,
+        checks = report.Checks.Select(c => new
+        {
+            group = c.Group,
+            name = c.Name,
+            state = c.State.ToString().ToLowerInvariant(),
+            value = c.Value,
+            fix = c.Fix,
+        }),
+    };
+    return Results.Json(payload, statusCode: report.Bad > 0 ? 503 : 200);
+});
 
 // ── Export incidentů (CSV + manažerský report) – dědí FallbackPolicy ──
 app.MapExportEndpoints();

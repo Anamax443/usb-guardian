@@ -2,9 +2,13 @@
 @rendermode @(new InteractiveServerRenderMode(prerender: false))
 @using System.Net.Mail
 @using USBGuardian.Admin.Notifications
+@using USBGuardian.Admin.Maintenance
 @inject IConfiguration Config
 @inject IDbContextFactory<AppDbContext> DbFactory
 @inject USBGuardian.Admin.Security.AccessCache Access
+@inject ServiceRestartRunner Restart
+@inject USBGuardian.Admin.Ui.UiStyleCache UiCache
+@inject NavigationManager Nav
 
 <h1>Nastavení</h1>
 
@@ -13,6 +17,37 @@
     <div class="banner bad">Centrální nastavení nedostupné: @_dbError<br/>
         <span class="muted">Spusť <code>database/06_appsettings.sql</code> a grant na <code>AppSettings</code> pro účet konzole.</span></div>
 }
+
+<h2>Vzhled konzole</h2>
+<p class="muted">Styl a rozvržení z <strong>banky UI</strong> (repo <span class="mono">Anamax443/Interface-Par</span>,
+    katalog <span class="mono">mockup/ui-styly-katalog.html</span>). Styl mění barvy, písma a míry;
+    rozvržení mění kostru okna. Obsah stránek je v obou případech týž.</p>
+<dl class="cfg">
+    <dt>Styl</dt>
+    <dd>
+        <select class="inp" @bind="_uiStyle">
+            @foreach (var st in USBGuardian.Admin.Ui.UiStyleCache.Styles)
+            {
+                <option value="@st.Id">@st.Label</option>
+            }
+        </select>
+    </dd>
+    <dt>Rozvržení</dt>
+    <dd>
+        <select class="inp" @bind="_uiLayout">
+            @foreach (var la in USBGuardian.Admin.Ui.UiStyleCache.Layouts)
+            {
+                <option value="@la.Id">@la.Label</option>
+            }
+        </select>
+    </dd>
+    <dt>Právě nasazeno</dt>
+    <dd class="mono">@UiCache.Style · @UiCache.Layout</dd>
+</dl>
+<div class="toolbar">
+    <button class="btn" @onclick="SaveUi" disabled="@_busy">Uložit vzhled</button>
+</div>
+@if (_uiMsg is not null) { <div class="banner @(_uiBad ? "bad" : "ok")">@_uiMsg</div> }
 
 <h2>Vynucování</h2>
 <dl class="cfg">
@@ -147,6 +182,52 @@ denní souhrn) je další krok.</p>
 </div>
 @if (_retentionMsg is not null) { <div class="banner @(_retentionBad ? "bad" : "ok")">@_retentionMsg</div> }
 
+<h2>Plánovaný restart služeb</h2>
+<p class="muted">Denní restart hlídaných Windows služeb. <strong>Službu, která neběží, i nastartuje</strong> — to je
+    pojistka proti výpadku typu „služba zůstala po deployi zastavená a nikdo si toho šest týdnů nevšiml“.
+    Restart provádí <strong>účet služby konzole</strong>; na cizím serveru na to musí mít právo, jinak běh
+    skončí hláškou „přístup odepřen“ (a je to vidět v <a href="kontroly">Kontrolách stavu</a>).</p>
+<dl class="cfg">
+    <dt>Zapnuto</dt>
+    <dd>
+        @if (_svcEnabled) { <span class="pill ok">ZAPNUTO</span> } else { <span class="pill off">vypnuto</span> }
+        &nbsp;<button class="btn" @onclick="ToggleSvcRestart" disabled="@_busy">@(_svcEnabled ? "Vypnout" : "Zapnout")</button>
+    </dd>
+    <dt>Čas denního běhu (HH:mm)</dt>
+    <dd><input class="inp" style="min-width:90px" @bind="_svcAt" placeholder="03:30" /></dd>
+    <dt>Služby (řádek = <span class="mono">HOST|Název služby</span>)</dt>
+    <dd>
+        <textarea class="inp" style="min-width:520px;height:92px;font-family:var(--font-mono);font-size:12px"
+                  @bind="_svcTargets" placeholder="SQL-SERVER|USB Guardian API"></textarea>
+        <div class="muted">Host prázdný (jen název služby) = služba na tomto serveru. Řádek začínající <span class="mono">#</span> se ignoruje.</div>
+    </dd>
+    <dt>Poslední běh</dt><dd class="mono">@(string.IsNullOrEmpty(_svcLastRun) ? "—" : _svcLastRun)</dd>
+</dl>
+<div class="toolbar">
+    <button class="btn" @onclick="SaveSvcRestart" disabled="@_busy">Uložit plán</button>
+    <button class="btn" @onclick="RunSvcRestartNow" disabled="@_busy" title="Provede restart hned – ověření, že práva i názvy služeb sedí">▶ Restartovat teď</button>
+</div>
+@if (_svcMsg is not null) { <div class="banner @(_svcBad ? "bad" : "ok")">@_svcMsg</div> }
+
+<h2>Kontroly stavu</h2>
+<p class="muted">Parametry pro stránku <a href="kontroly">Kontroly</a> — ověření, že celý řetěz agent → API → DB → konzole opravdu funguje.</p>
+<dl class="cfg">
+    <dt>Adresa API pro agenty</dt>
+    <dd>
+        <input class="inp" @bind="_healthApiUrl" placeholder="https://SQL-SERVER:5443" />
+        <div class="muted">Kontrola sem volá <span class="mono">/api/version</span>. Prázdné = dostupnost API se nekontroluje.</div>
+    </dd>
+    <dt>Incidenty smí být staré nejvýš (h)</dt>
+    <dd>
+        <input class="inp" style="min-width:90px" @bind="_healthMaxAge" />
+        <div class="muted">Nad tímto stářím nejnovějšího incidentu se hlásí chyba (tichý výpadek sběru). Default 48.</div>
+    </dd>
+</dl>
+<div class="toolbar">
+    <button class="btn" @onclick="SaveHealth" disabled="@_busy">Uložit kontroly</button>
+</div>
+@if (_healthMsg is not null) { <div class="banner @(_healthBad ? "bad" : "ok")">@_healthMsg</div> }
+
 <h2>Údržba</h2>
 <dl class="cfg">
     <dt>Aktualizovat nastavení</dt>
@@ -188,6 +269,19 @@ denní souhrn) je další krok.</p>
     private string _retentionDays = "365", _retentionLastRun = "";
     private string? _retentionMsg;
 
+    private bool _svcEnabled, _svcBad;
+    private string _svcAt = "03:30", _svcTargets = "", _svcLastRun = "";
+    private string? _svcMsg;
+
+    private string _uiStyle = USBGuardian.Admin.Ui.UiStyleCache.DefaultStyle;
+    private string _uiLayout = USBGuardian.Admin.Ui.UiStyleCache.DefaultLayout;
+    private bool _uiBad;
+    private string? _uiMsg;
+
+    private bool _healthBad;
+    private string _healthApiUrl = "", _healthMaxAge = "48";
+    private string? _healthMsg;
+
     private string? _reloadMsg;
 
     protected override async Task OnInitializedAsync()
@@ -227,6 +321,17 @@ denní souhrn) je další krok.</p>
             _retentionEnabled = string.Equals(await Get(db, "retention.enabled"), "true", StringComparison.OrdinalIgnoreCase);
             var rd = await Get(db, "retention.incidentDays"); _retentionDays = string.IsNullOrEmpty(rd) ? "365" : rd;
             _retentionLastRun = await Get(db, "retention.lastRun");
+
+            _svcEnabled = string.Equals(await Get(db, "svc.restart.enabled"), "true", StringComparison.OrdinalIgnoreCase);
+            var sat = await Get(db, "svc.restart.at"); _svcAt = string.IsNullOrEmpty(sat) ? "03:30" : sat;
+            _svcTargets = await Get(db, "svc.restart.targets");
+            _svcLastRun = await Get(db, "svc.restart.lastRun");
+
+            _uiStyle = UiCache.Style;
+            _uiLayout = UiCache.Layout;
+
+            _healthApiUrl = await Get(db, "health.apiUrl");
+            var hma = await Get(db, "health.maxIncidentAgeHours"); _healthMaxAge = string.IsNullOrEmpty(hma) ? "48" : hma;
 
             _dbError = null;
         }
@@ -432,6 +537,104 @@ denní souhrn) je další krok.</p>
             await Load();
         }
         catch (Exception ex) { _dbError = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task ToggleSvcRestart()
+    {
+        _busy = true;
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            await Set(db, "svc.restart.enabled", (!_svcEnabled).ToString().ToLowerInvariant());
+            await Load();
+        }
+        catch (Exception ex) { _dbError = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task SaveSvcRestart()
+    {
+        _svcMsg = null;
+        if (!ServiceRestartConfig.TryParseTime(_svcAt, out _))
+        { _svcMsg = "Čas zadej ve tvaru HH:mm (např. 03:30)."; _svcBad = true; return; }
+
+        var targets = ServiceRestartConfig.ParseTargets(_svcTargets);
+        if (_svcEnabled && targets.Count == 0)
+        { _svcMsg = "Restart je zapnutý, ale není zadaná žádná služba."; _svcBad = true; return; }
+
+        _busy = true;
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            await Set(db, "svc.restart.at", _svcAt.Trim());
+            await Set(db, "svc.restart.targets", (_svcTargets ?? "").Trim());
+            _svcMsg = $"Uloženo — {targets.Count} služeb, denně v {_svcAt.Trim()}."; _svcBad = false;
+        }
+        catch (Exception ex) { _svcMsg = "Chyba: " + ex.Message; _svcBad = true; }
+        finally { _busy = false; }
+    }
+
+    // Rucni spusteni = kontrola, ze prava i nazvy sluzeb sedi (necekat na nocni beh).
+    private async Task RunSvcRestartNow()
+    {
+        _svcMsg = null; _busy = true;
+        try
+        {
+            var summary = await Restart.RunAsync("ručně");
+            _svcBad = summary.Contains("CHYBA", StringComparison.OrdinalIgnoreCase);
+            _svcMsg = summary;
+            await Load();
+        }
+        catch (Exception ex) { _svcMsg = "Chyba: " + ex.Message; _svcBad = true; }
+        finally { _busy = false; }
+    }
+
+    // Uložení vzhledu = zápis do AppSettings + přenačtení cache; stránka se pak natáhne
+    // znovu, aby se v <head> objevil nový soubor s tokeny.
+    private async Task SaveUi()
+    {
+        _uiMsg = null;
+        if (!USBGuardian.Admin.Ui.UiStyleCache.IsKnownStyle(_uiStyle) ||
+            !USBGuardian.Admin.Ui.UiStyleCache.IsKnownLayout(_uiLayout))
+        { _uiMsg = "Neznámý styl nebo rozvržení."; _uiBad = true; return; }
+
+        _busy = true;
+        try
+        {
+            await using (var db = await DbFactory.CreateDbContextAsync())
+            {
+                await Set(db, "ui.style", _uiStyle);
+                await Set(db, "ui.layout", _uiLayout);
+            }
+            await UiCache.ReloadAsync();
+            _uiMsg = "Uloženo — načítám konzoli v novém vzhledu…"; _uiBad = false;
+            Nav.NavigateTo(Nav.Uri, forceLoad: true);
+        }
+        catch (Exception ex) { _uiMsg = "Chyba: " + ex.Message; _uiBad = true; }
+        finally { _busy = false; }
+    }
+
+    private async Task SaveHealth()
+    {
+        _healthMsg = null;
+        if (!int.TryParse(_healthMaxAge?.Trim(), out var h) || h <= 0)
+        { _healthMsg = "Stáří incidentů musí být kladné číslo hodin."; _healthBad = true; return; }
+
+        var url = (_healthApiUrl ?? "").Trim();
+        if (url.Length > 0 && !Uri.TryCreate(url, UriKind.Absolute, out _))
+        { _healthMsg = "Adresa API musí být plná URL včetně schématu, např. https://SQL-SERVER:5443."; _healthBad = true; return; }
+
+        _busy = true;
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            await Set(db, "health.apiUrl", url);
+            await Set(db, "health.maxIncidentAgeHours", h.ToString());
+            _healthMaxAge = h.ToString();
+            _healthMsg = "Uloženo."; _healthBad = false;
+        }
+        catch (Exception ex) { _healthMsg = "Chyba: " + ex.Message; _healthBad = true; }
         finally { _busy = false; }
     }
 

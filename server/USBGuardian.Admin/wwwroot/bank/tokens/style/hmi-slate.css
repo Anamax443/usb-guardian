@@ -1,0 +1,33 @@
+/* Tokeny stylu hmi-slate
+   GENEROVÁNO skriptem scripts/build-bank.mjs z mockup/ui-styly-katalog.html.
+   Needitovat — změny se přepíšou. Uprav katalog a spusť generátor znovu. */
+
+.ui[data-style="hmi-slate"], .ui {
+    --l-pane:#eef1f4; --l-chrome:#dfe4e9; --l-chromehi:#e8ecf0; --l-head:#cfd6dd;
+    --l-zebra:#e7ebef; --l-hover:#d5dde5; --l-border:#9aa5b1; --l-bordersoft:#c3ccd4;
+    --l-text:#10161c; --l-dim:#46525e; --l-faint:#6f7c88;
+    --l-accent:#0a6ea8; --l-accsoft:rgba(10,110,168,.16); --l-accfg:#ffffff;
+    --l-ok:#0a7d33; --l-warn:#b06a00; --l-crit:#c01f1f;
+
+    --d-pane:#161c22; --d-chrome:#0e1318; --d-chromehi:#1a2229; --d-head:#202a33;
+    --d-zebra:#1a2027; --d-hover:#24303a; --d-border:#33414d; --d-bordersoft:#263039;
+    --d-text:#e8eef4; --d-dim:#9fb0bf; --d-faint:#6f8090;
+    --d-accent:#1e9de0; --d-accsoft:rgba(30,157,224,.18); --d-accfg:#06121b;
+    --d-ok:#2fbf5a; --d-warn:#ffb020; --d-crit:#ff4d4d;
+
+    --border-w:2px;
+    --radius:0px; --nav-radius:0px; --sel-bar:4px;
+    --row-h:30px; --title-h:38px; --tb-h:34px; --panehead-h:30px; --status-h:28px;
+    --font-ui:"Segoe UI","Helvetica Neue",system-ui,sans-serif;
+    --font-display:var(--font-ui);
+    --font-data:"Cascadia Mono",Consolas,monospace;
+    --fs-ui:13.5px; --fs-data:13.5px; --fs-th:12px;
+    --th-transform:uppercase; --th-ls:1px; --th-weight:700;
+    --nav-h:32px; --pane-shadow:none; --dot-radius:0px;
+  }
+
+/* strukturální odchylky tohoto stylu */
+.ui[data-style="hmi-slate"] .p-dot { width: 11px; height: 11px; margin-right: 9px; }
+.ui[data-style="hmi-slate"] .p-panehead { background: var(--accent); color: var(--accfg); }
+.ui[data-style="hmi-slate"] .p-panehead .icon, .ui[data-style="hmi-slate"] .p-panehead .n { color: var(--accfg); opacity: .9; }
+.ui[data-style="hmi-slate"] .p-status b { font-size: calc(var(--fs-ui) + 1px); }

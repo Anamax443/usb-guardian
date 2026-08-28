@@ -1,0 +1,26 @@
+/* Tokeny stylu nord-calm
+   GENEROVÁNO skriptem scripts/build-bank.mjs z mockup/ui-styly-katalog.html.
+   Needitovat — změny se přepíšou. Uprav katalog a spusť generátor znovu. */
+
+.ui[data-style="nord-calm"], .ui {
+    --l-pane:#ffffff; --l-chrome:#eceff4; --l-chromehi:#f4f6f9; --l-head:#e5e9f0;
+    --l-zebra:#f7f9fb; --l-hover:#e0e5ee; --l-border:#ccd3de; --l-bordersoft:#dfe4ec;
+    --l-text:#2e3440; --l-dim:#4c566a; --l-faint:#7b8494;
+    --l-accent:#4c6f9a; --l-accsoft:rgba(76,111,154,.13); --l-accfg:#ffffff;
+    --l-ok:#4f7a3f; --l-warn:#97710f; --l-crit:#a4454e;
+
+    --d-pane:#2e3440; --d-chrome:#292e39; --d-chromehi:#323845; --d-head:#3b4252;
+    --d-zebra:#313743; --d-hover:#3b4252; --d-border:#434c5e; --d-bordersoft:#3a414f;
+    --d-text:#eceff4; --d-dim:#b8c1d1; --d-faint:#8b93a5;
+    --d-accent:#88c0d0; --d-accsoft:rgba(136,192,208,.14); --d-accfg:#2e3440;
+    --d-ok:#a3be8c; --d-warn:#ebcb8b; --d-crit:#bf616a;
+
+    --radius:3px; --nav-radius:3px; --sel-bar:3px;
+    --row-h:27px; --title-h:34px; --tb-h:31px; --panehead-h:27px; --status-h:23px;
+    --font-ui:"Segoe UI Variable Text","Segoe UI",system-ui,sans-serif;
+    --font-display:var(--font-ui);
+    --font-data:"Cascadia Mono",Consolas,monospace;
+    --fs-ui:12.5px; --fs-data:12px; --fs-th:11.5px;
+    --th-transform:none; --th-ls:.2px; --th-weight:600;
+    --nav-h:28px; --pane-shadow:none; --dot-radius:50%;
+  }

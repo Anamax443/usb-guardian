@@ -1,0 +1,26 @@
+/* Tokeny stylu console-dark
+   GENEROVÁNO skriptem scripts/build-bank.mjs z mockup/ui-styly-katalog.html.
+   Needitovat — změny se přepíšou. Uprav katalog a spusť generátor znovu. */
+
+.ui[data-style="console-dark"], .ui {
+    --l-pane:#fbfbf9; --l-chrome:#f0efeb; --l-chromehi:#f6f5f2; --l-head:#e9e8e3;
+    --l-zebra:#f6f5f2; --l-hover:#eae9e4; --l-border:#d3d2cb; --l-bordersoft:#e0dfd9;
+    --l-text:#23282e; --l-dim:#5a6169; --l-faint:#7b828b;
+    --l-accent:#9a6412; --l-accsoft:rgba(154,100,18,.12); --l-accfg:#ffffff;
+    --l-ok:#2f7d4c; --l-warn:#9a6412; --l-crit:#a63a2e;
+
+    --d-pane:#14181d; --d-chrome:#0f1317; --d-chromehi:#171c22; --d-head:#1b2128;
+    --d-zebra:#171b21; --d-hover:#1f262e; --d-border:#262e37; --d-bordersoft:#1e252c;
+    --d-text:#ccd6e0; --d-dim:#8397a8; --d-faint:#5c6b7a;
+    --d-accent:#d08b2c; --d-accsoft:rgba(208,139,44,.15); --d-accfg:#0f1317;
+    --d-ok:#4fa86a; --d-warn:#d08b2c; --d-crit:#d05c50;
+
+    --radius:1px; --nav-radius:0px; --sel-bar:2px;
+    --row-h:24px; --title-h:30px; --tb-h:28px; --panehead-h:24px; --status-h:22px;
+    --font-ui:"Cascadia Mono",Consolas,"SF Mono",monospace;
+    --font-display:var(--font-ui);
+    --font-data:"Cascadia Mono",Consolas,monospace;
+    --fs-ui:12px; --fs-data:11.5px; --fs-th:11px;
+    --th-transform:uppercase; --th-ls:.7px; --th-weight:600;
+    --nav-h:24px; --pane-shadow:none; --dot-radius:0px;
+  }

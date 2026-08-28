@@ -27,7 +27,7 @@ Serverová konzole agreguje data, drží inventář stanic z AD a ukazuje, kam c
 | **Šifrování agent↔API** | HTTPS + **pinning otisku** (bez CA) — ověřeno end-to-end (heartbeat OK z .181) |
 | **AD sync** | zapnutý 60 min + on-demand; **213 v AD, ~212 bez agenta** |
 | **Live commit** | **konzole `fa127ea`** (patička / `/api/version`; staged `cbc7a0a` = rozbalená chybová hláška – čeká na redeploy .213) · **API live `6f48153`** · **agent `f2bb194`** na .181 (spolehlivý unblock + re-blokace připojených – ověřeno z Event Logu; **staged `8b2dcaa`** = invalidace whitelist cache – čeká na redeploy agenta). Repo HEAD = `8b2dcaa`/`cbc7a0a`. Stamp spolehlivý = footer = git HEAD |
-| **Konzole – stránky** | Přehled (filtr+kumulace+řazení, kapacita, **export CSV + manažerský report s grafy**), Stanice (AD inventář + „Zmlklo agentů" + „Vyžádat data" + **Nasazení / hromadné vyřadit-zařadit**), Whitelist (**kapacita + filtr katalogu + auto-publish podepsané verze**), Nastavení (vynucování/přístup/email/alerty/dohled/auto-enrollment+default PC/retence/**Údržba: reload nastavení**), **Databáze**, Dokumentace (+HTML animace) |
+| **Konzole – stránky** | Přehled (filtr+kumulace+řazení, kapacita, **export CSV + manažerský report s grafy**), Stanice (AD inventář + „Zmlklo agentů" + „Vyžádat data" + **Nasazení / hromadné vyřadit-zařadit**), Whitelist (**kapacita + filtr katalogu + auto-publish podepsané verze**), Nastavení (vynucování/přístup/email/alerty/dohled/auto-enrollment+default PC/retence/**Údržba: reload nastavení**), **Databáze**, **Kontroly** (health checks), Dokumentace (+HTML animace) |
 | **Enforcement (F1-3)** | **whitelist 1:1** (auto-podpis serverem, interní RSA klíč na .213) → **vynucování** server→agent (`policy.enforce` v heartbeatu) → **break-glass** (lokální konzole 5080, offline, logováno, zruší se při sync) + **auto-re-enable** + reconciliace s whitelistem. Lokální konzole: restart služby, break-glass, seznam whitelistu |
 | **Deploy účet (auto-enroll)** | **gMSA `AXINETWORK\gmsa-USBGdep$`** – v `PC Admins` (admin na klientech) **i lokální admin na SQL-04** (deploy API); nainstalován na `.213`; deploy task `USBGuardian-AutoDeploy` (pod gMSA, přes CIM) |
 | **Agent (test) .181** | **PILOT ÚSPĚŠNÝ** – `.181` = **TRNKAMW11** (vlastní workstation); služba „USB Guardian" RUNNING, heartbeat + **incidenty tečou do DB**. Agent live **`f2bb194`** – atribuce uživatele, klient 100% (watchdog+toast), **enforcement F1-3 + auto-re-enable + spolehlivý unblock + re-blokace připojených médií**. Update agenta chce elevaci (UAC) → spustí uživatel (build staged na .213) |
@@ -165,6 +165,67 @@ vrátí médium i při zapnutém blokování. **Bug:** `WhitelistChecker` cachov
 neinvalidovalo → schválení se projevilo až za ~5 min (a `ReEnforce` mezitím mohl médium znovu zablokovat). Fix:
 `WhitelistSync` po stažení volá `WhitelistChecker.Reload()` → nová verze platí ihned, unblock v témž reconcile cyklu.
 
+### 5.6 Kontroly stavu + plánovaný restart služeb — HOTOVO (28.08.2026)
+**Co to řešilo:** 28.08.2026 se zjistilo, že služba „USB Guardian API" na SQL-04 byla **od poloviny července
+zastavená** (`sc query` → STOPPED, exit code 0 = zůstala dole po deployi/restartu serveru). Agent na `.181` běžel,
+incidenty si ukládal do fronty (7 souborů, nejstarší 02.07.), ale na server **6 týdnů nic nedoteklo**. Konzole to
+nikde neřekla nahlas — dlaždice „Zmlklo agentů" ukazovala `1` a nikdo se nekoukl. Po ručním startu služby se fronta
+sama dosypala.
+
+**Kontroly stavu (nová stránka `/kontroly`, `Health/HealthService.cs`):** 14 read-only kontrol ve třech skupinách —
+*Sběr dat* (databáze, **dostupnost API**, **stáří nejnovějšího incidentu**, zmlklí agenti, pokrytí stanic),
+*Whitelist a politika* (aktivní verze / podpis / expirace, katalog vs. publikace, podpisový klíč, vynucování),
+*Provoz a údržba* (e-mail, retence, AD sync, auto-enrollment, plánovaný restart, shoda verzí konzole/API/agentů).
+Každá kontrola vrací **co naměřila + proč na tom záleží + co s tím**. Stavy jsou schválně čtyři, aby šlo poznat
+rozdíl mezi rozbité a vědomě vypnuté: `v pořádku` / `varování` / `CHYBA` / `vypnuto` (+ `čeká na data`).
+Strojově totéž na **`GET /api/health`** — JSON, **HTTP 200 = OK, 503 = aspoň jedna chyba** (kontrakt pro externí dohled).
+Nastavení v Nastavení → Kontroly stavu: `health.apiUrl` (kam se ptát na `/api/version`), `health.maxIncidentAgeHours` (default 48).
+
+**Plánovaný restart služeb (`Maintenance/ServiceRestartService.cs`, Nastavení → Plánovaný restart služeb):**
+denně v nastavenou hodinu projde seznam cílů `HOST|Název služby` (host prázdný = tenhle server). Běžící službu
+restartuje, **zastavenou nastartuje** — to je ta pojistka proti výpadku výše. Nastavení: `svc.restart.enabled`,
+`svc.restart.at` (HH:mm), `svc.restart.targets`, výsledek do `svc.restart.lastRun` (čte ho i kontrola).
+Tlačítko **„Restartovat teď"** dělá totéž hned = ověření, že sedí práva i názvy služeb.
+Když stanice/server nebyl v okně dostupný, restart se dohání **nejvýš 2 h**, pak se čeká na další den.
+
+> **Práva:** restart provádí **účet služby konzole** (`LocalSystem` = strojový účet `.213`). Na cizím serveru na to
+> musí mít právo, jinak běh vrátí `CHYBA – přístup odepřen` (a je to vidět v Kontrolách). Pro API na SQL-04 je
+> potřeba účtu konzole povolit ovládání té jedné služby (`sc sdset`), nebo počkat na přesun API na `.213` (5.5).
+
+**Plánovaný restart i na klientovi (`agent/USBGuardian/SelfRestart.cs`):** stejná pojistka na stanici — agent se
+jednou denně sám restartuje (`sc stop` → pauza → `sc start` z odděleného `cmd.exe`, protože služba se nemůže
+restartovat zevnitř). Výchozí hodnoty z `agent.config.json` (`selfRestart.enabled/at`), přepínatelné z **lokální
+konzole** (karta „Plánovaný restart", admin-only), stav perzistovaný v `C:\ProgramData\USBGuardian\selfrestart.json`.
+
+**Konzole – provozní údaje nahoře:** čas, nasazený commit a tečka dostupnosti DB se přesunuly z patičky do horní lišty.
+
+### 5.7 Vzhled konzole z banky UI — přepínatelný v Nastavení (28.08.2026)
+Konzole přestala mít vlastní ručně psanou paletu a bere vzhled z **banky UI**
+(repo `Anamax443/Interface-Par`, katalog `mockup/ui-styly-katalog.html`, rozbor `docs/styly.md`).
+
+- **Co se zkopírovalo do `wwwroot/`:** `bank/ui.css`, `bank/fonts.css`, `bank/tokens/style/*.css` (23 stylů)
+  a `vendor/fonts/*.woff2` (Cascadia Mono + Inter, latin i **latin-ext** — bez něj by chyběly ř/ě/š/č/ů).
+  Banka se **needituje**, generuje ji katalog (`node scripts/build-bank.mjs`) — úpravy patří do katalogu.
+- **Pořadí v `<head>`** (závazné): `fonts.css` → `tokens/style/<styl>.css` → `ui.css` → `app.css`.
+- **Kostra** (`MainLayout.razor`): `.ui[data-style][data-layout]` + `p-title` / `p-nav` / `p-topnav` / `p-main` /
+  `p-status`. Položky menu jsou v jednom poli a vykreslují se do bočního i vodorovného menu → **žádný druhý
+  zdroj pravdy** o navigaci. Obal `.ui` dostává výšku z `app.css` (`100vh`), banka si ji sama nenastaví.
+- **Přepínání:** Nastavení → **Vzhled konzole** (styl + rozvržení). Ukládá se do `AppSettings`
+  (`ui.style`, `ui.layout`), čte `UiStyleCache` (singleton, přenačte se po uložení; DB dotaz na každý render by
+  byl zbytečný). Hodnota jde do **cesty k souboru**, proto prochází **whitelistem** známých stylů/rozvržení —
+  neznámá hodnota tiše spadne na výchozí `hmi-slate` / `side-nav`.
+- **Výchozí = `hmi-slate` + `side-nav`** (Velín — průmyslový panel: ohraničení 2 px, rádius 0, hlavičky verzálkami).
+- **`app.css` je teď jen vrstva komponent konzole** (dlaždice, pilulky, bannery, `dl.cfg`, dokumentace) a sahá
+  **výhradně přes role** banky (`--pane`, `--dim`, `--accent`, `--ok`, `--crit`, `--row-h`, `--radius` …).
+  Žádná barva natvrdo, žádný CSS framework vedle banky.
+- **Ověřeno:** build OK; konzole spuštěná lokálně proti neexistující DB (bez zásahu do ostrých dat) —
+  všech 7 souborů banky se servíruje (200), kostra i menu se vykreslí, aktivní položka svítí.
+  Blazor značí aktivní `NavLink` třídou `.active` a `aria-current="page"`, banka čeká `aria-current="true"` →
+  vzhled aktivní položky dodává `app.css`.
+
+> **Před nasazením dalšího stylu:** v katalogu spustit **Zkontrolovat všechny styly**, a to v rozvržení
+> `side-nav` — nálezy se liší podle kostry, ne jen podle stylu.
+
 ### 5.5 Roadmapa (pending)
 - **Monitoring expirace podpisového certu** – `CN=powershell.axinetwork.loc` platí do 2028-06-17; alert e-mailem z konzole.
 - **„Vše server na .213":** přesun API runtime z SQL-04 na .213 (konzole+API na .213, DB na SQL-04, agent repoint na
@@ -189,3 +250,4 @@ neinvalidovalo → schválení se projevilo až za ~5 min (a `ReEnforce` mezití
 | `docs/auto-deploy-setup.md` | Nastavení deploy gMSA + GPO + scheduled task pro auto-enrollment |
 | `docs/oponentura.md` | Komplexní technický dokument k oponentuře (kontext, NIS2, obhajoba rozhodnutí, bezpečnost, omezení) |
 | `docs/oponentura-komercni.md` | Komerční oponentní posudek (business/product readiness) + reakce autora |
+| `wwwroot/bank/README.md` | Banka UI – jak se zapojuje styl a rozvržení (kopie z Interface-Par) |

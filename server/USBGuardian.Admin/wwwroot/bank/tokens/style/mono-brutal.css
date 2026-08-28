@@ -1,0 +1,37 @@
+/* Tokeny stylu mono-brutal
+   GENEROVÁNO skriptem scripts/build-bank.mjs z mockup/ui-styly-katalog.html.
+   Needitovat — změny se přepíšou. Uprav katalog a spusť generátor znovu. */
+
+.ui[data-style="mono-brutal"], .ui {
+    --l-pane:#ffffff; --l-chrome:#ffffff; --l-chromehi:#ffffff; --l-head:#000000;
+    --l-zebra:#f4f4f4; --l-hover:#ffe600; --l-border:#000000; --l-bordersoft:#000000;
+    --l-text:#000000; --l-dim:#3a3a3a; --l-faint:#6e6e6e;
+    --l-accent:#000000; --l-accsoft:#ffe600; --l-accfg:#ffffff;
+    --l-ok:#006b2d; --l-warn:#8a5a00; --l-crit:#d10000;
+
+    --d-pane:#0a0a0a; --d-chrome:#0a0a0a; --d-chromehi:#0a0a0a; --d-head:#f2f2f2;
+    --d-zebra:#151515; --d-hover:#ffd400; --d-border:#f2f2f2; --d-bordersoft:#f2f2f2;
+    --d-text:#f2f2f2; --d-dim:#c2c2c2; --d-faint:#8a8a8a;
+    --d-accent:#f2f2f2; --d-accsoft:#ffd400; --d-accfg:#0a0a0a;
+    --d-ok:#3ddc84; --d-warn:#ffd400; --d-crit:#ff4d4d;
+
+    --border-w:2px;
+    --radius:0px; --nav-radius:0px; --sel-bar:6px;
+    --row-h:28px; --title-h:40px; --tb-h:34px; --panehead-h:30px; --status-h:26px;
+    --font-ui:"Cascadia Mono",Consolas,monospace;
+    --font-display:var(--font-ui);
+    --font-data:var(--font-ui);
+    --fs-ui:12.5px; --fs-data:12.5px; --fs-th:11.5px;
+    --th-transform:uppercase; --th-ls:1.2px; --th-weight:700;
+    --nav-h:30px; --pane-shadow:4px 4px 0 var(--border); --dot-radius:0px;
+  }
+
+/* strukturální odchylky tohoto stylu */
+.ui[data-style="mono-brutal"] .p-table thead th { color: var(--pane); }
+.ui[data-style="mono-brutal"] .p-panehead, .ui[data-style="mono-brutal"] .p-brand { text-transform: uppercase; letter-spacing: .5px; }
+.ui[data-style="mono-brutal"] .p-panehead { background: none; border-bottom-width: var(--border-w); }
+.ui[data-style="mono-brutal"] .p-navitem[aria-current="true"] { background: var(--accsoft); color: #000; }
+.ui[data-style="mono-brutal"] .p-navitem[aria-current="true"] .icon { color: #000; }
+.ui[data-style="mono-brutal"] .p-table tbody tr:hover td { color: #000; }
+.ui[data-style="mono-brutal"] .p-table tbody tr[data-sel="true"] td, .ui[data-style="mono-brutal"] .p-table tbody tr[data-sel="true"] td .dim { color: #000; }
+.ui[data-style="mono-brutal"] .p-field { border-width: var(--border-w); }

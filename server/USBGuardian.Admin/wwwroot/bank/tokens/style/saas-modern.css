@@ -1,0 +1,47 @@
+/* Tokeny stylu saas-modern
+   GENEROVÁNO skriptem scripts/build-bank.mjs z mockup/ui-styly-katalog.html.
+   Needitovat — změny se přepíšou. Uprav katalog a spusť generátor znovu. */
+
+.ui[data-style="saas-modern"], .ui {
+    --l-pane:#ffffff; --l-chrome:#f8fafc; --l-chromehi:#ffffff; --l-head:#f8fafc;
+    --l-zebra:#ffffff; --l-hover:#f1f5f9; --l-border:#e2e8f0; --l-bordersoft:#f1f5f9;
+    --l-text:#0f172a; --l-dim:#64748b; --l-faint:#94a3b8;
+    --l-accent:#6366f1; --l-accsoft:#eef2ff; --l-accfg:#ffffff;
+    --l-ok:#16a34a; --l-warn:#d97706; --l-crit:#dc2626;
+
+    --d-pane:#0f172a; --d-chrome:#020617; --d-chromehi:#0f172a; --d-head:#1e293b;
+    --d-zebra:#0f172a; --d-hover:#1e293b; --d-border:#1e293b; --d-bordersoft:#1e293b;
+    --d-text:#f1f5f9; --d-dim:#94a3b8; --d-faint:#64748b;
+    --d-accent:#818cf8; --d-accsoft:#1e1b4b; --d-accfg:#0f172a;
+    --d-ok:#4ade80; --d-warn:#fbbf24; --d-crit:#f87171;
+
+    --radius:8px; --nav-radius:8px; --sel-bar:0px;
+    --row-h:44px; --title-h:56px; --tb-h:52px; --panehead-h:44px; --status-h:34px;
+    --font-ui:Inter,"Segoe UI Variable Text","Segoe UI",system-ui,sans-serif;
+    --font-display:var(--font-ui);
+    --font-data:"Segoe UI Variable Text","Segoe UI",system-ui,sans-serif;
+    --fs-ui:14px; --fs-data:13.5px; --fs-th:12.5px;
+    --th-transform:none; --th-ls:0; --th-weight:500;
+    --nav-h:38px; --pane-shadow:0 1px 3px rgba(15,23,42,.1); --dot-radius:50%;
+  }
+
+/* strukturální odchylky tohoto stylu */
+.ui[data-style="saas-modern"] .p-state, .ui[data-style="vivid-gradient"] .p-state {
+    padding: 3px 10px 3px 9px;
+    border-radius: 999px;
+    background: var(--accsoft);
+    border: 1px solid var(--bordersoft);
+    font-size: calc(var(--fs-ui) - 1.5px);
+    font-weight: 500;
+  }
+.ui[data-style="saas-modern"] .p-btn, .ui[data-style="vivid-gradient"] .p-btn {
+    background: var(--accent);
+    color: var(--accfg);
+    border-color: transparent;
+    padding: 8px 16px;
+    font-weight: 500;
+    box-shadow: var(--pane-shadow);
+  }
+.ui[data-style="saas-modern"] .p-btn .icon, .ui[data-style="vivid-gradient"] .p-btn .icon { color: currentColor; }
+.ui[data-style="saas-modern"] .p-btn:hover, .ui[data-style="vivid-gradient"] .p-btn:hover { filter: brightness(1.1); }
+.ui[data-style="saas-modern"] .p-field, .ui[data-style="vivid-gradient"] .p-field { border-radius: 999px; padding: 4px 12px; }

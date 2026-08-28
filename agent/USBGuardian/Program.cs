@@ -114,6 +114,18 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<DeviceMonitor>());
 // Sdílený flush signál: heartbeat (WhitelistSync) → okamžitý sync incidentů (IncidentSync)
 builder.Services.AddSingleton<SyncSignals>();
 
+// ── Plánovaný restart klientské služby ───────────────────────
+// Stejná pojistka jako na serveru: jednou denně v nastavenou hodinu se
+// služba restartuje sama. Výchozí hodnoty z configu, přepínatelné z lokální
+// konzole; stav přežívá restart (selfrestart.json v ProgramData).
+builder.Services.AddSingleton(sp => new SelfRestartManager(
+    sp.GetRequiredService<ILogger<SelfRestartManager>>(),
+    builder.Configuration["selfRestart:statePath"] ?? @"C:\ProgramData\USBGuardian\selfrestart.json",
+    builder.Configuration["selfRestart:serviceName"] ?? "USB Guardian",
+    bool.Parse(builder.Configuration["selfRestart:enabled"] ?? "false"),
+    builder.Configuration["selfRestart:at"] ?? "03:30"));
+builder.Services.AddHostedService<SelfRestartService>();
+
 // ── Lokální admin konzole (loopback, read-only) ──────────────
 // Výchozí VYPNUTO – minimální attack surface (NIS2). Zapnout přes
 // agent.config.local.json: { "localConsole": { "enabled": true } }
@@ -126,6 +138,7 @@ if (bool.Parse(builder.Configuration["localConsole:enabled"] ?? "false"))
         sp.GetRequiredService<IncidentLogger>(),
         sp.GetRequiredService<PolicyState>(),
         sp.GetRequiredService<DeviceBlocker>(),
+        sp.GetRequiredService<SelfRestartManager>(),
         builder.Configuration["policy:mode"] ?? "warn",
         int.Parse(builder.Configuration["localConsole:port"] ?? "5080")));
 

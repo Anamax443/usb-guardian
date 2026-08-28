@@ -1,0 +1,52 @@
+/* Tokeny stylu winbox-95
+   GENEROVÁNO skriptem scripts/build-bank.mjs z mockup/ui-styly-katalog.html.
+   Needitovat — změny se přepíšou. Uprav katalog a spusť generátor znovu. */
+
+.ui[data-style="winbox-95"], .ui {
+    --l-pane:#ffffff; --l-chrome:#f0f0f0; --l-chromehi:#f6f6f6; --l-head:#e9e9e9;
+    --l-zebra:#f7f7f7; --l-hover:#e5f0fb; --l-border:#a0a0a0; --l-bordersoft:#d7d7d7;
+    --l-text:#000000; --l-dim:#3f3f3f; --l-faint:#767676;
+    --l-accent:#2a5cad; --l-accsoft:#cbe0f7; --l-accfg:#ffffff;
+    --l-ok:#1a7a1a; --l-warn:#8a6d00; --l-crit:#c00000;
+
+    --d-pane:#2d2d30; --d-chrome:#3f3f46; --d-chromehi:#45454b; --d-head:#37373d;
+    --d-zebra:#313135; --d-hover:#3e5f8a; --d-border:#5a5a5e; --d-bordersoft:#414146;
+    --d-text:#f0f0f0; --d-dim:#b8b8bc; --d-faint:#8a8a8e;
+    --d-accent:#2f6cbd; --d-accsoft:#24405f; --d-accfg:#ffffff;
+    --d-ok:#4cb04c; --d-warn:#c9a227; --d-crit:#e05252;
+
+    --radius:0px; --nav-radius:0px; --sel-bar:0px;
+    --row-h:20px; --title-h:28px; --tb-h:26px; --panehead-h:22px; --status-h:20px;
+    --font-ui:"Segoe UI",Tahoma,sans-serif;
+    --font-display:var(--font-ui);
+    --font-data:"Lucida Console",Consolas,monospace;
+    --fs-ui:12px; --fs-data:11.5px; --fs-th:11.5px;
+    --th-transform:none; --th-ls:0; --th-weight:400;
+    --nav-h:21px; --pane-shadow:none; --dot-radius:0px;
+  }
+
+/* strukturální odchylky tohoto stylu */
+.ui[data-style="winbox-95"] .p-btn {
+    border: 1px solid var(--border);
+    border-top-color: var(--chromehi); border-left-color: var(--chromehi);
+    background: var(--chrome);
+  }
+.ui[data-style="winbox-95"] .p-btn:hover { background: var(--chromehi); }
+.ui[data-style="winbox-95"] .p-gridwrap {
+    border: 1px solid var(--border);
+    border-right-color: var(--bordersoft); border-bottom-color: var(--bordersoft);
+    margin: 3px; background: var(--pane);
+  }
+.ui[data-style="winbox-95"] .p-table thead th {
+    border-right: 1px solid var(--border);
+    border-top: 1px solid var(--chromehi);
+    background: var(--chrome);
+  }
+.ui[data-style="winbox-95"] .p-table tbody tr[data-sel="true"] td {
+    background: var(--accent); color: var(--accfg);
+  }
+.ui[data-style="winbox-95"] .p-table tbody tr[data-sel="true"] td .dim, .ui[data-style="winbox-95"] .p-table tbody tr[data-sel="true"] td.c-date, .ui[data-style="winbox-95"] .p-table tbody tr[data-sel="true"] td.c-vs { color: var(--accfg); opacity: .85; }
+.ui[data-style="winbox-95"] .p-table tbody tr[data-sel="true"] td:first-child { box-shadow: none; }
+.ui[data-style="winbox-95"] .p-navitem[aria-current="true"] { background: var(--accent); color: var(--accfg); }
+.ui[data-style="winbox-95"] .p-navitem[aria-current="true"] .icon { color: var(--accfg); }
+.ui[data-style="winbox-95"] .p-panehead { background: var(--chrome); }

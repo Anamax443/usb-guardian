@@ -1,0 +1,32 @@
+/* Tokeny stylu catppuccin-soft
+   GENEROVÁNO skriptem scripts/build-bank.mjs z mockup/ui-styly-katalog.html.
+   Needitovat — změny se přepíšou. Uprav katalog a spusť generátor znovu. */
+
+.ui[data-style="catppuccin-soft"], .ui {
+    /* Latte drzi plochy; overlay0 a yellow jsou na text a znacky prilis
+       svetle, proto overlay2 a tmavsi zluta. */
+    --l-pane:#eff1f5; --l-chrome:#e6e9ef; --l-chromehi:#eff1f5; --l-head:#dce0e8;
+    --l-zebra:#e9ecf1; --l-hover:#ccd0da; --l-border:#bcc0cc; --l-bordersoft:#ccd0da;
+    --l-text:#4c4f69; --l-dim:#5c5f77; --l-faint:#7c7f93;
+    --l-accent:#1a5ce0; --l-accsoft:rgba(26,92,224,.12); --l-accfg:#ffffff;
+    --l-ok:#3a8f27; --l-warn:#b47a12; --l-crit:#d20f39;
+
+    --d-pane:#1e1e2e; --d-chrome:#181825; --d-chromehi:#1e1e2e; --d-head:#313244;
+    --d-zebra:#21212f; --d-hover:#313244; --d-border:#45475a; --d-bordersoft:#313244;
+    --d-text:#cdd6f4; --d-dim:#a6adc8; --d-faint:#6c7086;
+    --d-accent:#89b4fa; --d-accsoft:rgba(137,180,250,.16); --d-accfg:#11111b;
+    --d-ok:#a6e3a1; --d-warn:#f9e2af; --d-crit:#f38ba8;
+
+    --radius:6px; --nav-radius:6px; --sel-bar:0px;
+    --row-h:30px; --title-h:38px; --tb-h:34px; --panehead-h:30px; --status-h:26px;
+    --font-ui:"Segoe UI Variable Text","Segoe UI",system-ui,sans-serif;
+    --font-display:var(--font-ui);
+    --font-data:"Cascadia Mono",Consolas,monospace;
+    --fs-ui:13px; --fs-data:12.5px; --fs-th:12px;
+    --th-transform:none; --th-ls:0; --th-weight:600;
+    --nav-h:30px; --pane-shadow:none; --dot-radius:50%;
+  }
+
+/* strukturální odchylky tohoto stylu */
+.ui[data-style="catppuccin-soft"] .p-table tbody tr[data-sel="true"] td:first-child { box-shadow: none; }
+.ui[data-style="catppuccin-soft"] .p-navitem[aria-current="true"] { box-shadow: none; }
