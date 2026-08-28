@@ -55,6 +55,9 @@ var devAllowAll  = builder.Configuration.GetValue<bool>("Authorization:DevAllowA
 // DB-spravovaný seznam přístupu (rozšiřuje config bootstrap, viz AccessCache)
 builder.Services.AddSingleton<AccessCache>();
 
+// Motiv (dark/light) se čte z cookie přímo v App.razor – proto přístup k HttpContextu.
+builder.Services.AddHttpContextAccessor();
+
 // Vzhled konzole (styl + rozvržení z banky UI). Cache – čte se při každém renderu <head>.
 builder.Services.AddSingleton<USBGuardian.Admin.Ui.UiStyleCache>();
 

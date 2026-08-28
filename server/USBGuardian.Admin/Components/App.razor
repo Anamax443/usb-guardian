@@ -1,22 +1,17 @@
 @inject USBGuardian.Admin.Ui.UiStyleCache Ui
+@inject IHttpContextAccessor Http
 <!DOCTYPE html>
-<html lang="cs">
+@* Motiv vykresluje SERVER z cookie. Dřív ho nastavoval až skript v prohlížeči
+   z localStorage — jenže Blazor při překliknutí (enhanced navigation) přepíše
+   atributy <html> podle serverové odpovědi, a protože ta o motivu nevěděla,
+   volba po každém překliku zmizela a vzhled skočil zpátky na systémový.
+   Cookie chodí s každým požadavkem, takže atribut sedí hned a nikde neprobliká.
+   Prázdná hodnota = žádná volba → rozhoduje nastavení systému. *@
+<html lang="cs" data-theme="@Theme">
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <base href="/" />
-    @* Motiv musí být na <html> DŘÍV, než se cokoli vykreslí – jinak problikne bílá.
-       Bez uložené volby se atribut NESAHÁ VŮBEC: pak rozhoduje nastavení systému
-       (prefers-color-scheme), stejně jako ve FIO-úhradách. Dřívější tvrdý default
-       "dark" systémovou volbu přebíjel a přepínání pak vypadalo rozbitě. *@
-    <script>
-      (function () {
-        try {
-          var m = localStorage.getItem('axima.theme');
-          if (m === 'dark' || m === 'light') document.documentElement.dataset.theme = m;
-        } catch (e) {}
-      })();
-    </script>
 
     @* Banka UI (repo Anamax443/Interface-Par): písma → tokeny VYBRANÉHO stylu → vrstva komponent.
        Pořadí je závazné. Styl se přepíná v Nastavení, hodnota projde whitelistem v UiStyleCache.
@@ -37,3 +32,17 @@
     <script src="_framework/blazor.web.js"></script>
 </body>
 </html>
+
+@code {
+    private const string ThemeCookie = "axima.theme";
+
+    /// <summary>"dark" / "light" z cookie; prázdné = žádná volba → platí nastavení systému.</summary>
+    private string Theme
+    {
+        get
+        {
+            var v = Http.HttpContext?.Request.Cookies[ThemeCookie];
+            return v is "dark" or "light" ? v : "";
+        }
+    }
+}

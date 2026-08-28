@@ -62,9 +62,14 @@
 </div>
 
 <script>
-  /* Motiv: bez uložené volby jde konzole za systémem (atribut data-theme se
-     vůbec nenastavuje). Kliknutí volbu teprve zapíše — pak už platí ona.
+  /* Motiv: bez uložené volby jde konzole za systémem (atribut data-theme je prázdný).
+     Kliknutí volbu teprve zapíše — do COOKIE, ne do localStorage: cookie chodí
+     s každým požadavkem, takže ji server vykreslí rovnou do <html> a volba přežije
+     i překliknutí mezi stránkami (Blazor při něm atributy <html> přepisuje).
      Popisek tlačítka říká, KAM se přepne, ne kde jsme; jinak se to čte obráceně. */
+  function aximaSetCookie(v) {
+    document.cookie = 'axima.theme=' + v + '; path=/; max-age=31536000; SameSite=Lax';
+  }
   function aximaIsDark() {
     var d = document.documentElement.dataset.theme;
     if (d === 'dark') return true;
@@ -82,10 +87,21 @@
   function aximaToggleTheme() {
     var t = aximaIsDark() ? 'light' : 'dark';
     document.documentElement.dataset.theme = t;
-    try { localStorage.setItem('axima.theme', t); } catch (e) {}
+    aximaSetCookie(t);
     aximaThemeLabel();
   }
   (function () {
+    /* Kdo si motiv zvolil dřív (uložený v localStorage), o volbu nepřijde:
+       jednorázově se překlopí do cookie. Pak už rozhoduje jen cookie. */
+    try {
+      var stary = localStorage.getItem('axima.theme');
+      if ((stary === 'dark' || stary === 'light') && document.cookie.indexOf('axima.theme=') < 0) {
+        document.documentElement.dataset.theme = stary;
+        aximaSetCookie(stary);
+        localStorage.removeItem('axima.theme');
+      }
+    } catch (e) {}
+
     aximaThemeLabel();
     /* Když si člověk nic nevybral, přepnutí tmy v systému se projeví hned. */
     window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', aximaThemeLabel);
