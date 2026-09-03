@@ -114,6 +114,10 @@ builder.Services.AddHostedService<USBGuardian.Admin.Notifications.IncidentAlertS
 // ── Auto-enrollment agenta (běží, jen když deploy.enabled=true; default dry-run) ──
 builder.Services.AddHostedService<USBGuardian.Admin.Deploy.AgentDeployService>();
 
+// Ruční "nasadit teď" ze Stanic – konzole jen zapíše cíl a šťouchne do úlohy,
+// instalaci dělá deploy účet. Konzole sama na stanice nesahá.
+builder.Services.AddSingleton<USBGuardian.Admin.Deploy.DeployTrigger>();
+
 // ── Kontroly stavu (stránka /kontroly + /api/health pro externí dohled) ──
 builder.Services.AddSingleton<USBGuardian.Admin.Health.HealthService>();
 

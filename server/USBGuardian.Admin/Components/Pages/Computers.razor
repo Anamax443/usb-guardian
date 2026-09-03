@@ -1,6 +1,7 @@
 @page "/stanice"
 @inject IDbContextFactory<AppDbContext> DbFactory
 @inject USBGuardian.Admin.AdSync.AdSyncRunner AdSync
+@inject USBGuardian.Admin.Deploy.DeployTrigger Deploy
 
 <h1>Stanice</h1>
 
@@ -11,6 +12,7 @@
 else
 {
     @if (_reqError is not null) { <div class="banner bad">@_reqError</div> }
+    @if (_deployMsg is not null) { <div class="banner ok">@_deployMsg</div> }
 
     <div class="cards">
         <a class="card tile @(Stav is null ? "active" : "")" href="@Url(stav: "")">
@@ -37,6 +39,22 @@ else
             <button class="btn" type="submit" title="Zrušit všechna vyřazení – zařadit vše zpět do auto-nasazení">✓ Zařadit vše</button>
         </EditForm>
         <span class="muted">AD sync: @AdSync.LastSummary@(AdSync.LastRunUtc is { } t ? $" ({t.ToLocalTime():HH:mm:ss})" : "")</span>
+    </div>
+
+    @* Bez tohohle řádku není poznat, jestli se něco nasadí samo, nebo ne.
+       Pilulka "nasadí se" u stanice říká JEN "byla by mezi cíli". *@
+    <div class="banner @(_autoDeploy ? "ok" : "")" style="margin:10px 0">
+        @if (_autoDeploy)
+        {
+            <strong>Auto-nasazení je ZAPNUTÉ</strong>
+            <span>— konzole sama vybírá cíle každých @_deployInterval min@(_deployDryRun ? " (zatím jen dry-run, nic neinstaluje)" : "").</span>
+        }
+        else
+        {
+            <strong>Auto-nasazení je vypnuté — samo se nenasadí nic.</strong>
+            <span>Instalaci i aktualizaci spouštíš tlačítkem u stanice. Zapnout jde v <a href="nastaveni">Nastavení</a>.</span>
+        }
+        @if (!string.IsNullOrEmpty(_deployLastRun)) { <div class="muted">Poslední běh: @_deployLastRun</div> }
     </div>
 
     <div class="filterbar">
@@ -155,12 +173,23 @@ else
                                     <button class="btn" type="submit" title="Znovu zařadit do auto-nasazení">Zařadit</button>
                                 }
                             </EditForm>
+                            @* Force: nečeká na nic a na nic se neptá pravidel — pošle právě tuhle stanici. *@
+                            <EditForm FormName="@($"now-{c.Hostname}")" Model="_form" OnValidSubmit="NasaditTed">
+                                <input type="hidden" name="NowHost" value="@c.Hostname" />
+                                <button class="btn" type="submit"
+                                        title="Nainstalovat agenta na tuhle stanici hned, bez ohledu na zařazení">▶ Nasadit teď</button>
+                            </EditForm>
                         }
                         else { <span class="muted">—</span> }
                     </td>
                     <td data-no-print>
                         @if (Reports(c))
                         {
+                            <EditForm FormName="@($"upd-{c.Hostname}")" Model="_form" OnValidSubmit="AktualizovatTed">
+                                <input type="hidden" name="UpdHost" value="@c.Hostname" />
+                                <button class="btn" type="submit"
+                                        title="Nahrát na tuhle stanici verzi z kanálu stable (zastaví službu, vymění soubory, nastartuje)">⇪ Aktualizovat</button>
+                            </EditForm>
                             <EditForm FormName="@($"req-{c.Hostname}")" Model="_form" OnValidSubmit="RequestReport">
                                 <input type="hidden" name="ReqHost" value="@c.Hostname" />
                                 <button class="btn" type="submit" title="Vyžádat aktuální data při nejbližším heartbeatu (do ~2 min)">⟳ Vyžádat</button>
@@ -205,6 +234,8 @@ else
     [SupplyParameterFromForm]                 public string? ReqHost { get; set; }
     [SupplyParameterFromForm]                 public string? ExclHost { get; set; }
     [SupplyParameterFromForm]                 public string? IgnHost { get; set; }
+    [SupplyParameterFromForm]                 public string? NowHost { get; set; }
+    [SupplyParameterFromForm]                 public string? UpdHost { get; set; }
 
     private const int DefaultSilentAfterMinutes = 180;
 
@@ -212,12 +243,15 @@ else
     private List<Computer> _all = new();
     private int _reporting, _missing, _silent;
     private int _silentAfterMin = DefaultSilentAfterMinutes;
+    private bool _autoDeploy, _deployDryRun = true;
+    private string _deployInterval = "30", _deployLastRun = "";
     private readonly FormModel _form = new();
     private sealed class FormModel { }
 
     // hostname (UPPER) → čas posledního vyžádání dat (z AppSettings cmd.report.*)
     private Dictionary<string, DateTime> _reqMap = new(StringComparer.OrdinalIgnoreCase);
-    private string? _reqError;   // chyba zápisu vyžádání (Load() ho nevynuluje)
+    private string? _reqError;
+    private string? _deployMsg;   // chyba zápisu vyžádání (Load() ho nevynuluje)
 
     // Nasazování: default (deploy.defaultEnroll – pro nové PC, nastavuje se v Nastavení) + výjimky.
     // Efektivní stav = include ? ON : exclude ? OFF : default. Výjimky jdou jen ty, co se liší od defaultu.
@@ -413,6 +447,28 @@ else
 
     // Přepnutí trvalého vyřazení. Zapisuje se na řádek stanice, ne do seznamu
     // v nastavení – proto to hromadné akce nepřepíšou.
+    private async Task NasaditTed()
+    {
+        var host = NowHost?.Trim();
+        if (string.IsNullOrEmpty(host)) { await Load(); return; }
+        var (ok, zprava) = await Deploy.SpustAsync(host, USBGuardian.Admin.Deploy.DeployTrigger.Akce.Instalace,
+                                                   await CurrentUser());
+        _reqError = ok ? null : zprava;
+        _deployMsg = ok ? zprava : null;
+        await Load();
+    }
+
+    private async Task AktualizovatTed()
+    {
+        var host = UpdHost?.Trim();
+        if (string.IsNullOrEmpty(host)) { await Load(); return; }
+        var (ok, zprava) = await Deploy.SpustAsync(host, USBGuardian.Admin.Deploy.DeployTrigger.Akce.Aktualizace,
+                                                   await CurrentUser());
+        _reqError = ok ? null : zprava;
+        _deployMsg = ok ? zprava : null;
+        await Load();
+    }
+
     private async Task ToggleIgnore()
     {
         var host = IgnHost?.Trim();
@@ -484,6 +540,14 @@ else
         {
             await using var db = await DbFactory.CreateDbContextAsync();
             _silentAfterMin = await LoadSilentThreshold(db);
+
+            // Stav auto-nasazení – ať je na stránce vidět, jestli se něco stane samo.
+            var st = await db.AppSettings.ToListAsync();
+            string Nast(string k) => st.FirstOrDefault(x => x.Key == k)?.Value ?? "";
+            _autoDeploy    = string.Equals(Nast("deploy.enabled"), "true", StringComparison.OrdinalIgnoreCase);
+            _deployDryRun  = !string.Equals(Nast("deploy.dryRun"), "false", StringComparison.OrdinalIgnoreCase);
+            var di = Nast("deploy.intervalMinutes"); _deployInterval = string.IsNullOrEmpty(di) ? "30" : di;
+            _deployLastRun = Nast("deploy.lastRun");
             _reqMap = await LoadReportRequests(db);
             var defRow = await db.AppSettings.FirstOrDefaultAsync(s => s.Key == DefaultEnrollKey);
             _defaultEnroll = !string.Equals(defRow?.Value, "false", StringComparison.OrdinalIgnoreCase); // default ON
