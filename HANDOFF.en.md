@@ -230,6 +230,33 @@ The console no longer carries its own hand-written palette; the look comes from 
 > **Before adopting another style:** run **Check all styles** in the catalog, in the `side-nav` layout — findings
 > depend on the skeleton, not only on the style.
 
+### 5.8 Separated deploy accounts and API deployment (2026-09-03)
+Until 2026-09-03 a **single** account (`gmsa-USBGdep$`) was admin both on the client fleet and on SQL-04 — one
+compromised deploy identity would have reached both. Split into three roles, none holding the other's rights:
+
+| Role | Account | Admin where |
+|---|---|---|
+| Clients (auto-enrollment) | `gmsa-USBGdep$` | `PC Admins` → workstations only |
+| Servers (API deploy) | `gmsa-USBGsrv$` | local admin on SQL-04 only |
+| Console (the running app) | `B-S-W-MIKOS$` (LocalSystem) | **nowhere** |
+
+`gmsa-USBGsrv$` is deliberately **not** in `Server Admins` — that would grant admin on every server. Membership is
+local, on that one machine.
+
+**API deployment** used to be manual PS blocks relying on the client account being admin on SQL-04. It is now
+`scripts/Deploy-Api.cmd` plus the `USBGuardian-ApiDeploy` scheduled task on `.213` under the server gMSA: stop the
+service, **wait for `STOPPED`** (otherwise `USBGuardian.Api.exe` stays locked, robocopy fails and the old version
+keeps running while the deploy "succeeded"), copy without `appsettings.local.json`, start, verify `RUNNING`.
+Log in `C:\ProgramData\USBGuardian\deploy\api-deploy.log`; the exit code shows as the task's Last Result.
+
+**A batch file, not PowerShell:** `.cmd` is not subject to the `AllSigned` GPO, so the deployment step needs no
+re-signing on every change.
+
+> **Consequence for the scheduled service restart:** the console (LocalSystem) is not admin on SQL-04 and must not
+> be. Restarting `USB Guardian API` from there will fail — either grant it control of **that single service** via
+> `sc sdset` (one ACE, not an account holding the keys to the server), or let the server gMSA do the restart the
+> same way it does the deploy.
+
 ### 5.5 Roadmap (pending)
 - **Monitoring of signing cert expiry** – `CN=powershell.axinetwork.loc` valid until 2028-06-17; alert via e-mail from the console.
 - **"Everything on the server .213":** move the API runtime from SQL-04 to .213 (console+API on .213, DB on SQL-04, agent repoint to

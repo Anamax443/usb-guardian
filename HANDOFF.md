@@ -29,7 +29,7 @@ Serverová konzole agreguje data, drží inventář stanic z AD a ukazuje, kam c
 | **Live commit** | **konzole `fa127ea`** (patička / `/api/version`; staged `cbc7a0a` = rozbalená chybová hláška – čeká na redeploy .213) · **API live `6f48153`** · **agent `f2bb194`** na .181 (spolehlivý unblock + re-blokace připojených – ověřeno z Event Logu; **staged `8b2dcaa`** = invalidace whitelist cache – čeká na redeploy agenta). Repo HEAD = `8b2dcaa`/`cbc7a0a`. Stamp spolehlivý = footer = git HEAD |
 | **Konzole – stránky** | Přehled (filtr+kumulace+řazení, kapacita, **export CSV + manažerský report s grafy**), Stanice (AD inventář + „Zmlklo agentů" + „Vyžádat data" + **Nasazení / hromadné vyřadit-zařadit**), Whitelist (**kapacita + filtr katalogu + auto-publish podepsané verze**), Nastavení (vynucování/přístup/email/alerty/dohled/auto-enrollment+default PC/retence/**Údržba: reload nastavení**), **Databáze**, **Kontroly** (health checks), Dokumentace (+HTML animace) |
 | **Enforcement (F1-3)** | **whitelist 1:1** (auto-podpis serverem, interní RSA klíč na .213) → **vynucování** server→agent (`policy.enforce` v heartbeatu) → **break-glass** (lokální konzole 5080, offline, logováno, zruší se při sync) + **auto-re-enable** + reconciliace s whitelistem. Lokální konzole: restart služby, break-glass, seznam whitelistu |
-| **Deploy účet (auto-enroll)** | **gMSA `AXINETWORK\gmsa-USBGdep$`** – v `PC Admins` (admin na klientech) **i lokální admin na SQL-04** (deploy API); nainstalován na `.213`; deploy task `USBGuardian-AutoDeploy` (pod gMSA, přes CIM) |
+| **Deploy účty (oddělené vrstvy)** | **klienti:** gMSA `AXINETWORK\gmsa-USBGdep$` – v `PC Admins`, admin **jen na stanicích**, task `USBGuardian-AutoDeploy` na `.213`. **servery:** gMSA `AXINETWORK\gmsa-USBGsrv$` – lokální admin **jen na SQL-04**, task `USBGuardian-ApiDeploy` na `.213`. **Konzole (`B-S-W-MIKOS$`) není admin nikde.** Od 03.09.2026 – jeden účet už nedrží fleet i server současně |
 | **Agent (test) .181** | **PILOT ÚSPĚŠNÝ** – `.181` = **TRNKAMW11** (vlastní workstation); služba „USB Guardian" RUNNING, heartbeat + **incidenty tečou do DB**. Agent live **`f2bb194`** – atribuce uživatele, klient 100% (watchdog+toast), **enforcement F1-3 + auto-re-enable + spolehlivý unblock + re-blokace připojených médií**. Update agenta chce elevaci (UAC) → spustí uživatel (build staged na .213) |
 
 ## 3. Klíčová rozhodnutí (proč)
@@ -225,6 +225,32 @@ Konzole přestala mít vlastní ručně psanou paletu a bere vzhled z **banky UI
 
 > **Před nasazením dalšího stylu:** v katalogu spustit **Zkontrolovat všechny styly**, a to v rozvržení
 > `side-nav` — nálezy se liší podle kostry, ne jen podle stylu.
+
+### 5.8 Oddělené deploy účty a nasazení API (03.09.2026)
+Do 03.09.2026 držel **jeden** účet (`gmsa-USBGdep$`) admina na klientech i na SQL-04 — kompromitace deploy identity
+by tedy sáhla na fleet i na databázový server současně. Rozděleno na tři role, každá bez práv té druhé:
+
+| Role | Účet | Kde je admin |
+|---|---|---|
+| Klienti (auto-enrollment) | `gmsa-USBGdep$` | `PC Admins` → jen stanice |
+| Servery (deploy API) | `gmsa-USBGsrv$` | lokální admin jen na SQL-04 |
+| Konzole (běžící aplikace) | `B-S-W-MIKOS$` (LocalSystem) | **nikde** |
+
+`gmsa-USBGsrv$` je záměrně **mimo** skupinu `Server Admins` — ta by dala admina na všechny servery. Členství je
+lokální, jen na tom jednom stroji.
+
+**Nasazení API** dělal dřív operátor ručními PS bloky (opíralo se o to, že klientský účet je admin na SQL-04).
+Nově je to `scripts/Deploy-Api.cmd` + scheduled task `USBGuardian-ApiDeploy` na `.213` pod serverovým gMSA:
+zastaví službu, **počká na `STOPPED`** (bez toho zůstane `USBGuardian.Api.exe` zamčený, robocopy selže a na serveru
+dál běží stará verze — a deploy přitom „proběhl"), zkopíruje bez `appsettings.local.json`, nastartuje a ověří `RUNNING`.
+Log v `C:\ProgramData\USBGuardian\deploy\api-deploy.log`, návratový kód je vidět jako Last Result úlohy.
+
+**Dávka, ne PowerShell:** `.cmd` nepodléhá `AllSigned` z GPO, takže se nasazovací krok nemusí při každé změně
+znovu podepisovat.
+
+> **Důsledek pro plánovaný restart služeb:** konzole (LocalSystem) na SQL-04 admin není a být nemá. Restart
+> `USB Guardian API` odtud proto neprojde — buď jí povolit ovládání **té jedné služby** přes `sc sdset`
+> (jedna ACE, ne účet s klíči od serveru), nebo restart nechat na serverovém gMSA stejným vzorem jako deploy.
 
 ### 5.5 Roadmapa (pending)
 - **Monitoring expirace podpisového certu** – `CN=powershell.axinetwork.loc` platí do 2028-06-17; alert e-mailem z konzole.
