@@ -54,6 +54,27 @@ if (Test-Path $tasksSrc) {
     Copy-Item (Join-Path $tasksSrc "*.xml") $tasksDst -Force
 }
 
+# ── Kontrola konfigurace balicku ─────────────────────────────
+# Do balicku se snadno dostane VYVOJOVY agent.config.local.json, ve kterem je
+# lokalni konzole zapnuta. Na fleetu ma byt vypnuta (minimalni attack surface).
+# Stalo se to 03.09.2026: konzole se rozjela na stanicich kolegu a lidem
+# vyskakovala hlaska "403 - pristup pouze pro lokalni administratory".
+$cfgPath = Join-Path $Output "Configgent.config.local.json"
+if (Test-Path $cfgPath) {
+    $cfg = Get-Content $cfgPath -Raw
+    if ($cfg -match '"enabled"\s*:\s*true') {
+        Write-Host ""
+        Write-Host "VAROVANI: v balicku je zapnuta lokalni konzole (localConsole.enabled = true)." -ForegroundColor Yellow
+        Write-Host "          Na fleet patri vypnuta. Oprav Configgent.config.local.json a sestav znovu." -ForegroundColor Yellow
+        Write-Host ""
+    }
+    if ($cfg -match 'YOUR_API_SERVER') {
+        Write-Host "VAROVANI: v balicku je sablonovy syncUrl (YOUR_API_SERVER) - agent se nepripoji." -ForegroundColor Yellow
+    }
+} else {
+    Write-Host "VAROVANI: balicek nema Configgent.config.local.json - agent nebude vedet, kam se hlasit." -ForegroundColor Yellow
+}
+
 # ── Offline instalator ───────────────────────────────────────
 # Davky patri primo do balicku: kdyz se balicek prenese na stanici, ke ktere
 # se deploy kanal nedostane, musi tam byt cim ho nainstalovat a cim ho zase
