@@ -18,7 +18,7 @@ Serverová konzole agreguje data, drží inventář stanic z AD a ukazuje, kam c
 | | |
 |---|---|
 | **Doména** | `axinetwork.loc` |
-| **DB** | SQL Server `B-S-W-SQL-04` (= `10.8.2.225`), databáze `USBGuardian`, skripty `database/01–07` aplikované; **+ `GRANT DELETE ON dbo.WhitelistDevices` účtu konzole** (mazání z katalogu – aplikováno ručně) |
+| **DB** | SQL Server `B-S-W-SQL-04` (= `10.8.2.225`), databáze `USBGuardian`, skripty `database/01–07` aplikované, **`08_deploy_ignored.sql` = trvalé vyřazení stanice (Ignorovat)**; **+ `GRANT DELETE ON dbo.WhitelistDevices` účtu konzole** (mazání z katalogu – aplikováno ručně) |
 | **API** | `B-S-W-SQL-04`, Windows služba „USB Guardian API", install `C:\USBGuardian.Api`, gMSA `AXINETWORK\gmsa-SQL$`; **HTTPS `:5443`** (self-signed, **PIN `E6F6B4FCE0BB627F564E85D6509DE7C4B82CF2F0`**) + HTTP `:5050`. **Živá verze přes `GET /api/version`** |
 | **Verze/commit (kontrola)** | konzole patička + `:4200/api/version`; API `:5050/api/version`; agent hlásí commit → konzole „Agent verze". Vše stampuje `git rev-parse` (MSBuild) |
 | **Admin konzole** | **živá** `http://10.8.2.213:4200/` (`B-S-W-MIKOS`), služba `USBGuardianConsole`, `C:\Apps\USBGuardianConsole`, self-contained |

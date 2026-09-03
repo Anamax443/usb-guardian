@@ -30,6 +30,18 @@ public class Computer
     public DateTime? AdSyncedAt { get; set; }
     /// <summary>Cesta (OU) v Active Directory, např. "AXIMA / Computers".</summary>
     public string? AdPath { get; set; }
+
+    // ── Nasazování agenta (úmysl operátora) ──
+    /// <summary>
+    /// Trvale vyřazeno z nasazování agenta ("Ignorovat"). Má PŘEDNOST před
+    /// include seznamem i před výchozí volbou. Hromadná tlačítka "Zařadit vše" /
+    /// "Vyřadit vše" se tohohle příznaku ZÁMĚRNĚ nedotýkají – jinak by se ručně
+    /// vyřazená stanice po první hromadné akci vrátila mezi cíle.
+    /// </summary>
+    public bool DeployIgnored { get; set; }
+    /// <summary>Kdo stanici vyřadil – bez toho se za půl roku nikdo nedozví proč.</summary>
+    public string? DeployIgnoredBy { get; set; }
+    public DateTime? DeployIgnoredAt { get; set; }
 }
 
 [Table("AppSettings")]

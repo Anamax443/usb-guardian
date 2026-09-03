@@ -53,7 +53,7 @@ else
         <thead>
             <tr>
                 <th>Kom.</th><th>Hostname</th><th>Cesta v AD</th><th>OS</th><th>Doména</th>
-                <th>Stav</th><th>Agent verze</th><th>Poslední kontakt</th><th data-no-print>Nasazení</th><th data-no-print>Data</th>
+                <th>Stav</th><th>Agent verze</th><th>Poslední kontakt</th><th data-no-print title="Trvalé vyřazení – hromadné akce se ho nedotknou">Ignorovat</th><th data-no-print>Nasazení</th><th data-no-print>Data</th>
             </tr>
         </thead>
         <tbody>
@@ -73,7 +73,22 @@ else
                     <td>@(string.IsNullOrEmpty(c.AgentVersion) ? "—" : c.AgentVersion)</td>
                     <td>@(c.LastSeen is null ? "—" : c.LastSeen.Value.ToLocalTime().ToString("dd.MM.yyyy HH:mm"))</td>
                     <td data-no-print>
-                        @if (c.InActiveDirectory && !Reports(c))
+                        @* Zaškrtávátko = trvalý úmysl operátora. Uloženo na řádku stanice,
+                           takže ho "Zařadit vše" nepřepíše. *@
+                        <EditForm FormName="@($"ign-{c.Hostname}")" Model="_form" OnValidSubmit="ToggleIgnore">
+                            <input type="hidden" name="IgnHost" value="@c.Hostname" />
+                            <input type="checkbox" checked="@c.DeployIgnored" onchange="this.form.requestSubmit()"
+                                   title="@(c.DeployIgnored
+                                            ? $"Trvale vyřazeno ze všech nasazení{IgnoredNote(c)} – kliknutím zrušíš"
+                                            : "Trvale vyřadit ze všech nasazení (hromadné akce se toho nedotknou)")" />
+                        </EditForm>
+                    </td>
+                    <td data-no-print>
+                        @if (c.DeployIgnored)
+                        {
+                            <span class="pill off" title="Ignorováno@IgnoredNote(c)">ignorováno</span>
+                        }
+                        else if (c.InActiveDirectory && !Reports(c))
                         {
                             <EditForm FormName="@($"excl-{c.Hostname}")" Model="_form" OnValidSubmit="ToggleHostDeploy">
                                 <input type="hidden" name="ExclHost" value="@c.Hostname" />
@@ -120,10 +135,15 @@ else
 }
 
 @code {
+    // Kdo vyřazení nastavil – jinak se za půl roku nikdo nedozví, proč se
+    // na ten jeden stroj nenasazuje.
+    [CascadingParameter] private Task<Microsoft.AspNetCore.Components.Authorization.AuthenticationState>? AuthState { get; set; }
+
     [SupplyParameterFromQuery(Name = "stav")] public string? Stav { get; set; }
     [SupplyParameterFromQuery(Name = "q")]    public string? Q { get; set; }
     [SupplyParameterFromForm]                 public string? ReqHost { get; set; }
     [SupplyParameterFromForm]                 public string? ExclHost { get; set; }
+    [SupplyParameterFromForm]                 public string? IgnHost { get; set; }
 
     private const int DefaultSilentAfterMinutes = 180;
 
@@ -297,8 +317,44 @@ else
         else await Load();
     }
 
+    // Přepnutí trvalého vyřazení. Zapisuje se na řádek stanice, ne do seznamu
+    // v nastavení – proto to hromadné akce nepřepíšou.
+    private async Task ToggleIgnore()
+    {
+        var host = IgnHost?.Trim();
+        if (string.IsNullOrEmpty(host)) { await Load(); return; }
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var pc = await db.Computers.FirstOrDefaultAsync(c => c.Hostname == host);
+            if (pc is not null)
+            {
+                pc.DeployIgnored = !pc.DeployIgnored;
+                pc.DeployIgnoredBy = pc.DeployIgnored ? await CurrentUser() : null;
+                pc.DeployIgnoredAt = pc.DeployIgnored ? DateTime.UtcNow : null;
+                await db.SaveChangesAsync();
+            }
+            _reqError = null;
+        }
+        catch (Exception ex) { _reqError = "Změnu se nepodařilo uložit: " + ex.Message; }
+        await Load();
+    }
+
+    private async Task<string> CurrentUser()
+    {
+        if (AuthState is null) return "?";
+        try { return (await AuthState).User.Identity?.Name ?? "?"; }
+        catch { return "?"; }
+    }
+
+    private static string IgnoredNote(Computer c) =>
+        string.IsNullOrEmpty(c.DeployIgnoredBy) ? ""
+        : $" ({c.DeployIgnoredBy}{(c.DeployIgnoredAt is { } t ? ", " + t.ToLocalTime().ToString("dd.MM.yyyy") : "")})";
+
+    // Hromadné akce se ignorovaných stanic ZÁMĚRNĚ netýkají.
     private List<string> DeployCandidates() =>
-        _all.Where(c => c.InActiveDirectory && !Reports(c)).Select(c => c.Hostname).ToList();
+        _all.Where(c => c.InActiveDirectory && !Reports(c) && !c.DeployIgnored)
+            .Select(c => c.Hostname).ToList();
 
     private Task ExcludeAll() => SetHostsDeploy(DeployCandidates(), target: false);
     private Task IncludeAll() => SetHostsDeploy(DeployCandidates(), target: true);

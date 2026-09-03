@@ -57,8 +57,11 @@ public class AgentDeployService : BackgroundService
             return cfg.IntervalMinutes;
 
         // Stanice z AD bez agenta (nikdy se neozvaly).
+        // DeployIgnored se filtruje UŽ V DOTAZU: trvale vyřazená stanice se nesmí
+        // objevit mezi cíli ani omylem, ani přes include seznam.
         var targets = await db.Computers
-            .Where(c => c.InActiveDirectory && c.LastSeen == null && c.AgentVersion == "")
+            .Where(c => c.InActiveDirectory && c.LastSeen == null && c.AgentVersion == ""
+                        && !c.DeployIgnored)
             .Select(c => c.Hostname)
             .ToListAsync(ct);
 
