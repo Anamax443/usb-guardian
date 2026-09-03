@@ -112,8 +112,11 @@ $perHost = {
         $toastXml = Join-Path $SourcePath 'tasks\USBGuardian-ToastHelper.xml'
         if (Test-Path $toastXml) {
             $tmpXml = Join-Path ([System.IO.Path]::GetTempPath()) ("usbg-toast-{0}.xml" -f $h)
+            # Docasny soubor se maze ve finally nize - jinak se v %TEMP% na .213
+            # hromadi usbg-toast-<HOST>.xml po kazdem nasazeni (jeden na stanici).
             (Get-Content $toastXml -Raw) | Set-Content $tmpXml -Encoding Unicode
             $toOut = (& schtasks /Create /S $h /XML $tmpXml /TN "USBGuardian\USBGuardian-ToastHelper" /F 2>&1 | Out-String)
+            Remove-Item $tmpXml -Force -ErrorAction SilentlyContinue
             $toOk  = ($LASTEXITCODE -eq 0)
             $toMsg = $(if ($toOk) { 'toast ok' } else { 'toast FAIL: ' + ($toOut.Trim() -replace '\s+',' ') })
         }

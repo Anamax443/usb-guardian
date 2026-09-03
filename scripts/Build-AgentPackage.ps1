@@ -54,6 +54,15 @@ if (Test-Path $tasksSrc) {
     Copy-Item (Join-Path $tasksSrc "*.xml") $tasksDst -Force
 }
 
+# ── Offline instalator ───────────────────────────────────────
+# Davky patri primo do balicku: kdyz se balicek prenese na stanici, ke ktere
+# se deploy kanal nedostane, musi tam byt cim ho nainstalovat a cim ho zase
+# uklidit. .cmd schvalne - nepodleha AllSigned z GPO.
+foreach ($d in "Install-Agent.cmd", "Uninstall-Agent.cmd") {
+    $src = Join-Path $PSScriptRoot $d
+    if (Test-Path $src) { Copy-Item $src $Output -Force }
+}
+
 Write-Host ""
 $exe   = Join-Path $Output "USBGuardian.exe"
 $toast = Join-Path $Output "ToastHelper\ToastHelper.exe"
