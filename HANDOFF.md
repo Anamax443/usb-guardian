@@ -252,6 +252,32 @@ znovu podepisovat.
 > `USB Guardian API` odtud proto neprojde — buď jí povolit ovládání **té jedné služby** přes `sc sdset`
 > (jedna ACE, ne účet s klíči od serveru), nebo restart nechat na serverovém gMSA stejným vzorem jako deploy.
 
+### 5.9 Aktualizace už nasazeného agenta (03.09.2026)
+Fleet skript uměl jen **čistou instalaci**. `-ReinstallExisting` šel rovnou na `robocopy` bez zastavení služby —
+běžící `USBGuardian.exe` je zamčený, takže by se přepsala část DLL, kopie `.exe` selhala a na stanici by zůstala
+**směs verzí**, zatímco deploy hlásí úspěch. Proto je aktualizace samostatná úloha:
+
+`scripts/Update-Agent.cmd <ZDROJ> <HOST | SOUBOR_S_HOSTY> [SLUŽBA]` — zastaví službu, **počká na `STOPPED`**,
+zkopíruje, nastartuje a **ověří `RUNNING`**. Stanici bez služby přeskočí (na čistou instalaci je AutoDeploy).
+Návratový kód = počet neúspěšných stanic; log `C:\ProgramData\USBGuardian\deploy\update-agent.log`.
+
+Spouští se úlohou **`USBGuardian-UpdateAgent`** na `.213` pod `gmsa-USBGdep$`; seznam stanic v
+`C:\ProgramData\USBGuardian\deploy\update.txt` (jeden host na řádek, `#` = komentář).
+
+**Dávka, ne PowerShell** — `.cmd` nepodléhá `AllSigned`, takže změna aktualizačního kroku nevyžaduje podpis.
+
+> **Vytvoření úlohy pod gMSA (gotcha):** `schtasks /Create /RU "…gmsa$"` bez hesla vyrobí úlohu s
+> `LogonType=InteractiveToken` → nespustí se („uživatel nebyl přihlášen", event 332). S4U (`/NP`) nemá síťové
+> credentials a nedosáhne na `\\HOST\C$`. Funguje jediné: vytáhnout XML fungující úlohy, vyměnit v něm
+> `<Command>`/`<Arguments>`/`<URI>`, uložit jako **UTF-16** a založit přes `/XML` — to nese `LogonType=Password`,
+> u kterého si heslo gMSA vyzvedne systém.
+
+> **Když deploy úloha začne hlásit `ERROR_LOGON_FAILURE (0x8007052E)`**, není to o právech — je to zastaralá
+> lokální kopie hesla gMSA. Spravit na `.213`: `Install-ADServiceAccount gmsa-USBGdep`.
+
+**Ověřeno 03.09.2026:** TRNKAMW11 přeskočena z `f2bb194` na `560722b`, kontrola Verze komponent hlásí jedinou
+verzi agenta. Zároveň se tím uklidily dva soubory, které od července visely ve frontě.
+
 ### 5.5 Roadmapa (pending)
 - **Monitoring expirace podpisového certu** – `CN=powershell.axinetwork.loc` platí do 2028-06-17; alert e-mailem z konzole.
 - **„Vše server na .213":** přesun API runtime z SQL-04 na .213 (konzole+API na .213, DB na SQL-04, agent repoint na
