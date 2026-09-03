@@ -160,9 +160,16 @@ public class IncidentSync : BackgroundService
 
             if (newRecords.Count == 0 && updatedDisconnects.Count == 0)
             {
+                // Všechno z tohohle souboru už na serveru je (offset == počet záznamů).
+                // Dřív se tu jen vrátilo – soubor pak zůstal ve frontě NAVŽDY a fronta
+                // hlásila neodeslané záznamy, které dávno odeslané byly. Falešný poplach,
+                // který sám nikdy nezmizí, je horší než žádný.
                 _logger.LogInformation(
-                    "IncidentSync: {File} – žádné nové záznamy ({Sent}/{Total})",
+                    "IncidentSync: {File} – vše odesláno ({Sent}/{Total}), uklízím do sent",
                     fileName, alreadySent, daily.Records.Count);
+
+                if (!_incidentLogger.IsTodaysFile(filePath))
+                    _incidentLogger.MoveTeSent(filePath);
                 return;
             }
 
