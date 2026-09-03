@@ -42,18 +42,70 @@ else
     <div class="filterbar">
         <form method="get" class="searchform">
             @if (Stav is not null) { <input type="hidden" name="stav" value="@Stav" /> }
+            @* Sloupcové filtry se nesou dál, aby je hledání nesmazalo. *@
+            @if (!string.IsNullOrWhiteSpace(FHost)) { <input type="hidden" name="h" value="@FHost" /> }
+            @if (!string.IsNullOrWhiteSpace(FOu))   { <input type="hidden" name="ou" value="@FOu" /> }
+            @if (!string.IsNullOrWhiteSpace(FOs))   { <input type="hidden" name="os" value="@FOs" /> }
+            @if (!string.IsNullOrWhiteSpace(FDom))  { <input type="hidden" name="dom" value="@FDom" /> }
+            @if (!string.IsNullOrWhiteSpace(FVer))  { <input type="hidden" name="ver" value="@FVer" /> }
+            @if (!string.IsNullOrEmpty(FIgn))       { <input type="hidden" name="ign" value="@FIgn" /> }
+            @if (!string.IsNullOrEmpty(FNas))       { <input type="hidden" name="nas" value="@FNas" /> }
             <input class="inp" name="q" value="@Q" placeholder="hledat hostname / OS / cesta / doména" />
             <button class="btn" type="submit">Hledat</button>
         </form>
         @if (Stav is not null || !string.IsNullOrEmpty(Q)) { <a class="chip" href="stanice">✕ zrušit filtry</a> }
     </div>
 
-    <h2>Inventář (@Filtered().Count())</h2>
+    <h2>Inventář (@Filtered().Count() @(JeFiltrovano ? $"z {_all.Count}" : ""))</h2>
+
+    @* Formulář stojí MIMO tabulku – <form> nesmí obalit <tr>. Políčka se k němu
+       hlásí atributem form="fstanice", což HTML umožňuje. *@
+    <form id="fstanice" method="get" class="no-print">
+        @if (!string.IsNullOrEmpty(Q)) { <input type="hidden" name="q" value="@Q" /> }
+    </form>
+
     <table>
         <thead>
             <tr>
                 <th>Kom.</th><th>Hostname</th><th>Cesta v AD</th><th>OS</th><th>Doména</th>
                 <th>Stav</th><th>Agent verze</th><th>Poslední kontakt</th><th data-no-print title="Trvalé vyřazení – hromadné akce se ho nedotknou">Ignorovat</th><th data-no-print>Nasazení</th><th data-no-print>Data</th>
+            </tr>
+            <tr class="filtry" data-no-print>
+                <td></td>
+                <td><input class="f" form="fstanice" name="h" value="@FHost" placeholder="hostname" /></td>
+                <td><input class="f" form="fstanice" name="ou" value="@FOu" placeholder="OU" /></td>
+                <td><input class="f" form="fstanice" name="os" value="@FOs" placeholder="OS" /></td>
+                <td><input class="f" form="fstanice" name="dom" value="@FDom" placeholder="doména" /></td>
+                <td>
+                    <select class="f" form="fstanice" name="stav" onchange="this.form.requestSubmit()">
+                        <option value="" selected="@(string.IsNullOrEmpty(Stav))">vše</option>
+                        <option value="hlasi"  selected="@(Stav == "hlasi")">hlásí</option>
+                        <option value="zmlkl"  selected="@(Stav == "zmlkl")">zmlkl</option>
+                        <option value="chybi"  selected="@(Stav == "chybi")">chybí agent</option>
+                        <option value="neniad" selected="@(Stav == "neniad")">není v AD</option>
+                    </select>
+                </td>
+                <td><input class="f" form="fstanice" name="ver" value="@FVer" placeholder="commit" /></td>
+                <td></td>
+                <td data-no-print>
+                    <select class="f" form="fstanice" name="ign" onchange="this.form.requestSubmit()">
+                        <option value=""    selected="@(string.IsNullOrEmpty(FIgn))">vše</option>
+                        <option value="ano" selected="@(FIgn == "ano")">ignorované</option>
+                        <option value="ne"  selected="@(FIgn == "ne")">neignorované</option>
+                    </select>
+                </td>
+                <td data-no-print>
+                    <select class="f" form="fstanice" name="nas" onchange="this.form.requestSubmit()">
+                        <option value=""           selected="@(string.IsNullOrEmpty(FNas))">vše</option>
+                        <option value="nasadi"     selected="@(FNas == "nasadi")">nasadí se</option>
+                        <option value="vyrazeno"   selected="@(FNas == "vyrazeno")">vyřazeno</option>
+                        <option value="ignorovano" selected="@(FNas == "ignorovano")">ignorováno</option>
+                    </select>
+                </td>
+                <td data-no-print>
+                    <button class="btn" form="fstanice" type="submit" title="Použít filtry">Filtrovat</button>
+                    @if (JeFiltrovano) { <a class="chip" href="stanice" title="Zrušit všechny filtry">✕</a> }
+                </td>
             </tr>
         </thead>
         <tbody>
@@ -141,6 +193,15 @@ else
 
     [SupplyParameterFromQuery(Name = "stav")] public string? Stav { get; set; }
     [SupplyParameterFromQuery(Name = "q")]    public string? Q { get; set; }
+    // Filtry po sloupcích – každý zvlášť, ať jde hledat "všechny NTB v Brně
+    // bez agenta" a ne jen jedno slovo přes celou tabulku.
+    [SupplyParameterFromQuery(Name = "h")]    public string? FHost { get; set; }
+    [SupplyParameterFromQuery(Name = "ou")]   public string? FOu { get; set; }
+    [SupplyParameterFromQuery(Name = "os")]   public string? FOs { get; set; }
+    [SupplyParameterFromQuery(Name = "dom")]  public string? FDom { get; set; }
+    [SupplyParameterFromQuery(Name = "ver")]  public string? FVer { get; set; }
+    [SupplyParameterFromQuery(Name = "ign")]  public string? FIgn { get; set; }
+    [SupplyParameterFromQuery(Name = "nas")]  public string? FNas { get; set; }
     [SupplyParameterFromForm]                 public string? ReqHost { get; set; }
     [SupplyParameterFromForm]                 public string? ExclHost { get; set; }
     [SupplyParameterFromForm]                 public string? IgnHost { get; set; }
@@ -197,6 +258,7 @@ else
             "hlasi" => _all.Where(Reports),
             "zmlkl" => _all.Where(Silent),
             "chybi" => _all.Where(c => c.InActiveDirectory && !Reports(c)),
+            "neniad" => _all.Where(c => !c.InActiveDirectory),
             _       => _all
         };
         if (!string.IsNullOrWhiteSpace(Q))
@@ -208,8 +270,40 @@ else
                 (c.AdPath ?? "").Contains(s, StringComparison.OrdinalIgnoreCase) ||
                 (c.Domain ?? "").Contains(s, StringComparison.OrdinalIgnoreCase));
         }
+        // Sloupcové filtry se skládají (AND) – zužují to, co prošlo dlaždicí a hledáním.
+        q = Obsahuje(q, FHost, c => c.Hostname);
+        q = Obsahuje(q, FOu,   c => c.AdPath);
+        q = Obsahuje(q, FOs,   c => c.OperatingSystem);
+        q = Obsahuje(q, FDom,  c => c.Domain);
+        q = Obsahuje(q, FVer,  c => c.AgentVersion);
+
+        if (FIgn == "ano") q = q.Where(c => c.DeployIgnored);
+        else if (FIgn == "ne") q = q.Where(c => !c.DeployIgnored);
+
+        q = FNas switch
+        {
+            "ignorovano" => q.Where(c => c.DeployIgnored),
+            "nasadi"     => q.Where(c => !c.DeployIgnored && c.InActiveDirectory && !Reports(c) && EffectiveDeploy(c.Hostname)),
+            "vyrazeno"   => q.Where(c => !c.DeployIgnored && c.InActiveDirectory && !Reports(c) && !EffectiveDeploy(c.Hostname)),
+            _            => q
+        };
+
         return q;
     }
+
+    private static IEnumerable<Computer> Obsahuje(IEnumerable<Computer> q, string? hledane,
+                                                  Func<Computer, string?> pole)
+    {
+        if (string.IsNullOrWhiteSpace(hledane)) return q;
+        var s = hledane.Trim();
+        return q.Where(c => (pole(c) ?? "").Contains(s, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private bool JeFiltrovano =>
+        !string.IsNullOrEmpty(Stav) || !string.IsNullOrEmpty(Q) ||
+        !string.IsNullOrWhiteSpace(FHost) || !string.IsNullOrWhiteSpace(FOu) ||
+        !string.IsNullOrWhiteSpace(FOs) || !string.IsNullOrWhiteSpace(FDom) ||
+        !string.IsNullOrWhiteSpace(FVer) || !string.IsNullOrEmpty(FIgn) || !string.IsNullOrEmpty(FNas);
 
     private const string ReqKeyPrefix = "cmd.report.";
 
@@ -369,11 +463,16 @@ else
         catch { return DefaultSilentAfterMinutes; }
     }
 
+    // Dlaždice mění jen "stav" – ostatní filtry si nese s sebou, jinak by
+    // kliknutí na dlaždici tiše zahodilo, co má člověk nastavené ve sloupcích.
     private string Url(string stav)
     {
         var parts = new List<string>();
         if (!string.IsNullOrEmpty(stav)) parts.Add($"stav={stav}");
         if (!string.IsNullOrEmpty(Q)) parts.Add($"q={Uri.EscapeDataString(Q)}");
+        void Pridej(string k, string? v) { if (!string.IsNullOrWhiteSpace(v)) parts.Add($"{k}={Uri.EscapeDataString(v)}"); }
+        Pridej("h", FHost); Pridej("ou", FOu); Pridej("os", FOs);
+        Pridej("dom", FDom); Pridej("ver", FVer); Pridej("ign", FIgn); Pridej("nas", FNas);
         return parts.Count > 0 ? "stanice?" + string.Join("&", parts) : "stanice";
     }
 
