@@ -30,11 +30,14 @@ public sealed class DeployTrigger
 {
     private readonly IDbContextFactory<AppDbContext> _dbFactory;
     private readonly ILogger<DeployTrigger> _logger;
+    private readonly ActivityLogger _dennik;
 
-    public DeployTrigger(IDbContextFactory<AppDbContext> dbFactory, ILogger<DeployTrigger> logger)
+    public DeployTrigger(IDbContextFactory<AppDbContext> dbFactory, ILogger<DeployTrigger> logger,
+                         ActivityLogger dennik)
     {
         _dbFactory = dbFactory;
         _logger = logger;
+        _dennik = dennik;
     }
 
     public const string DefaultTargetsFile = @"C:\ProgramData\USBGuardian\deploy\targets.txt";
@@ -111,11 +114,17 @@ public sealed class DeployTrigger
             {
                 _logger.LogWarning("Ruční nasazení {Host}: schtasks skončil {Code}: {Vystup}",
                     hostname, p.ExitCode, vystup);
+                _dennik.Log("deploy", $"úlohu {taskName} se nepodařilo spustit (kód {p.ExitCode})",
+                    ActivityLevel.Error, hostname, kdo);
                 return (false, $"Úloha {taskName} nešla spustit (kód {p.ExitCode}): {Kratce(vystup)}");
             }
 
             _logger.LogWarning("Ruční {Akce} stanice {Host} vyžádána ({Kdo}) – spuštěna úloha {Task}",
                 akce, hostname, kdo, taskName);
+            _dennik.Log("deploy",
+                (akce == Akce.Instalace ? "ruční instalace agenta" : "ruční aktualizace agenta")
+                + $" – spuštěna úloha {taskName}",
+                ActivityLevel.Warn, hostname, kdo);
 
             // Úloha běží na pozadí – výsledek přijde do jejího logu, ne sem.
             return (true, akce == Akce.Instalace

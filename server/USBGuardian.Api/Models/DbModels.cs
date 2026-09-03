@@ -81,6 +81,22 @@ public class WhitelistVersion
     public bool IsActive { get; set; } = true;
 }
 
+[Table("ActivityLog")]
+public class ActivityEntry
+{
+    [Key] public long Id { get; set; }
+    public DateTime Timestamp { get; set; } = DateTime.UtcNow;
+    /// <summary>info / warn / error – aby šel odfiltrovat šum od toho, co hoří.</summary>
+    public string Level { get; set; } = "info";
+    /// <summary>heartbeat / incidents / whitelist / deploy / settings / adsync …</summary>
+    public string Source { get; set; } = string.Empty;
+    /// <summary>Které stanice se to týká. NULL = serverová akce.</summary>
+    public string? Hostname { get; set; }
+    /// <summary>Kdo to vyvolal. NULL = automatika.</summary>
+    [Column("User")] public string? User { get; set; }
+    public string Message { get; set; } = string.Empty;
+}
+
 [Table("Incidents")]
 public class Incident
 {

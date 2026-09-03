@@ -20,7 +20,10 @@
 // ============================================================
 
 using System.Text;
+using Microsoft.EntityFrameworkCore;
 using USBGuardian.Admin.Health;
+using USBGuardian.Api.Data;
+using USBGuardian.Api.Models;
 
 namespace USBGuardian.Admin.Export;
 
@@ -77,6 +80,46 @@ public static class HealthExportEndpoints
 
             return Results.File(Encoding.UTF8.GetBytes(sb.ToString()), "text/plain; charset=utf-8",
                 $"usbguardian-kontroly-{DateTime.Now:yyyyMMdd-HHmm}.txt");
+        });
+
+        // Deník aktivity – tentýž výběr, jaký je zrovna na stránce.
+        app.MapGet("/export/aktivita.csv", async (
+            IDbContextFactory<AppDbContext> factory,
+            int? hodin, string? uroven, string? zdroj, string? q, CancellationToken ct) =>
+        {
+            await using var db = await factory.CreateDbContextAsync(ct);
+            IQueryable<ActivityEntry> dotaz = db.ActivityLog;
+
+            if (hodin is > 0)
+            {
+                var od = DateTime.UtcNow.AddHours(-hodin.Value);
+                dotaz = dotaz.Where(a => a.Timestamp >= od);
+            }
+            if (!string.IsNullOrEmpty(uroven)) dotaz = dotaz.Where(a => a.Level == uroven);
+            if (!string.IsNullOrEmpty(zdroj)) dotaz = dotaz.Where(a => a.Source == zdroj);
+            if (!string.IsNullOrWhiteSpace(q))
+            {
+                var h = q.Trim();
+                dotaz = dotaz.Where(a => a.Message.Contains(h) || (a.Hostname != null && a.Hostname.Contains(h)));
+            }
+
+            // Strop je vyšší než na stránce: soubor se otevře v Excelu, ne v prohlížeči.
+            var radky = await dotaz.OrderByDescending(a => a.Timestamp).Take(20_000).ToListAsync(ct);
+
+            var sb = new StringBuilder();
+            sb.Append('﻿');
+            sb.AppendLine("Cas;Uroven;Zdroj;Stanice;Uzivatel;Zprava");
+            foreach (var a in radky)
+            {
+                sb.AppendLine(string.Join(';', new[]
+                {
+                    C(a.Timestamp.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")),
+                    C(a.Level), C(a.Source), C(a.Hostname), C(a.User), C(a.Message),
+                }));
+            }
+
+            return Results.File(Encoding.UTF8.GetBytes(sb.ToString()), "text/csv; charset=utf-8",
+                $"usbguardian-aktivita-{DateTime.Now:yyyyMMdd-HHmm}.csv");
         });
 
         app.MapGet("/export/health.html", async (HealthService health, int? tisk, CancellationToken ct) =>

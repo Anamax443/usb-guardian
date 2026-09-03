@@ -116,6 +116,10 @@ builder.Services.AddHostedService<USBGuardian.Admin.Deploy.AgentDeployService>()
 
 // Ruční "nasadit teď" ze Stanic – konzole jen zapíše cíl a šťouchne do úlohy,
 // instalaci dělá deploy účet. Konzole sama na stanice nesahá.
+// Deník aktivity – konzole do něj píše zásahy operátora, API komunikaci agentů.
+// Tatáž tabulka, aby se to dalo číst jako jeden příběh.
+builder.Services.AddSingleton<ActivityLogger>();
+
 builder.Services.AddSingleton<USBGuardian.Admin.Deploy.DeployTrigger>();
 
 // ── Kontroly stavu (stránka /kontroly + /api/health pro externí dohled) ──

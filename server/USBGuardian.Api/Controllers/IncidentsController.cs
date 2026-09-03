@@ -24,15 +24,18 @@ public class IncidentsController : ControllerBase
     private readonly IncidentQueue _queue;
     private readonly AppDbContext _db;
     private readonly ILogger<IncidentsController> _logger;
+    private readonly ActivityLogger _dennik;
 
     public IncidentsController(
         IncidentQueue queue,
         AppDbContext db,
-        ILogger<IncidentsController> logger)
+        ILogger<IncidentsController> logger,
+        ActivityLogger dennik)
     {
         _queue  = queue;
         _db     = db;
         _logger = logger;
+        _dennik = dennik;
     }
 
     // --------------------------------------------------------
@@ -52,6 +55,12 @@ public class IncidentsController : ControllerBase
             Request:    request,
             SourceIp:   sourceIp,
             ReceivedAt: DateTime.UtcNow);
+
+        // Deník: kolik incidentů kdo poslal. Bez toho jde zpětně zjistit jen to,
+        // co v databázi JE — ne to, že se něco poslat POKUSILO a fronta to odmítla.
+        _dennik.Log("incidents",
+            $"přijato {request.Incidents.Count} incidentů (soubor {request.SourceFile ?? "?"})",
+            ActivityLevel.Info, request.Hostname);
 
         // TryWrite je non-blocking – okamžitě vrátí true/false
         if (!_queue.TryEnqueue(item))

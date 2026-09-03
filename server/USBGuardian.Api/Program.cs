@@ -52,6 +52,14 @@ builder.Services.AddDbContext<AppDbContext>(options =>
 
 // ── Fronta incidentů (controller zařadí batch → worker zapisuje do DB async) ──
 // BEZ TÉTO REGISTRACE: IncidentsController nejde postavit (DI) → 500 na /api/incidents.
+// Deník aktivity. Vlastní továrna na kontext schválně: zápis do deníku běží
+// MIMO požadavek (fire-and-forget), takže si nesmí půjčovat scoped kontext,
+// který mu pod rukama zmizí, až požadavek skončí.
+builder.Services.AddDbContextFactory<AppDbContext>(options =>
+    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")),
+    lifetime: ServiceLifetime.Singleton);
+builder.Services.AddSingleton<ActivityLogger>();
+
 builder.Services.AddSingleton<USBGuardian.Api.Queue.IncidentQueue>();
 builder.Services.AddHostedService<USBGuardian.Api.Queue.IncidentQueueWorker>();
 

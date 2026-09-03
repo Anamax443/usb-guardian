@@ -17,8 +17,13 @@ namespace USBGuardian.Api.Controllers;
 public class HeartbeatController : ControllerBase
 {
     private readonly AppDbContext _db;
+    private readonly ActivityLogger _dennik;
 
-    public HeartbeatController(AppDbContext db) => _db = db;
+    public HeartbeatController(AppDbContext db, ActivityLogger dennik)
+    {
+        _db = db;
+        _dennik = dennik;
+    }
 
     [HttpGet]
     public async Task<IActionResult> Heartbeat(
@@ -63,6 +68,22 @@ public class HeartbeatController : ControllerBase
         // Centrální vynucování (.213 = zdroj pravdy) → agent dle něj blokuje/varuje (Fáze 2).
         var enforceRow = await _db.AppSettings.FirstOrDefaultAsync(s => s.Key == "policy.enforce");
         var enforce = string.Equals(enforceRow?.Value, "true", StringComparison.OrdinalIgnoreCase);
+
+        // Deník: tep agenta je nejčastější řádek, ale právě z něj je vidět,
+        // kdo se ozývá a kdo mlčí. Zapisuje se, co server odpověděl — jinak
+        // by se zpětně nedalo zjistit, proč se agent zachoval, jak se zachoval.
+        var zmeny = new List<string>();
+        if (currentVersion != whitelistVersion) zmeny.Add($"nový whitelist {currentVersion}");
+        if (reportNow) zmeny.Add("vyžádána data");
+        if (enforce) zmeny.Add("vynucování ZAP");
+        if (computer == null) zmeny.Add("stanice není v evidenci");
+
+        _dennik.Log("heartbeat",
+            zmeny.Count == 0
+                ? $"tep OK (whitelist {whitelistVersion}, agent {agentVersion})"
+                : $"tep — {string.Join(", ", zmeny)} (agent {agentVersion})",
+            computer == null ? ActivityLevel.Warn : ActivityLevel.Info,
+            hostname);
 
         return Ok(new HeartbeatResponse
         {

@@ -2,6 +2,7 @@
 @inject IDbContextFactory<AppDbContext> DbFactory
 @inject USBGuardian.Admin.AdSync.AdSyncRunner AdSync
 @inject USBGuardian.Admin.Deploy.DeployTrigger Deploy
+@inject ActivityLogger Dennik
 
 <h1>Stanice</h1>
 
@@ -483,6 +484,13 @@ else
                 pc.DeployIgnoredBy = pc.DeployIgnored ? await CurrentUser() : null;
                 pc.DeployIgnoredAt = pc.DeployIgnored ? DateTime.UtcNow : null;
                 await db.SaveChangesAsync();
+
+                // Kdo koho vyřadil je přesně ta věc, na kterou se za rok nikdo
+                // nevzpomene — a auditor se zeptá.
+                Dennik.Log("deploy",
+                    pc.DeployIgnored ? "stanice trvale vyřazena z nasazování"
+                                     : "trvalé vyřazení stanice zrušeno",
+                    ActivityLevel.Warn, pc.Hostname, pc.DeployIgnoredBy ?? await CurrentUser());
             }
             _reqError = null;
         }

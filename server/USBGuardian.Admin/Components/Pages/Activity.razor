@@ -1,0 +1,181 @@
+@page "/aktivita"
+@rendermode @(new InteractiveServerRenderMode(prerender: true))
+@inject IDbContextFactory<AppDbContext> DbFactory
+@implements IDisposable
+
+@* Deník provozu: jedno místo, kde je vidět, co se v systému děje — tep agentů,
+   příjem incidentů, stahování whitelistu i zásahy operátora. Píše do něj API
+   (komunikace agentů) i konzole (ruční akce), takže se to čte jako jeden příběh. *@
+
+<h1>Aktivita</h1>
+
+<p class="intro">Provozní deník celého systému — kdo s kým mluvil a co kdo změnil.
+Doplňuje <a href="">Přehled</a> (co se dělo s médii) a <a href="kontroly">Kontroly</a> (jestli všechno funguje):
+tady je vidět <em>provoz</em>, ne jen výsledek.</p>
+
+@if (_chyba is not null)
+{
+    <div class="banner bad">
+        Deník nelze číst: @_chyba
+        <div class="muted">Pokud tabulka ještě neexistuje, spusť <code>database/09_activity_log.sql</code>.</div>
+    </div>
+}
+
+<div class="toolbar">
+    <button class="btn" @onclick="PrepnoutZive" title="Načítat nové řádky každé 3 s">
+        @(_zive ? "⏸ Zastavit" : "▶ Živě")
+    </button>
+    <button class="btn" @onclick="Nacti" disabled="@_nacitam">↻ Načíst</button>
+
+    <span class="sep"></span>
+    <select class="inp" style="min-width:130px" @bind="_hodin" @bind:after="Nacti">
+        <option value="1">poslední hodina</option>
+        <option value="8">8 hodin</option>
+        <option value="24">24 hodin</option>
+        <option value="168">7 dní</option>
+        <option value="0">vše</option>
+    </select>
+    <select class="inp" style="min-width:120px" @bind="_uroven" @bind:after="Nacti">
+        <option value="">všechny úrovně</option>
+        <option value="info">info</option>
+        <option value="warn">varování</option>
+        <option value="error">chyby</option>
+    </select>
+    <select class="inp" style="min-width:130px" @bind="_zdroj" @bind:after="Nacti">
+        <option value="">všechny zdroje</option>
+        @foreach (var z in _zdroje) { <option value="@z">@z</option> }
+    </select>
+    <input class="inp" style="min-width:220px" @bind="_hledat" @bind:event="onchange" @bind:after="Nacti"
+           placeholder="hledat v textu / stanici" />
+
+    <a class="btn" href="@ExportUrl()" target="_blank" rel="noopener"
+       title="Stáhnout aktuální výběr jako CSV pro Excel">⬇ CSV</a>
+</div>
+
+<h2>
+    Záznamy (@_radky.Count@(_radky.Count >= Strop ? "+" : ""))
+    @if (_zive) { <span class="pill ok">živě</span> }
+    <span class="muted" style="font-weight:400"> · načteno @_nacteno.ToString("HH:mm:ss")</span>
+</h2>
+
+@if (_radky.Count == 0 && _chyba is null)
+{
+    <p class="muted">Za zvolené období tu nic není.</p>
+}
+else
+{
+    <table>
+        <thead>
+            <tr>
+                <th style="width:150px">Čas</th>
+                <th style="width:90px">Úroveň</th>
+                <th style="width:110px">Zdroj</th>
+                <th style="width:150px">Stanice</th>
+                <th>Zpráva</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var r in _radky)
+            {
+                <tr>
+                    <td class="mono">@r.Timestamp.ToLocalTime().ToString("dd.MM. HH:mm:ss")</td>
+                    <td><span class="pill @Pilulka(r.Level)">@r.Level</span></td>
+                    <td class="mono">@r.Source</td>
+                    <td class="mono">@(string.IsNullOrEmpty(r.Hostname) ? "—" : r.Hostname)</td>
+                    <td class="wrap">
+                        @r.Message
+                        @if (!string.IsNullOrEmpty(r.User)) { <span class="muted"> · @r.User</span> }
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    /// <summary>Strop výběru – deník roste rychle a stránka není archiv.</summary>
+    private const int Strop = 500;
+
+    private readonly List<ActivityEntry> _radky = new();
+    private List<string> _zdroje = new();
+    private string _hodin = "8", _uroven = "", _zdroj = "", _hledat = "";
+    private bool _zive, _nacitam;
+    private DateTime _nacteno = DateTime.Now;
+    private string? _chyba;
+    private Timer? _casovac;
+
+    protected override async Task OnInitializedAsync() => await Nacti();
+
+    private async Task Nacti()
+    {
+        if (_nacitam) return;
+        _nacitam = true;
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+
+            IQueryable<ActivityEntry> q = db.ActivityLog;
+            if (int.TryParse(_hodin, out var h) && h > 0)
+            {
+                var od = DateTime.UtcNow.AddHours(-h);
+                q = q.Where(a => a.Timestamp >= od);
+            }
+            if (!string.IsNullOrEmpty(_uroven)) q = q.Where(a => a.Level == _uroven);
+            if (!string.IsNullOrEmpty(_zdroj)) q = q.Where(a => a.Source == _zdroj);
+            if (!string.IsNullOrWhiteSpace(_hledat))
+            {
+                var s = _hledat.Trim();
+                q = q.Where(a => a.Message.Contains(s) || (a.Hostname != null && a.Hostname.Contains(s)));
+            }
+
+            var data = await q.OrderByDescending(a => a.Timestamp).Take(Strop).ToListAsync();
+            _radky.Clear();
+            _radky.AddRange(data);
+
+            // Nabídka zdrojů se bere z dat, ne z pevného seznamu – jinak by se
+            // rozešla s tím, co se do deníku doopravdy píše.
+            _zdroje = await db.ActivityLog.Select(a => a.Source).Distinct().OrderBy(x => x).ToListAsync();
+
+            _nacteno = DateTime.Now;
+            _chyba = null;
+        }
+        catch (Exception ex) { _chyba = ex.Message; }
+        finally { _nacitam = false; }
+    }
+
+    private void PrepnoutZive()
+    {
+        _zive = !_zive;
+        if (_zive)
+        {
+            _casovac = new Timer(async _ =>
+            {
+                await InvokeAsync(async () => { await Nacti(); StateHasChanged(); });
+            }, null, TimeSpan.FromSeconds(3), TimeSpan.FromSeconds(3));
+        }
+        else
+        {
+            _casovac?.Dispose();
+            _casovac = null;
+        }
+    }
+
+    private string ExportUrl()
+    {
+        var q = new List<string>();
+        if (!string.IsNullOrEmpty(_hodin) && _hodin != "0") q.Add($"hodin={_hodin}");
+        if (!string.IsNullOrEmpty(_uroven)) q.Add($"uroven={_uroven}");
+        if (!string.IsNullOrEmpty(_zdroj)) q.Add($"zdroj={Uri.EscapeDataString(_zdroj)}");
+        if (!string.IsNullOrWhiteSpace(_hledat)) q.Add($"q={Uri.EscapeDataString(_hledat.Trim())}");
+        return "export/aktivita.csv" + (q.Count > 0 ? "?" + string.Join("&", q) : "");
+    }
+
+    private static string Pilulka(string uroven) => uroven switch
+    {
+        "error" => "bad",
+        "warn" => "warn",
+        _ => "off",
+    };
+
+    public void Dispose() => _casovac?.Dispose();
+}

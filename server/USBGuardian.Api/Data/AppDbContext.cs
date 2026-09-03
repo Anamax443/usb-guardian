@@ -18,6 +18,7 @@ public class AppDbContext : DbContext
     public DbSet<WhitelistVersion> WhitelistVersions => Set<WhitelistVersion>();
     public DbSet<Incident> Incidents => Set<Incident>();
     public DbSet<AppSetting> AppSettings => Set<AppSetting>();
+    public DbSet<ActivityEntry> ActivityLog => Set<ActivityEntry>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -38,5 +39,11 @@ public class AppDbContext : DbContext
             .HasIndex(i => i.Hostname);
         modelBuilder.Entity<Incident>()
             .HasIndex(i => i.Username);
+
+        // Deník se čte skoro vždy "od konce a za posledních N hodin".
+        modelBuilder.Entity<ActivityEntry>()
+            .HasIndex(a => a.Timestamp);
+        modelBuilder.Entity<ActivityEntry>()
+            .HasIndex(a => new { a.Source, a.Timestamp });
     }
 }

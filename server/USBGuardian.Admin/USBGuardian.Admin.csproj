@@ -28,6 +28,7 @@
          (slinkované = jeden zdroj pravdy, bez tahání obsahu/deps API projektu) -->
     <Compile Include="..\USBGuardian.Api\Models\DbModels.cs" Link="Shared\DbModels.cs" />
     <Compile Include="..\USBGuardian.Api\Data\AppDbContext.cs" Link="Shared\AppDbContext.cs" />
+    <Compile Include="..\USBGuardian.Api\Data\ActivityLogger.cs" Link="Shared\ActivityLogger.cs" />
   </ItemGroup>
 
   <ItemGroup>
