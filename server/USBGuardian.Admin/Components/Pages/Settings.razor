@@ -73,6 +73,62 @@
 <p class="muted">Hranice pro tečku komunikace i dlaždici „Zmlklo agentů" na Stanicích. Stanice, která dřív
     hlásila agenta a déle se neozvala, se počítá jako zmlklá (možný výpadek / tamper). Default 180 min.</p>
 
+<h2>Verze agenta</h2>
+<p class="muted">Archiv balíčků na tomto serveru. <strong>Stable</strong> je verze pro fleet,
+    <strong>beta</strong> pro vzorek stanic, na kterém se nová verze nejdřív osvědčí. Ostatní verze
+    jsou archiv — nerozvážejí se nikam, ale je z čeho se vrátit, když se nasazená ukáže jako špatná.
+    Tady se volí <em>záměr</em>; přepnutí provede dávka <span class="mono">Set-AgentVersion.cmd</span>.</p>
+@if (_verzeChyba is not null)
+{
+    <div class="banner bad">Archiv verzí nelze číst: @_verzeChyba</div>
+}
+<dl class="cfg">
+    <dt>Složka archivu</dt>
+    <dd>
+        <input class="inp" @bind="_verzeDir" placeholder="C:\Apps\USBGuardianAgentVersions" />
+        <div class="muted">Podsložka = jeden commit agenta.</div>
+    </dd>
+    <dt>Stable (fleet)</dt>
+    <dd>
+        <select class="inp" @bind="_verzeStable">
+            <option value="">— nezvoleno —</option>
+            @foreach (var v in _verze) { <option value="@v">@v</option> }
+        </select>
+    </dd>
+    <dt>Beta (vzorek stanic)</dt>
+    <dd>
+        <select class="inp" @bind="_verzeBeta">
+            <option value="">— nezvoleno —</option>
+            @foreach (var v in _verze) { <option value="@v">@v</option> }
+        </select>
+    </dd>
+    <dt>Beta stanice (vzorek)</dt>
+    <dd>
+        <textarea class="inp" style="min-width:420px;height:70px;font-family:var(--font-mono);font-size:12px"
+                  @bind="_betaHosts" placeholder="PC01&#10;PC02&#10;PC03"></textarea>
+        <div class="muted">Stálý vzorek 3–4 strojů, na kterém se nová verze zkouší. Jeden hostname na řádek.
+            Zapisuje se do <span class="mono">update-beta.txt</span>, odkud si ho vezme úloha
+            <span class="mono">UpdateAgentBeta</span> — nemusíš ho psát znovu při každé verzi.</div>
+    </dd>
+    <dt>Archivovat verzí (nejvýš)</dt>
+    <dd>
+        <input class="inp" style="min-width:90px" @bind="_verzeKeep" />
+        <div class="muted">Každý balíček má přes 100 MB. Nejstarší nad tento počet se při archivaci mažou —
+            kromě té, která je právě stable nebo beta. Zapisuje se do <span class="mono">keep.txt</span>
+            ve složce archivu, odkud si ho dávka přečte. Default 10.</div>
+    </dd>
+    <dt>V archivu</dt>
+    <dd class="mono">@(_verze.Count == 0 ? "—" : string.Join(" · ", _verze))</dd>
+</dl>
+<div class="toolbar">
+    <button class="btn" @onclick="SaveVerze" disabled="@_busy">Uložit verze</button>
+    <button class="btn" @onclick="PovysitBetu" disabled="@(_busy || string.IsNullOrEmpty(_verzeBeta))"
+            title="Beta se osvědčila → stane se stable. Dosavadní stable tím spadne do archivu.">
+        ▲ Povýšit betu na stable
+    </button>
+</div>
+@if (_verzeMsg is not null) { <div class="banner @(_verzeBad ? "bad" : "ok")">@_verzeMsg</div> }
+
 <h2>Auto-enrollment agenta</h2>
 <p class="muted">Konzole sama nasadí agenta na stanice z AD <strong>bez agenta</strong> (24/7). Default <strong>VYPNUTO + dry-run</strong>.
     Ostrý běh vyžaduje, aby <strong>účet konzole měl lokální admin na klientech</strong> (dedikovaný deploy účet) — viz HANDOFF.</p>
@@ -286,6 +342,12 @@ denní souhrn) je další krok.</p>
     private bool _uiBad;
     private string? _uiMsg;
 
+    private string _verzeDir = "", _verzeStable = "", _verzeBeta = "", _verzeKeep = "10";
+    private List<string> _verze = new();
+    private string _betaHosts = "";
+    private string? _verzeMsg, _verzeChyba;
+    private bool _verzeBad;
+
     private bool _healthBad;
     private string _healthApiUrl = "", _healthMaxAge = "48", _healthStepDelay = "300";
     private string? _healthMsg;
@@ -334,6 +396,14 @@ denní souhrn) je další krok.</p>
             var sat = await Get(db, "svc.restart.at"); _svcAt = string.IsNullOrEmpty(sat) ? "03:30" : sat;
             _svcTargets = await Get(db, "svc.restart.targets");
             _svcLastRun = await Get(db, "svc.restart.lastRun");
+
+            _verzeDir    = await Get(db, "agent.versionsDir");
+            if (string.IsNullOrWhiteSpace(_verzeDir)) _verzeDir = @"C:\Apps\USBGuardianAgentVersions";
+            _verzeStable = await Get(db, "agent.version.stable");
+            _verzeBeta   = await Get(db, "agent.version.beta");
+            var vk = await Get(db, "agent.keepVersions"); _verzeKeep = string.IsNullOrEmpty(vk) ? "10" : vk;
+            _betaHosts   = await Get(db, "agent.betaHosts");
+            NactiVerze();
 
             _uiStyle = UiCache.Style;
             _uiLayout = UiCache.Layout;
@@ -621,6 +691,104 @@ denní souhrn) je další krok.</p>
             Nav.NavigateTo(Nav.Uri, forceLoad: true);
         }
         catch (Exception ex) { _uiMsg = "Chyba: " + ex.Message; _uiBad = true; }
+        finally { _busy = false; }
+    }
+
+    // Archiv se cte z disku, ne z databaze: zdroj pravdy o tom, ktere balicky
+    // opravdu existuji, je slozka. Zaznam v DB, ktery neodpovida disku, by lhal.
+    private void NactiVerze()
+    {
+        _verze.Clear();
+        _verzeChyba = null;
+        try
+        {
+            if (!Directory.Exists(_verzeDir)) { _verzeChyba = "složka neexistuje: " + _verzeDir; return; }
+            _verze = Directory.GetDirectories(_verzeDir)
+                .Where(d => File.Exists(Path.Combine(d, "USBGuardian.exe")))
+                .OrderByDescending(d => Directory.GetLastWriteTimeUtc(d))
+                .Select(d => Path.GetFileName(d)!)
+                .ToList();
+        }
+        catch (Exception ex) { _verzeChyba = ex.Message; }
+    }
+
+    // Vzorek stanic musi videt uloha, ktera rozvazi betu - ta do databaze nevidi.
+    private void ZapisBetaHosts()
+    {
+        try
+        {
+            var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+                                   "USBGuardian", "deploy");
+            Directory.CreateDirectory(dir);
+            var radky = (_betaHosts ?? "")
+                .Split(new[] { '\n', '\r', ',', ';' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            File.WriteAllLines(Path.Combine(dir, "update-beta.txt"), radky);
+        }
+        catch { /* neuspech zapisu nesmi shodit ulozeni nastaveni - je videt v hlasce */ }
+    }
+
+    // Beta se osvedcila. Stable := beta; dosavadni stable uz neni odkazovana
+    // zadnym kanalem, takze je z ni archiv - presne jak to ma byt.
+    private async Task PovysitBetu()
+    {
+        _verzeMsg = null;
+        if (string.IsNullOrWhiteSpace(_verzeBeta))
+        { _verzeMsg = "Není zvolená beta verze."; _verzeBad = true; return; }
+
+        var puvodni = _verzeStable;
+        _busy = true;
+        try
+        {
+            await using (var db = await DbFactory.CreateDbContextAsync())
+                await Set(db, "agent.version.stable", _verzeBeta.Trim());
+            _verzeStable = _verzeBeta.Trim();
+            _verzeMsg = $"Stable = {_verzeStable}"
+                      + (string.IsNullOrEmpty(puvodni) ? "" : $"; z {puvodni} je archiv")
+                      + ". Rozvoz spusť dávkou Set-AgentVersion.cmd " + _verzeStable + " stable na serveru.";
+            _verzeBad = false;
+        }
+        catch (Exception ex) { _verzeMsg = "Chyba: " + ex.Message; _verzeBad = true; }
+        finally { _busy = false; }
+    }
+
+    private async Task SaveVerze()
+    {
+        _verzeMsg = null;
+        if (!int.TryParse(_verzeKeep?.Trim(), out var keep) || keep < 2 || keep > 100)
+        { _verzeMsg = "Počet archivovaných verzí musí být 2 až 100."; _verzeBad = true; return; }
+
+        _busy = true;
+        try
+        {
+            await using (var db = await DbFactory.CreateDbContextAsync())
+            {
+                await Set(db, "agent.versionsDir",     (_verzeDir ?? "").Trim());
+                await Set(db, "agent.version.stable",  (_verzeStable ?? "").Trim());
+                await Set(db, "agent.version.beta",    (_verzeBeta ?? "").Trim());
+                await Set(db, "agent.keepVersions",    keep.ToString());
+                await Set(db, "agent.betaHosts",       (_betaHosts ?? "").Trim());
+            }
+
+            ZapisBetaHosts();
+
+            // Strop musi videt i davka, ktera archivuje - ta do databaze nevidi.
+            var zapis = "";
+            try
+            {
+                if (Directory.Exists(_verzeDir))
+                    await File.WriteAllTextAsync(Path.Combine(_verzeDir, "keep.txt"), keep.ToString());
+                else
+                    zapis = " (keep.txt nezapsán – složka archivu neexistuje)";
+            }
+            catch (Exception ex) { zapis = " (keep.txt nezapsán: " + ex.Message + ")"; }
+
+            NactiVerze();
+            _verzeMsg = $"Uloženo — stable: {(string.IsNullOrEmpty(_verzeStable) ? "—" : _verzeStable)}, "
+                      + $"beta: {(string.IsNullOrEmpty(_verzeBeta) ? "—" : _verzeBeta)}, archiv {keep}{zapis}. "
+                      + "Přepnutí provede Set-AgentVersion.cmd na serveru.";
+            _verzeBad = false;
+        }
+        catch (Exception ex) { _verzeMsg = "Chyba: " + ex.Message; _verzeBad = true; }
         finally { _busy = false; }
     }
 
