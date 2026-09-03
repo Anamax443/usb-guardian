@@ -55,21 +55,20 @@ if (Test-Path $tasksSrc) {
 }
 
 # ── Kontrola konfigurace balicku ─────────────────────────────
-# Do balicku se snadno dostane VYVOJOVY agent.config.local.json, ve kterem je
-# lokalni konzole zapnuta. Na fleetu ma byt vypnuta (minimalni attack surface).
-# Stalo se to 03.09.2026: konzole se rozjela na stanicich kolegu a lidem
-# vyskakovala hlaska "403 - pristup pouze pro lokalni administratory".
+# Lokalni konzole MA byt na fleetu zapnuta: je to break-glass. Uzivatel
+# s NTB v terenu si pres ni (jako lokalni admin) docasne vypne blokovani
+# a muze pracovat, i kdyz na server nedosahne. Bez ni by mu blok zablokoval
+# praci a jedina cesta by byla volat IT.
 $cfgPath = Join-Path $Output "Configgent.config.local.json"
 if (Test-Path $cfgPath) {
     $cfg = Get-Content $cfgPath -Raw
-    if ($cfg -match '"enabled"\s*:\s*true') {
-        Write-Host ""
-        Write-Host "VAROVANI: v balicku je zapnuta lokalni konzole (localConsole.enabled = true)." -ForegroundColor Yellow
-        Write-Host "          Na fleet patri vypnuta. Oprav Configgent.config.local.json a sestav znovu." -ForegroundColor Yellow
-        Write-Host ""
+    if ($cfg -notmatch '"localConsole"') {
+        Write-Host "VAROVANI: balicek nema localConsole - na stanici nepujde break-glass." -ForegroundColor Yellow
+    } elseif ($cfg -match '"localConsole"\s*:\s*{[^}]*"enabled"\s*:\s*false') {
+        Write-Host "VAROVANI: lokalni konzole je VYPNUTA - uzivatel v terenu si nevypne blokovani." -ForegroundColor Yellow
     }
     if ($cfg -match 'YOUR_API_SERVER') {
-        Write-Host "VAROVANI: v balicku je sablonovy syncUrl (YOUR_API_SERVER) - agent se nepripoji." -ForegroundColor Yellow
+        Write-Host "VAROVANI: sablonovy syncUrl (YOUR_API_SERVER) - agent se nepripoji." -ForegroundColor Yellow
     }
 } else {
     Write-Host "VAROVANI: balicek nema Configgent.config.local.json - agent nebude vedet, kam se hlasit." -ForegroundColor Yellow

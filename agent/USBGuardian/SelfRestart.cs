@@ -32,7 +32,7 @@ public sealed class SelfRestartState
 {
     public bool Enabled { get; set; }
     /// <summary>Čas denního běhu ve tvaru "HH:mm".</summary>
-    public string At { get; set; } = "03:30";
+    public string At { get; set; } = "04:15";
     /// <summary>Datum posledního plánovaného běhu ("yyyy-MM-dd") – ochrana proti opakování v týž den.</summary>
     public string LastDate { get; set; } = "";
     /// <summary>Popis posledního běhu pro konzoli (kdo/kdy/jak dopadl).</summary>
@@ -201,7 +201,7 @@ public sealed class SelfRestartManager
         _state = new SelfRestartState
         {
             Enabled = defaultEnabled,
-            At = TryParseTime(defaultAt, out _) ? defaultAt : "03:30",
+            At = TryParseTime(defaultAt, out _) ? defaultAt : "04:15",
         };
     }
 

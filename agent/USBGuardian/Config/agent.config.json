@@ -58,12 +58,13 @@
   },
 
   // ── Plánovaný restart klientské služby ──────────────────────
-  // enabled: false = výchozí. Zapnout lze i z lokální konzole (admin).
+  // enabled: true = výchozí. Denní restart drží agenta svěží (zaseknutý WMI
+  // watcher, ukousnutý handle). Vypnout lze z lokální konzole (admin).
   // at: čas denního restartu "HH:mm". Když stanice v ten čas neběží,
   // restart se dohání nejvýš 2 h, pak se počká na další den.
   "selfRestart": {
-    "enabled": false,
-    "at": "03:30",
+    "enabled": true,
+    "at": "04:15",
     "serviceName": "USB Guardian",
     "statePath": "C:\\ProgramData\\USBGuardian\\selfrestart.json"
   },

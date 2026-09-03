@@ -123,10 +123,10 @@ public class LocalConsoleService : BackgroundService
             // ── Authorizace: pouze lokální admin ──────────────────
             if (!IsLocalAdmin(ctx.User))
             {
-                _logger.LogWarning(
-                    "Lokální konzole: odmítnut neadmin přístup ({User})",
-                    ctx.User?.Identity?.Name ?? "anonymní");
-                WriteText(ctx, 403, "403 – pristup pouze pro lokalni administratory");
+                var kdo = PopisIdentity(ctx.User);
+                _logger.LogWarning("Lokální konzole: odmítnut přístup ({User})", kdo);
+                WriteBytes(ctx, 403, "text/html; charset=utf-8",
+                    Encoding.UTF8.GetBytes(OdmitnutoHtml(kdo)));
                 return;
             }
 
@@ -262,7 +262,37 @@ public class LocalConsoleService : BackgroundService
         if (user?.Identity is not WindowsIdentity { IsAuthenticated: true } identity)
             return false;
 
-        return new WindowsPrincipal(identity).IsInRole(WindowsBuiltInRole.Administrator);
+        // 1) Plný token – klasický případ.
+        if (new WindowsPrincipal(identity).IsInRole(WindowsBuiltInRole.Administrator))
+            return true;
+
+        // 2) UAC-FILTROVANÝ TOKEN. Přihlášení na 127.0.0.1 je z pohledu Windows
+        //    SÍŤOVÉ, a u lokálního účtu se z takového tokenu skupina Administrators
+        //    odebere (LocalAccountTokenFilterPolicy) – zůstane v něm jen jako
+        //    "deny-only". IsInRole pak řekne NE, i když člověk lokální admin JE.
+        //    Přesně tohle potkalo uživatele, který se chtěl dostat k break-glass:
+        //    zadal správné přihlášení a konzole ho stejně odmítla.
+        //
+        //    Členství tu slouží jako AUTORIZACE, ne jako zdroj práv: samotnou akci
+        //    provádí služba běžící pod SYSTEM, žádný elevovaný token k tomu není
+        //    potřeba. Stačí tedy vědět, že ten člověk do skupiny patří.
+        try
+        {
+            var admins = new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null);
+            if (identity.Groups is { } skupiny && skupiny.Any(g => g.Equals(admins)))
+                return true;
+        }
+        catch { /* když token skupiny nenese, platí odpověď z bodu 1 */ }
+
+        return false;
+    }
+
+    /// <summary>Popis identity do hlášky i do logu – bez toho se odmítnutí nedá diagnostikovat.</summary>
+    private static string PopisIdentity(IPrincipal? user)
+    {
+        if (user?.Identity is not WindowsIdentity identity) return "neznámá identita";
+        if (!identity.IsAuthenticated) return "nepřihlášeno (anonymní požadavek)";
+        return identity.Name ?? "bez jména";
     }
 
     // --------------------------------------------------------
@@ -360,6 +390,48 @@ public class LocalConsoleService : BackgroundService
             recent
         };
     }
+
+    // --------------------------------------------------------
+    // Odmítnutí musí říct KDO byl viděn a CO je potřeba. Holý řádek
+    // "403 – pristup pouze pro lokalni administratory" nechal člověka
+    // v terénu bez informace, co má dělat dál.
+    // --------------------------------------------------------
+    private static string OdmitnutoHtml(string kdo) => $$"""
+        <!DOCTYPE html>
+        <html lang="cs">
+        <head>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1">
+          <title>USB Guardian – přístup odepřen</title>
+          <style>
+            body { margin:0; font-family:Segoe UI, system-ui, sans-serif; background:#0f1419; color:#e6e6e6;
+                   display:flex; min-height:100vh; align-items:center; justify-content:center; }
+            .k { background:#161b22; border:1px solid #2a2f37; border-radius:10px; padding:26px 30px; max-width:560px; }
+            h1 { font-size:17px; margin:0 0 4px; }
+            .p { color:#8b949e; font-size:13px; margin:0 0 16px; }
+            dl { display:grid; grid-template-columns:130px 1fr; gap:6px 12px; font-size:13px; margin:0 0 16px; }
+            dt { color:#8b949e; } dd { margin:0; }
+            .mono { font-family:Consolas, monospace; }
+            ul { font-size:13px; line-height:1.6; margin:0; padding-left:18px; color:#c9d1d9; }
+          </style>
+        </head>
+        <body>
+          <div class="k">
+            <h1>Přístup odepřen</h1>
+            <p class="p">Lokální konzole USB Guardian je jen pro správce tohoto počítače.</p>
+            <dl>
+              <dt>Přihlášen jako</dt><dd class="mono">{{kdo}}</dd>
+              <dt>Potřeba</dt><dd>členství ve skupině <span class="mono">Administrators</span> na tomto počítači</dd>
+            </dl>
+            <ul>
+              <li>Přihlas se účtem, který je na tomhle počítači správcem.</li>
+              <li>Konzole slouží k dočasnému vypnutí blokování médií, když jsi mimo firemní síť.</li>
+              <li>Pokud správcem jsi a přesto tě to nepustí, nahlas to IT — chceme o tom vědět.</li>
+            </ul>
+          </div>
+        </body>
+        </html>
+        """;
 
     // --------------------------------------------------------
     // HTTP odpovědi
