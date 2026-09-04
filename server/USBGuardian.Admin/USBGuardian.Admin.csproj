@@ -47,6 +47,10 @@
     <None Include="..\..\docs\architecture.en.md" Link="docs\architecture.en.md"><CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory></None>
     <None Include="..\..\docs\auto-deploy-setup.md" Link="docs\auto-deploy-setup.md"><CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory></None>
     <None Include="..\..\docs\auto-deploy-setup.en.md" Link="docs\auto-deploy-setup.en.md"><CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory></None>
+    <None Include="..\..\docs\oponentura.md" Link="docs\oponentura.md"><CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory></None>
+    <None Include="..\..\docs\oponentura.en.md" Link="docs\oponentura.en.md"><CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory></None>
+    <None Include="..\..\docs\oponentura-komercni.md" Link="docs\oponentura-komercni.md"><CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory></None>
+    <None Include="..\..\docs\oponentura-komercni.en.md" Link="docs\oponentura-komercni.en.md"><CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory></None>
     <!-- Grafické výstupy – statické soubory servírované z kořene konzole.
          Každý má v hlavičce přepínač CS/EN, takže se nebundlují dvě jazykové varianty. -->
     <None Include="..\..\docs\how-it-works.html" Link="wwwroot\how-it-works.html"><CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory></None>

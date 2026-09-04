@@ -1,6 +1,6 @@
 # Oponentní posudek — komerční potenciál USB Guardian (+ reakce autora)
 
-*🇨🇿 Čeština · Související: [oponentura.md](oponentura.md) (technická základová zpráva)*
+*🇨🇿 Čeština · [🇬🇧 English](oponentura-komercni.en.md) · Související: [oponentura.md](oponentura.md) (technická základová zpráva)*
 
 | | |
 |---|---|

@@ -312,3 +312,5 @@ only ever reported "package has no config". After the fix the check passes on a 
 | `docs/mind-map.html` | Mind map of the system, CS/EN |
 | `docs/flowchart.html` | Flowchart of one medium's path (decision points), CS/EN |
 | `docs/management-summary.html` | **Management summary — one A4 portrait page**, print-ready, CS/EN |
+| `docs/oponentura.md` / `.en.md` | The full technical review document (context, NIS2, defence of decisions, security, limitations) — **ch. 34 = the 2026-09-04 addendum** |
+| `docs/oponentura-komercni.md` / `.en.md` | The commercial review (business/product readiness) + the author's response |

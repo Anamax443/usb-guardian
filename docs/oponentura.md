@@ -9,11 +9,12 @@
 | **Projekt** | USB Guardian |
 | **Repozitář** | `Anamax443/usb-guardian` |
 | **Autor** | Milan Trnka (AXIMA) |
-| **Verze dokumentu** | 1.0 |
-| **Datum** | 2026-06-19 |
+| **Verze dokumentu** | 1.1 — kapitoly 1–33 ve znění 1.0, kapitola 34 = doplněk k 4. 9. 2026 |
+| **Datum** | 2026-06-19, doplněno 2026-09-04 |
 | **Klasifikace** | Interní — podklad pro oponenturu |
 | **Doménové prostředí** | `axinetwork.loc` (AXIMA) |
-| **Související dokumenty** | [README.md](../README.md), [HANDOFF.md](../HANDOFF.md), [architecture.md](architecture.md), [how-it-works.html](how-it-works.html), [auto-deploy-setup.md](auto-deploy-setup.md) |
+| **Jazyk** | 🇨🇿 Čeština · [🇬🇧 English](oponentura.en.md) |
+| **Související dokumenty** | [README.md](../README.md), [HANDOFF.md](../HANDOFF.md), [architecture.md](architecture.md), [auto-deploy-setup.md](auto-deploy-setup.md), [oponentura-komercni.md](oponentura-komercni.md) · grafické výstupy: [how-it-works.html](how-it-works.html), [mind-map.html](mind-map.html), [flowchart.html](flowchart.html), [management-summary.html](management-summary.html) |
 
 ---
 
@@ -90,6 +91,9 @@ stanici a **poctivý rozbor omezení, rizik a otevřených bodů**.
 31. Útočné scénáře (attack trees)
 32. Kompletní příklady konfigurace
 33. Chování v hraničních situacích (edge cases)
+
+**ČÁST VIII — Doplněk**
+34. Co se změnilo od verze 1.0 (stav k 4. 9. 2026)
 
 **Přílohy**
 - A. Glosář pojmů
@@ -2195,6 +2199,115 @@ nedefinované stavy.
 | `tls.validateServerCertificate=false` bez pinu | MITM (jen pro vývoj) |
 | `allowWildcards=true` | Méně specifické (VID:PID bez sériáku) → širší povolení |
 | `policy.onExpiredWhitelist=allow` | Po expiraci pustí vše → ztráta ochrany |
+
+---
+
+# ČÁST VIII — Doplněk
+
+## 34. Co se změnilo od verze 1.0 (stav k 4. 9. 2026)
+
+Kapitoly 1–33 zůstávají ve znění z 19. 6. 2026. Tato kapitola shrnuje, co od té doby přibylo, co se
+v provozu ukázalo jinak, než dokument předpokládal, a co zůstává otevřené. Píšu ji proto, že dokument,
+který popisuje záměr a tváří se jako popis stavu, je horší než žádný — oponent podle něj nemůže nic ověřit.
+
+### 34.1 Deník provozu (`ActivityLog`)
+
+Verze 1.0 měla auditní stopu postavenou výhradně na incidentech. To je málo: **do incidentů se dostane jen
+to, co skončilo incidentem**. Když agent přestal komunikovat, když někdo změnil whitelist nebo když se
+nasadila nová verze, nezůstala po tom stopa nikde než v Event Logu jednoho stroje.
+
+Přibyla tabulka `dbo.ActivityLog` (čas, úroveň, zdroj, stanice, uživatel, zpráva) a stránka **Aktivita**
+v konzoli. Píše do ní **API** (heartbeat včetně toho, *co* server odpověděl, příjem dávek incidentů) i
+**konzole** (ruční nasazení a aktualizace, trvalé vyřazení stanice, publikace whitelistu) — obojí přes
+sdílený `ActivityLogger`, aby se provoz četl jako jeden příběh.
+
+Zápis je **fire-and-forget a každá chyba se spolkne**. Kdyby heartbeat agenta spadl kvůli tomu, že nešlo
+zapsat řádek deníku, byl by pozorovatel důležitější než to, co pozoruje. Ze stejného důvodu se na dokončení
+zápisu nečeká — tep stovek agentů nemá být svázaný s latencí databáze.
+
+**Otevřený bod (poctivě):** `sp_PurgeActivityLog` v databázi je, ale **nikdo ji nevolá**. Při 227 stanicích
+a heartbeatu po 2 minutách jde řádově o **150 tisíc řádků denně**; retence deníku je tedy dluh, ne funkce.
+V Nastavení je zatím jen `retention.incidentDays`.
+
+### 34.2 Nasazovací kanál: instalace ≠ aktualizace
+
+Verze 1.0 popisovala nasazení jako jednu úlohu. Provoz ukázal dvě chyby v tom předpokladu.
+
+**(a) Aktualizace není kopie navíc.** Fleet skript uměl jen čistou instalaci; „prostě robocopy" by na
+běžícím agentovi přepsal část DLL, kopie zamčeného `.exe` by selhala a na stanici by zůstala **směs verzí**
+— zatímco deploy hlásí úspěch. Vznikl proto `Update-Agent.cmd` (a `Deploy-Api.cmd` pro server) se vzorem
+**zastav → počkej na `STOPPED` → zkopíruj → ověř `RUNNING`**.
+
+**(b) Jedna identita držela obě vrstvy.** Klientský deploy účet byl zároveň admin na databázovém serveru,
+takže jeho kompromitace by sáhla na fleet i na server současně. Rozděleno na tři role: `gmsa-USBGdep$`
+(jen stanice), `gmsa-USBGsrv$` (jen server API, záměrně mimo skupinu serverových adminů) a účet běžící
+konzole, který **není admin nikde**.
+
+**Nález při ověřování (4. 9. 2026):** úloha `USBGuardian-ApiDeploy`, kterou dokumentace popisovala jako
+existující, na app serveru **nikdy nevznikla** — byl tam jen skript. API proto od června běželo ve staré
+verzi, ačkoli „deploy proběhl". Úloha byla založena a první běh ověřen (návratový kód 0, služba `RUNNING`,
+`/api/version` hlásí aktuální commit). Poučení do oponentury: *tvrzení „kanál existuje" má cenu jen tehdy,
+když je doložené jeho posledním během.*
+
+> **Past při zakládání úlohy pod gMSA:** `schtasks /Create /RU "…gmsa$"` bez hesla vyrobí úlohu s
+> `LogonType=InteractiveToken` → nespustí se (event 332). S4U (`/NP`) nemá síťové credentials a nedosáhne
+> na `\\HOST\C$`. Funguje jedině XML s `LogonType=Password` uložené v **UTF-16** a založené přes `/XML`.
+
+**Kanály a návrat zpět:** balíček se archivuje po verzích (`stable` / `beta`), takže jde nasadit předchozí
+verzi. V balíčku je i offline instalátor pro stanici, kam deploy kanál nedosáhne.
+
+### 34.3 Lokální konzole: autorizace lokálního admina
+
+Fáze 3 (break-glass) předpokládala, že lokální admin se do konzole na `127.0.0.1:5080` dostane. V praxi
+se nedostal. Požadavek na loopback je z pohledu Windows **síťové přihlášení** a u **lokálního** účtu z
+takového tokenu `LocalAccountTokenFilterPolicy` odebere skupinu `Administrators` (zůstane jen jako
+*deny-only*), takže `IsInRole` vrátí false, i když člověk admin **je**. Break-glass byl tedy nedostupný
+přesně v situaci, na kterou je určený.
+
+Kontrola nyní **uznává i filtrovaný token**. Je to obhajitelné: členství tu slouží jako **autorizace**,
+ne jako zdroj práv — samotnou akci provádí služba pod SYSTEM, žádný elevovaný token volajícího není
+potřeba. Odmítnutí navíc vrací stránku, která ukáže, **jako kdo** byl požadavek viděn a co je potřeba;
+bez toho se to nedalo diagnostikovat na dálku.
+
+**Otevřený rozpor (k rozhodnutí, ne k opravě):** šablona konfigurace má `localConsole.enabled=false`
+(minimální attack surface), ale **rozvezený balíček i archivované verze mají `true`**. Buď platí, že
+break-glass má být na fleetu dostupný (a pak to má říkat i šablona), nebo že nemá (a pak se musí přebalit
+balíček). Dnes je v tom dokumentace i praxe nekonzistentní — což je přesně ten typ nálezu, který sem patří.
+
+### 34.4 Provozní funkce přidané po verzi 1.0
+
+| Funkce | Co řeší |
+|--------|---------|
+| **Kontroly stavu** | Seznam kontrol serveru i klientů se ukáže dopředu a odškrtává se s průběžnými výsledky; export CSV / HTML / PDF / TXT. Bez toho nebylo poznat, jestli kontrola běží, nebo se zasekla. |
+| **Plánovaný restart** | Služeb na serveru i agenta na stanici (agent výchozím nastavením 04:15) — zaseknutý WMI watcher přežije restart služby, ne den provozu. |
+| **Denní self-restart agenta** | Totéž z druhé strany: agent si restart řídí sám, i když na server nedosáhne. |
+| **Filtry a vyřazení v Stanicích** | Filtry po sloupcích + trvalé „Ignorovat", které hromadné akce nepřepíšou. |
+| **Vzhled z banky UI** | Přepínatelný v Nastavení, přežije překliknutí mezi stránkami. |
+
+### 34.5 Aktuální provozní čísla (4. 9. 2026)
+
+| Ukazatel | Hodnota |
+|----------|---------|
+| Stanic v evidenci (z AD) | 227 |
+| Stanic hlásících agenta | 4 (pilot) |
+| Stanic bez agenta | 200 |
+| Incidentů za 30 dní | 29 (z toho 20 varování, 0 blokováno) |
+| Schválených médií ve whitelistu | 3 |
+| Režim vynucování | varování (blokování zatím nezapnuto) |
+
+Jinými slovy: **systém je hotový a ověřený, plošné rozvezení a zapnutí blokování jsou rozhodnutí, ne
+technický dluh.** To je poctivější formulace než „nasazeno", kterou by tabulka bez čtvrtého řádku svedla
+napsat.
+
+### 34.6 Dopad na kapitoly 1–33
+
+| Kapitola | Co se mění |
+|----------|------------|
+| 14 (Auditovatelnost, NIS2) | Auditní stopa už není jen incidentní — deník pokrývá i komunikaci a zásahy operátora. Chybí retence deníku. |
+| 15 (Sestavení, nasazení) | Instalace a aktualizace jsou dvě úlohy; tři oddělené deploy identity; kanály stable/beta. |
+| 17 (Provoz, monitoring, retence) | Přibyly kontroly stavu a plánované restarty; retence deníku je otevřená. |
+| 13 / 19 (Vynucování, omezení) | Break-glass byl fakticky nedostupný kvůli filtrovanému tokenu — opraveno; rozpor kolem `localConsole.enabled` na fleetu trvá. |
+| 20 (Roadmapa) | Nově: retence deníku, sjednocení lokální konzole na fleetu, upgrade `Microsoft.AspNetCore.Authentication.Negotiate` (NU1903). |
 
 ---
 

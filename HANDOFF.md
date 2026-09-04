@@ -332,6 +332,6 @@ nikdy nespustila — skript jen hlásil „balíček nemá config". Po opravě k
 | `docs/mind-map.html` | Myšlenková mapa systému, CS/EN |
 | `docs/flowchart.html` | Vývojový diagram cesty jednoho média (rozhodovací body), CS/EN |
 | `docs/management-summary.html` | **Shrnutí pro vedení — 1× A4 na výšku**, k tisku, CS/EN |
-| `docs/oponentura.md` | Komplexní technický dokument k oponentuře (kontext, NIS2, obhajoba rozhodnutí, bezpečnost, omezení) |
-| `docs/oponentura-komercni.md` | Komerční oponentní posudek (business/product readiness) + reakce autora |
+| `docs/oponentura.md` / `.en.md` | Komplexní technický dokument k oponentuře (kontext, NIS2, obhajoba rozhodnutí, bezpečnost, omezení) — **kap. 34 = doplněk k 4. 9. 2026** |
+| `docs/oponentura-komercni.md` / `.en.md` | Komerční oponentní posudek (business/product readiness) + reakce autora |
 | `wwwroot/bank/README.md` | Banka UI – jak se zapojuje styl a rozvržení (kopie z Interface-Par) |
