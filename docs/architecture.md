@@ -34,7 +34,7 @@
 │                                                                     │
 │  ┌──────────────────────────────────┐   ┌────────────────────────┐ │
 │  │  USB Guardian API                │   │  SQL Server            │ │
-│  │  ASP.NET Core – port 5443/5050   │   │  Database: USBGuardian │ │
+│  │  ASP.NET Core – port 5443 (jen HTTPS)│   │  Database: USBGuardian │ │
 │  │                                  │   │                        │ │
 │  │  /api/whitelist  (GET)           │◄─►│  Incidents             │ │
 │  │  /api/incidents  (POST/GET)      │   │  WhitelistVersions     │ │
@@ -270,7 +270,7 @@ jinak nezměnil žádný `.cs`. Dřív (`BeforeTargets=CoreGenerateAssemblyInfo`
 | Komponenta | Kde |
 |-----------|-----|
 | Konzole | patička + `:4200/api/version` |
-| API | `:5050/api/version` (**NOVĚ**) |
+| API | `:5443/api/version` |
 | Agent | hlásí commit v heartbeatu → konzole „Agent verze" |
 
 ## Datový tok – incident
@@ -473,7 +473,6 @@ Konzole má na `AppSettings` jen write (ne delete na `Incidents`), proto je enfo
 
 | Položka | Popis |
 |---------|-------|
-| Zavřít HTTP 5050 | NIS2 – jen HTTPS (firewall block / přebindovat API na SQL_SERVER) |
 | Per-serial blocklist | Zákaz konkrétního média, near-real-time k agentům (přednost před whitelistem) |
 | Hardening konzole | gMSA místo LocalSystem; dedikovaná `USB-Guardian-Admins`; HTTPS konzole; přesun API na APP_SERVER |
 | **Retence deníku** | `sp_PurgeActivityLog` existuje, ale **nikdo ji nevolá** – doplnit `activity.retentionDays` do Nastavení a volání do API (vzor: `RetentionService`) |

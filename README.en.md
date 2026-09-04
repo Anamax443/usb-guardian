@@ -46,7 +46,7 @@ Unapproved media are warned or blocked. Designed as a technical control for
 | 36 | **Updating a deployed agent** – `Update-Agent.cmd` (stop → wait for `STOPPED` → copy → verify `RUNNING`), **offline installer** in the package, **stable/beta channels**, **version archive** + rollback | ✅ |
 | 37 | **Activity log** – `ActivityLog`: heartbeats and the server's answers, incident batches received, whitelist publications, manual operator actions; API and console write into the same table, page with filters, live mode and CSV export | ✅ |
 | 38 | **Local console: local admin login** – a loopback token is a *network* token and for a local account Windows strips Administrators from it (`LocalAccountTokenFilterPolicy`) → the check now accepts a filtered token as well, and a refusal shows **who** the person was seen as | ✅ |
-| – | Close unencrypted HTTP 5050 (HTTPS only) | 🔜 NIS2 |
+| 39 | **Closed unencrypted HTTP 5050** – only listens in `Development`, production (Windows service) is HTTPS `:5443` only | ✅ |
 | – | Per-serial **blocklist** + blocking of an already-connected device | 🔜 |
 | – | Signing certificate expiry monitoring | 🔜 |
 | – | **Activity-log retention** – `sp_PurgeActivityLog` exists but nothing calls it | 🔜 |
@@ -66,7 +66,7 @@ Three components, push model (agent → API), two-tier server (logic on the app 
 │  (loopback :5080)  │   │           │  Settings / Docs    │      │  WhitelistVersions│
 └─────────▲──────────┘   │           └─────────────────────┘      │  AppSettings      │
           │              │           ┌─────────────────────┐      │  ActivityLog      │
-   install / update      └──────────►│ API (:5050/:5443)   ├─read/─└───────────────────┘
+   install / update      └──────────►│ API (:5443, HTTPS only) ├─read/─└───────────────────┘
    (tasks under gMSA)                │  incident ingestion │ write            ▲
           │                          │  heartbeat + policy │                  │
           └──────────────────────────┤  whitelist delivery │──────────────────┘
@@ -86,7 +86,7 @@ Visually: [data-flow animation](docs/how-it-works.html) · [mind map](docs/mind-
 | Component | Technology | Where it runs |
 |-----------|-------------|----------|
 | **Agent** | C# .NET 8, Windows Service | every station (SYSTEM) |
-| **API** | ASP.NET Core, :5050 / :5443 | `SQL_SERVER`, installed at `C:\USBGuardian.Api`, Windows service "USB Guardian API" |
+| **API** | ASP.NET Core, :5443 (HTTPS only) | `SQL_SERVER`, installed at `C:\USBGuardian.Api`, Windows service "USB Guardian API" |
 | **Admin console** | Blazor Server, :4200 | `APP_SERVER_IP` (`APP_SERVER`, Windows service `USBGuardianConsole`) |
 | **Database** | SQL Server | `SQL_SERVER`, DB `USBGuardian` |
 | **Authentication** | Windows Auth (Kerberos / Negotiate) | API: AD group; console: AD group + account whitelist |
@@ -137,7 +137,7 @@ Contract **`GET /api/version`**.
 Every component reports its git commit so the operator can verify exactly what is running:
 
 - **Console** – commit in the **footer** + endpoint `:4200/api/version`.
-- **API** – endpoint `:5050/api/version` (NEW).
+- **API** – endpoint `:5443/api/version`.
 - **Agent** – reports the commit (heartbeat) → the console shows it as **"Agent version"**.
 
 The commit is stamped at build time via MSBuild (`git rev-parse`) – **reliably** (the generated `GitCommit.g.cs`,

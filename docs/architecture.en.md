@@ -34,7 +34,7 @@
 │                                                                     │
 │  ┌──────────────────────────────────┐   ┌────────────────────────┐ │
 │  │  USB Guardian API                │   │  SQL Server            │ │
-│  │  ASP.NET Core – port 5443/5050   │   │  Database: USBGuardian │ │
+│  │  ASP.NET Core – port 5443 (HTTPS only)│   │  Database: USBGuardian │ │
 │  │                                  │   │                        │ │
 │  │  /api/whitelist  (GET)           │◄─►│  Incidents             │ │
 │  │  /api/incidents  (POST/GET)      │   │  WhitelistVersions     │ │
@@ -286,7 +286,7 @@ is reliable** – a generated source file `GitCommit.g.cs` is rewritten only whe
 | Component | Where |
 |-----------|-------|
 | Console | footer + `:4200/api/version` |
-| API | `:5050/api/version` |
+| API | `:5443/api/version` |
 | Agent | reports the commit in the heartbeat → console "Agent version" |
 
 ## Data flow – an incident
@@ -509,7 +509,6 @@ The console only has write on `AppSettings` (no delete on `Incidents`), which is
 
 | Item | Description |
 |------|-------------|
-| Close HTTP 5050 | NIS2 – HTTPS only (firewall block / rebind the API) |
 | Per-serial blocklist | Banning a specific medium, near-real-time to the agents (takes precedence over the whitelist) |
 | Console hardening | gMSA instead of LocalSystem; a dedicated `USB-Guardian-Admins`; HTTPS console; move the API to the app server |
 | **Activity-log retention** | `sp_PurgeActivityLog` exists but **nothing calls it** – add `activity.retentionDays` to Settings and the call to the API (pattern: `RetentionService`) |

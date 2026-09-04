@@ -121,7 +121,11 @@ var tlsCertPath = builder.Configuration["tls:certPath"] ?? @"C:\ProgramData\USBG
 var tlsCert     = USBGuardian.Api.SelfCert.LoadOrCreate(tlsCertPath, Environment.MachineName);
 builder.WebHost.ConfigureKestrel(o =>
 {
-    o.ListenAnyIP(5050);                                       // HTTP (přechodně; zvážit zavřít)
+    // HTTP jen ve vývoji (Windows služba v produkci ASPNETCORE_ENVIRONMENT nenastavuje,
+    // takže defaultně Production) – incidenty, hostname, sériová čísla i policy metadata
+    // by jinak šla po síti nešifrovaně. NIS2. Stejný vzor jako Swagger níž.
+    if (builder.Environment.IsDevelopment())
+        o.ListenAnyIP(5050);                                   // HTTP – jen dev
     o.ListenAnyIP(5443, listen => listen.UseHttps(tlsCert));  // HTTPS – self-cert
 });
 

@@ -1160,8 +1160,10 @@ This chapter is key for a review — it lists **deliberate** limitations, not om
 
 ### 19.4 Unencrypted HTTP :5050
 
-- The API still listens on HTTP :5050 as well (alongside HTTPS :5443). For NIS2 it should be **HTTPS only** —
-  closing :5050 is on the roadmap.
+- **Fixed (2026-09-04).** The API used to also listen on HTTP :5050 alongside HTTPS :5443. The port now
+  only opens in `Development` (`Program.cs`, `builder.Environment.IsDevelopment()`) — a Windows service in
+  production doesn't set `ASPNETCORE_ENVIRONMENT`, so it defaults to `Production` and HTTP stays closed.
+  Production is now **HTTPS only**.
 
 ### 19.5 Single points / topology
 
@@ -1203,7 +1205,7 @@ This chapter is key for a review — it lists **deliberate** limitations, not om
 | The window before blocking (pre-mount) | Medium | Known, mitigation via GPO/driver on the roadmap |
 | A local admin disables the agent | Medium | Fundamental, organisational mitigation |
 | The key on the server | Low–medium | A deliberate trade-off, ACL |
-| HTTP :5050 open | Low | Roadmap (close it) |
+| HTTP :5050 open | Low | Fixed (2026-09-04) |
 | Fleet update missing | Medium (operational) | Design done, implementation pending *(done 09/2026)* |
 | Scaling unverified | Medium | A load test is recommended |
 
@@ -1216,7 +1218,7 @@ This chapter is key for a review — it lists **deliberate** limitations, not om
 | High | A per-serial blocklist (precedence over the whitelist) | 🔜 |
 | High | Client updates (an update-safe fleet + version targeting) | design done *(implemented 09/2026, §34.2)* |
 | High | Guaranteed pre-mount blocking (GPO Device Installation Restrictions / a kernel driver) | 🔜 |
-| Medium | Close HTTP :5050 (HTTPS only) | 🔜 |
+| Medium | Close HTTP :5050 (HTTPS only) | done (2026-09-04) |
 | Medium | Move the API to APP_SERVER ("everything on the app server") | 🔜 |
 | Medium | Monitoring the signing certificate's expiry | 🔜 |
 | Medium | A load test on the full fleet | 🔜 |

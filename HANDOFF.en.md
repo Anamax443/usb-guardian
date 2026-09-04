@@ -19,8 +19,8 @@ The server console aggregates data, keeps a station inventory from AD and shows 
 |---|---|
 | **Domain** | `domena.loc` |
 | **DB** | SQL Server `SQL_SERVER` (= `SQL_SERVER_IP`), database `USBGuardian`, scripts `database/01–07` applied, **`08_deploy_ignored.sql`**, **`09_activity_log.sql` = activity log (2026-09-04)**; **+ `GRANT DELETE ON dbo.WhitelistDevices` to the console account** (catalog deletion – applied manually) **+ `ActivityLog` grants**: `SELECT,INSERT` for `APP_SERVER$` and `gmsa-api$`, `EXECUTE ON sp_PurgeActivityLog` for `gmsa-api$` |
-| **API** | `SQL_SERVER`, Windows service "USB Guardian API", install `C:\USBGuardian.Api`, gMSA `DOMENA\gmsa-api$`; **HTTPS `:5443`** (self-signed, **PIN `API_CERT_THUMBPRINT`**) + HTTP `:5050`. **Live version via `GET /api/version`** |
-| **Version/commit (check)** | console footer + `:4200/api/version`; API `:5050/api/version`; agent reports commit → console "Agent version". All stamped by `git rev-parse` (MSBuild) |
+| **API** | `SQL_SERVER`, Windows service "USB Guardian API", install `C:\USBGuardian.Api`, gMSA `DOMENA\gmsa-api$`; **HTTPS `:5443`** (self-signed, **PIN `API_CERT_THUMBPRINT`**) – HTTP `:5050` closed in production, `Development` only. **Live version via `GET /api/version`** |
+| **Version/commit (check)** | console footer + `:4200/api/version`; API `:5443/api/version`; agent reports commit → console "Agent version". All stamped by `git rev-parse` (MSBuild) |
 | **Admin console** | **live** `http://APP_SERVER_IP:4200/` (`APP_SERVER`), service `USBGuardianConsole`, `C:\Apps\USBGuardianConsole`, self-contained |
 | **Console account** | **LocalSystem** = `DOMENA\APP_SERVER$` (SQL grant: read all + write Computers/WhitelistDevices/WhitelistVersions/AppSettings) |
 | **Console authorization** | AD `DOMENA\IT-Admins` + whitelist `DOMENA\it-admin` (+ DB list from Settings) |
@@ -329,7 +329,7 @@ ENFORCEMENT, SERVICE, PLANNED RESTART) — previously he saw only an endless loa
 - **Monitoring of signing cert expiry** – `CN=powershell.domena.loc` valid until 2028-06-17; alert via e-mail from the console.
 - **"Everything on the server APP_SERVER":** move the API runtime from SQL_SERVER to APP_SERVER (console+API on APP_SERVER, DB on SQL_SERVER, agent repoint to
   `https://APP_SERVER_IP:5443`) → PC-01 really not needed. **Build/deploy artifacts are on D:\deploy (locally), not on PC-01.**
-- **Close HTTP 5050** on SQL_SERVER (HTTPS only) – NIS2.
+- ~~Close HTTP 5050~~ **DONE (2026-09-04)** – only listens in `Development` (`Program.cs`, `builder.Environment.IsDevelopment()`), production is HTTPS `:5443` only.
 - **Activity log retention** – nothing calls `sp_PurgeActivityLog`; add `activity.retentionDays` to Settings and the call to the API.
 - **`Microsoft.AspNetCore.Authentication.Negotiate` 8.0.0** – the build reports NU1903 (known high-severity advisory); bump to current 8.0.x.
 - **Per-serial blocklist** + **blocking already-connected media** (the startup scan is half the way there).

@@ -1110,8 +1110,10 @@ Tato kapitola je pro oponenturu klíčová — uvádí **vědomá** omezení, ni
 
 ### 19.4 Nešifrované HTTP :5050
 
-- API zatím naslouchá i na HTTP :5050 (vedle HTTPS :5443). Pro NIS2 by mělo zůstat **jen HTTPS** —
-  uzavření :5050 je na roadmapě.
+- **Opraveno (04.09.2026).** API dřív naslouchalo i na HTTP :5050 vedle HTTPS :5443. Port se teď otevře
+  jen v `Development` (`Program.cs`, `builder.Environment.IsDevelopment()`) — Windows služba v produkci
+  `ASPNETCORE_ENVIRONMENT` nenastavuje, takže defaultně `Production` a HTTP zůstává zavřené. Produkce je
+  tedy **jen HTTPS**.
 
 ### 19.5 Single points / topologie
 
@@ -1151,7 +1153,7 @@ Tato kapitola je pro oponenturu klíčová — uvádí **vědomá** omezení, ni
 | Okno před blokací (pre-mount) | Střední | Známé, mitigace GPO/driver na roadmapě |
 | Lokální admin vyřadí agenta | Střední | Principiální, mitigace organizační |
 | Klíč na serveru | Nízká–střední | Vědomý trade-off, ACL |
-| HTTP :5050 otevřený | Nízká | Roadmapa (uzavřít) |
+| HTTP :5050 otevřený | Nízká | Opraveno (04.09.2026) |
 | Update flotily chybí | Střední (provozní) | Návrh hotov, implementace čeká |
 | Škálování neověřeno | Střední | Zátěžový test doporučen |
 
@@ -1164,7 +1166,7 @@ Tato kapitola je pro oponenturu klíčová — uvádí **vědomá** omezení, ni
 | Vysoká | Per-serial blocklist (přednost před whitelistem) | 🔜 |
 | Vysoká | Aktualizace klientů (update-safe fleet + verzové cílení) | návrh hotov |
 | Vysoká | Garantované pre-mount blokování (GPO Device Installation Restrictions / kernel driver) | 🔜 |
-| Střední | Uzavřít HTTP :5050 (jen HTTPS) | 🔜 |
+| Střední | Uzavřít HTTP :5050 (jen HTTPS) | hotovo (04.09.2026) |
 | Střední | Přesun API na APP_SERVER („vše na serveru") | 🔜 |
 | Střední | Monitoring expirace podpisového certu | 🔜 |
 | Střední | Zátěžový test na plné flotile | 🔜 |

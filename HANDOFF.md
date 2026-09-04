@@ -19,8 +19,8 @@ Serverová konzole agreguje data, drží inventář stanic z AD a ukazuje, kam c
 |---|---|
 | **Doména** | `domena.loc` |
 | **DB** | SQL Server `SQL_SERVER` (= `SQL_SERVER_IP`), databáze `USBGuardian`, skripty `database/01–07` aplikované, **`08_deploy_ignored.sql` = trvalé vyřazení stanice (Ignorovat)**, **`09_activity_log.sql` = deník provozu (04.09.2026)**; **+ `GRANT DELETE ON dbo.WhitelistDevices` účtu konzole** (mazání z katalogu – aplikováno ručně) **+ granty na `ActivityLog`**: `SELECT,INSERT` pro `APP_SERVER$` i `gmsa-api$`, `EXECUTE ON sp_PurgeActivityLog` pro `gmsa-api$` |
-| **API** | `SQL_SERVER`, Windows služba „USB Guardian API", install `C:\USBGuardian.Api`, gMSA `DOMENA\gmsa-api$`; **HTTPS `:5443`** (self-signed, **PIN `API_CERT_THUMBPRINT`**) + HTTP `:5050`. **Živá verze přes `GET /api/version`** |
-| **Verze/commit (kontrola)** | konzole patička + `:4200/api/version`; API `:5050/api/version`; agent hlásí commit → konzole „Agent verze". Vše stampuje `git rev-parse` (MSBuild) |
+| **API** | `SQL_SERVER`, Windows služba „USB Guardian API", install `C:\USBGuardian.Api`, gMSA `DOMENA\gmsa-api$`; **HTTPS `:5443`** (self-signed, **PIN `API_CERT_THUMBPRINT`**) – HTTP `:5050` zavřeno v produkci, jen `Development`. **Živá verze přes `GET /api/version`** |
+| **Verze/commit (kontrola)** | konzole patička + `:4200/api/version`; API `:5443/api/version`; agent hlásí commit → konzole „Agent verze". Vše stampuje `git rev-parse` (MSBuild) |
 | **Admin konzole** | **živá** `http://APP_SERVER_IP:4200/` (`APP_SERVER`), služba `USBGuardianConsole`, `C:\Apps\USBGuardianConsole`, self-contained |
 | **Účet konzole** | **LocalSystem** = `DOMENA\APP_SERVER$` (SQL grant: read vše + write Computers/WhitelistDevices/WhitelistVersions/AppSettings; **+ DELETE na `WhitelistDevices`** – mazání z katalogu, jinak ✕ hodí „DELETE permission denied") |
 | **Autorizace konzole** | AD `DOMENA\IT-Admins` + whitelist `DOMENA\it-admin` (+ DB seznam z Nastavení) |
@@ -343,7 +343,7 @@ alespoň zjednodušenou uživatelskou stránku, teď správně plný přístup p
 - **Monitoring expirace podpisového certu** – `CN=powershell.domena.loc` platí do 2028-06-17; alert e-mailem z konzole.
 - **„Vše server na APP_SERVER":** přesun API runtime z SQL_SERVER na APP_SERVER (konzole+API na APP_SERVER, DB na SQL_SERVER, agent repoint na
   `https://APP_SERVER_IP:5443`) → PC-01 fakt netřeba. **Build/deploy artefakty jsou na D:\deploy (lokálně), ne na PC-01.**
-- **Zavřít HTTP 5050** na SQL_SERVER (jen HTTPS) – NIS2.
+- ~~Zavřít HTTP 5050~~ **HOTOVO (04.09.2026)** – naslouchá jen v `Development` (`Program.cs`, `builder.Environment.IsDevelopment()`), produkce jen HTTPS `:5443`.
 - **Retence deníku** – `sp_PurgeActivityLog` nikdo nevolá; doplnit `activity.retentionDays` do Nastavení a volání do API.
 - **`Microsoft.AspNetCore.Authentication.Negotiate` 8.0.0** – build hlásí NU1903 (známá vysoká zranitelnost), zvednout na aktuální 8.0.x.
 - **Per-serial blocklist** + **blokace už-připojeného média** (startovní sken je půlka cesty).

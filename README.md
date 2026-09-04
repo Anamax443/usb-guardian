@@ -46,7 +46,7 @@ technické opatření pro **NIS2 / zákon 181/2014 Sb. / ISO 27001**.
 | 36 | **Aktualizace nasazeného agenta** – `Update-Agent.cmd` (stop → čekat `STOPPED` → kopie → ověřit `RUNNING`), **offline instalátor** v balíčku, **kanály stable/beta**, **archiv verzí** + návrat k předchozí | ✅ |
 | 37 | **Deník provozu (Aktivita)** – `ActivityLog`: heartbeaty a odpovědi serveru, příjem dávek, publikace whitelistu, ruční zásahy operátora; API i konzole píšou do téže tabulky, stránka s filtry, živým režimem a exportem CSV | ✅ |
 | 38 | **Lokální konzole: přihlášení lokálního admina** – loopback token je síťový a u lokálního účtu z něj Windows odebere Administrators (`LocalAccountTokenFilterPolicy`); kontrola nově uznává i filtrovaný token a odmítnutí ukáže, **jako kdo** byl člověk viděn | ✅ |
-| – | Zavřít nešifrované HTTP 5050 (jen HTTPS) | 🔜 NIS2 |
+| 39 | **Zavřeno nešifrované HTTP 5050** – naslouchá jen v `Development`, produkce (Windows služba) jen HTTPS `:5443` | ✅ |
 | – | Per-serial **blocklist** + blokace už-připojeného média | 🔜 |
 | – | Monitoring expirace podpisového certu | 🔜 |
 | – | **Retence deníku** – `sp_PurgeActivityLog` existuje, ale nikdo ji nevolá | 🔜 |
@@ -66,7 +66,7 @@ Tři komponenty, push model (agent → API), dvouvrstvý server (operativa na ap
 │  (loopback :5080)  │   │           │  Nastavení / Docs   │      │  WhitelistVersions│
 └─────────▲──────────┘   │           └─────────────────────┘      │  AppSettings      │
           │              │           ┌─────────────────────┐      │  ActivityLog      │
-   instalace/update      └──────────►│ API (:5050/:5443)   ├─read/─└───────────────────┘
+   instalace/update      └──────────►│ API (:5443, jen HTTPS) ├─read/─└───────────────────┘
    (úlohy pod gMSA)                  │  příjem incidentů   │ write            ▲
           │                          │  heartbeat + politika│                 │
           └──────────────────────────┤  whitelist distribuce│─────────────────┘
@@ -86,7 +86,7 @@ Vizuálně: [animace toku dat](docs/how-it-works.html) · [myšlenková mapa](do
 | Komponenta | Technologie | Kde běží |
 |-----------|-------------|----------|
 | **Agent** | C# .NET 8, Windows Service | každá stanice (SYSTEM) |
-| **API** | ASP.NET Core, :5050 / :5443 | `SQL_SERVER`, instalace `C:\USBGuardian.Api`, Windows služba „USB Guardian API" |
+| **API** | ASP.NET Core, :5443 (jen HTTPS) | `SQL_SERVER`, instalace `C:\USBGuardian.Api`, Windows služba „USB Guardian API" |
 | **Admin konzole** | Blazor Server, :4200 | `APP_SERVER_IP` (`APP_SERVER`, Windows služba `USBGuardianConsole`) |
 | **Databáze** | SQL Server | `SQL_SERVER`, DB `USBGuardian` |
 | **Autentizace** | Windows Auth (Kerberos / Negotiate) | API: AD skupina; konzole: AD skupina + whitelist účtů |
@@ -134,7 +134,7 @@ Kontrakt **`GET /api/version`**.
 Všechny komponenty hlásí svůj git commit, takže operátor ověří, co přesně běží:
 
 - **Konzole** – commit v **patičce** + endpoint `:4200/api/version`.
-- **API** – endpoint `:5050/api/version` (NOVĚ).
+- **API** – endpoint `:5443/api/version`.
 - **Agent** – hlásí commit (heartbeat) → konzole ho zobrazí jako **„Agent verze"**.
 
 Commit se razítkuje při buildu přes MSBuild (`git rev-parse`) – **spolehlivě** (generovaný `GitCommit.g.cs`
