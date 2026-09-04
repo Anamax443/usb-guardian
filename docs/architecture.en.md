@@ -209,8 +209,9 @@ A whitelist entry contains: `vendorId`, `productId`, `serialNumber`, `descriptio
 |-------|-----------|
 | Transport | TLS 1.2+ (Kestrel), the agent verifies the server by **thumbprint pinning** (no CA) |
 | Authentication | Windows Auth – Kerberos Negotiate |
-| Authorization | AD groups – `USB-Guardian-Clients` (API), admin group + account whitelist (console) |
-| Data integrity | RSA signature of the whitelist, fail-secure (what the agent cannot verify, it does not use) |
+| Authorization | AD groups – `USB-Guardian-Clients` (API), admin group + account whitelist (console); the API also has a **`FallbackPolicy`** (fail-closed default – a new endpoint with no attribute is protected, not silently public, see below) |
+| Caller identity | the hostname in the payload is compared against the authenticated identity of the machine account (`CallerIdentity.cs`) – **currently logs mismatches only**, doesn't reject (2026-09-04 audit) |
+| Data integrity | RSA signature of the whitelist, fail-secure (what the agent cannot verify, it does not use); incident dedup `timestamp\|serial\|vendor\|ProductId\|PnpDeviceId` (the last pair used to be missing – a collision risk for devices sharing a serial number) |
 | Service account | gMSA `DOMENA\gmsa-api$` – no password in configuration |
 | Tier separation | three deploy identities: fleet × server × the running console (which is an admin nowhere) |
 | Audit trail | incidents + the **activity log** (who talked to whom, who changed what) |
@@ -221,6 +222,22 @@ A whitelist entry contains: `vendorId`, `productId`, `serialNumber`, `descriptio
 > offline by hand after every catalog change proved operationally unworkable. It is the tool's own internal
 > key (agents hold only the public part), not a company CA; it is protected by ACLs on the server. The offline
 > `WhitelistSigner` remains for key generation and manual verification.
+
+> **FallbackPolicy (2026-09-04):** until then, API security relied entirely on nobody forgetting to write
+> `[Authorize]` on a new action – exactly the kind of mistake the audit already caught once
+> (`POST /api/whitelist/devices` used to run under the same policy as GET). `FallbackPolicy =
+> USBGuardianClients` makes the API fail-closed the way the console already was: everything is protected by
+> default, public only where explicitly marked `[AllowAnonymous]`/`.AllowAnonymous()` (`/api/version`,
+> `/api/cert-info`, `IncidentsController.QueueStatus`).
+
+> **Hostname verification (2026-09-04, warn-only):** the agent runs as SYSTEM, i.e. it authenticates with
+> the machine account (`DOMAIN\HOSTNAME$`). The server can therefore compare what the caller actually proved
+> against who it claims to be in the data (`Hostname` in incidents/heartbeat) – previously taken on faith.
+> Deliberately **logs only** a mismatch (Event Log + `ActivityLog`, category "bezpecnost"), doesn't reject
+> the request: the real production format of the identity couldn't be verified live, and a hard rejection on
+> a wrong assumption would silence the whole fleet at once. After a few days with no false positives it
+> should be tightened to `403` (`CallerIdentity.ParseMachineHostname`, a pure function, tests in
+> `tests/USBGuardian.Api.Tests/CallerIdentityTests.cs`).
 
 ## Configuration – key values
 
@@ -289,6 +306,28 @@ is reliable** – a generated source file `GitCommit.g.cs` is rewritten only whe
 | API | `:5443/api/version` |
 | Agent | reports the commit in the heartbeat → console "Agent version" |
 
+## Tests and CI
+
+Until 2026-09-04 the repo had no C# tests at all (just one JS test for the UI). Today: **24 tests** across
+two projects, both xUnit, no mock framework – either real instances routed into a temp directory (agent) or
+pure functions with no infrastructure dependency (API):
+
+| Project | What it tests | Count |
+|---------|---------------|-------|
+| `tests/USBGuardian.Agent.Tests` | `WhitelistChecker`, `PolicyEnforcer` – whitelist expiry, decision logic | 8 |
+| `tests/USBGuardian.Api.Tests` | `IncidentSpool` (write/read/delete/quarantine of a corrupt file), the dedup key (`IncidentQueueWorker.MakeKey`), `CallerIdentity` (parsing a Windows identity) | 16 |
+
+The API tests reach into `internal` methods via `InternalsVisibleTo` (`server/USBGuardian.Api/AssemblyInfo.cs`)
+– this works around the fact that, e.g., a `WindowsIdentity` can't easily be constructed in a test, so the
+logic under test is split into a pure parsing function (testable) and a thin wrapper around the framework
+(untested, trivial).
+
+**CI (`.github/workflows/build-and-test.yml`, since 2026-09-04):** on every push/PR to `main` it builds the
+agent, the API and the console separately (no shared `.sln` covers all three) and runs both test projects.
+Runs on `windows-latest` – required, not optional: the agent/API/console use Windows-only APIs
+(`WindowsIdentity`/`WindowsPrincipal` for Negotiate auth, `AddWindowsService`, the `EventLog` provider), so
+this wouldn't even restore on Linux.
+
 ## Data flow – an incident
 
 ```
@@ -299,10 +338,44 @@ is reliable** – a generated source file `GitCommit.g.cs` is rewritten only whe
 5. NotificationService: toast to the user
 6. IncidentLogger: store into queue/log_MACHINE_DATE.json
 7. IncidentSync (1 min): send to the server /api/incidents
-8. IncidentsController: enqueue into IncidentQueue → return 202 Accepted (does NOT write to the DB)
-9. IncidentQueueWorker (async): dequeue and write into the SQL table Incidents
-10. ActivityLogger: a log line "batch of N incidents received from station X" (fire-and-forget)
+8. IncidentsController: compare the claimed Hostname against the caller's authenticated identity (machine
+   account) – currently logs a mismatch only, doesn't reject the request (2026-09-04 audit, warn-only – see below)
+9. IncidentsController: IncidentSpool writes the batch to disk atomically (survives a process crash) → ONLY
+   THEN enqueue into IncidentQueue → return 202 Accepted
+10. IncidentQueueWorker (async): dequeue, dedup (`timestamp|serial|vendor|ProductId|PnpDeviceId`), write into
+    the SQL table Incidents → delete the spool file (only after a successful write)
+11. ActivityLogger: a log line "batch of N incidents received from station X" (fire-and-forget)
 ```
+
+### Incident queue durability (IncidentSpool)
+
+Until 2026-09-04, `202 Accepted` was returned right after the batch was queued in the in-memory
+`IncidentQueue` – an API process crash between that acknowledgement and the DB write lost the batch for
+good (the agent advances its offset on a 2xx response and never resends, see `IncidentSync.cs`).
+`IncidentSpool` (`server/USBGuardian.Api/Queue/IncidentSpool.cs`) adds a layer between the controller and
+the queue to fix this:
+
+```
+POST /api/incidents
+   → IncidentSpool.Write()  – atomic write (temp + move) to disk,
+                               C:\ProgramData\USBGuardian\incident-spool
+   → IncidentQueue.TryEnqueue()
+   ← 202 Accepted            (only NOW – "accepted" means it survives a process crash too)
+
+IncidentQueueWorker (Channel reader)
+   → ProcessBatch() → SaveChangesAsync()
+   → IncidentSpool.Delete()  – ONLY after a successful DB write
+```
+
+Anything left on disk (a process crash, or just a routine service restart before the `Channel` drained) is
+**replayed first on the next service start** (`ReplaySpoolAsync`), ahead of fresh traffic. A repeated replay
+is made harmless by the existing dedup in `ProcessBatch` – which is why the dedup key extended with
+`ProductId`/`PnpDeviceId` (see below) matters for this property too, not just for deduplicating resends.
+
+Spool status (pending file count + age of the oldest one) is visible on `/kontroly` (the "Incident queue
+(spool)" check) and machine-readable via `GET /api/incidents/queue/status` (an anonymous endpoint, counts
+only – no incident content; the console runs on a different machine than the API and otherwise has no
+access to it).
 
 ## Activity log (ActivityLog)
 
@@ -511,9 +584,18 @@ The console only has write on `AppSettings` (no delete on `Incidents`), which is
 |------|-------------|
 | Per-serial blocklist | Banning a specific medium, near-real-time to the agents (takes precedence over the whitelist) |
 | Console hardening | gMSA instead of LocalSystem; a dedicated `USB-Guardian-Admins`; HTTPS console; move the API to the app server |
+| **ACL on the TLS/RSA keys** | `api-tls.pfx` and `whitelist_private.pem` on the server – the one item left unresolved from the 2026-09-04 audit, a server-side action (Set-Acl), not code |
 | **Activity-log retention** | `sp_PurgeActivityLog` exists but **nothing calls it** – add `activity.retentionDays` to Settings and the call to the API (pattern: `RetentionService`) |
 | ~~Local console on the fleet~~ | **Decided 2026-09-04: ON across the fleet, exclusively for a local admin of the station.** The template in the repo stays `false` (a safe default for other environments), the fleet package is built with `true`; the build warns about the opposite state |
 | Toast privilege separation | A helper process in the user session – one-way pipes SYSTEM → user |
+| **Tighten hostname verification** | warn-only today (`CallerIdentity`) – after a few days with no false positives in Activity, switch to a hard rejection (403) |
+
+> Done (previously pending): the admin UI (Blazor console + AD sync), **encrypted agent↔API comms**
+> (self-cert + pinning), central settings (enforcement/access/e-mail + alerts), the **whitelist
+> publishing/signing workflow** (client = a 1:1 copy of the server, see below), the **durable incident
+> queue** (`IncidentSpool`), the **API FallbackPolicy**, the **dedup key extended with
+> ProductId/PnpDeviceId**, and the **first CI** (`.github/workflows/build-and-test.yml` – build + tests on
+> `windows-latest` on every push/PR).
 
 ## Whitelist publishing/signing workflow (automatic, the client is a 1:1 copy of the server)
 

@@ -33,7 +33,7 @@ Unapproved media are warned or blocked. Designed as a technical control for
 | 23 | **Data retention** – Settings (console) + `RetentionService` in the API (purges old incidents); **Database page** (DB content overview) | ✅ |
 | 24 | **Deploy targeting** – default for new PCs (Settings) + per-station and bulk include/exclude in Stations | ✅ |
 | 25 | **Agent local console** also shows the list of approved devices (whitelist) + agent version | ✅ |
-| 26 | **HTML animation** of how the system works (`/how-it-works.html`, 13 steps: data flow + enforcement) | ✅ |
+| 26 | **HTML animation** of how the system works (`/how-it-works.html`, 16 steps: data flow + enforcement + spool) | ✅ |
 | 27 | **Whitelist signing/publishing workflow (automatic)** – catalog change → console publishes and **signs internally** (server-side RSA, key on APP_SERVER) → API serves the signed blob verbatim → **client = a 1:1 copy of the server** within ~2 min; agent O(1) match (scales to 10k) | ✅ |
 | 28 | **Enforcement server→agent (Phase 2)** – heartbeat carries `policy.enforce` (APP_SERVER = truth) → agent really **blocks/warns** per the server | ✅ |
 | 29 | **Local break-glass (Phase 3)** – station admin temporarily disables blocking offline (local console), persisted, **logged** → server; cleared on reconnect | ✅ |
@@ -47,9 +47,14 @@ Unapproved media are warned or blocked. Designed as a technical control for
 | 37 | **Activity log** – `ActivityLog`: heartbeats and the server's answers, incident batches received, whitelist publications, manual operator actions; API and console write into the same table, page with filters, live mode and CSV export | ✅ |
 | 38 | **Local console: local admin login** – a loopback token is a *network* token and for a local account Windows strips Administrators from it (`LocalAccountTokenFilterPolicy`) → the check now accepts a filtered token as well, and a refusal shows **who** the person was seen as | ✅ |
 | 39 | **Closed unencrypted HTTP 5050** – only listens in `Development`, production (Windows service) is HTTPS `:5443` only | ✅ |
+| 40 | **External security audit + remediation** (2026-09-04) – 6 findings, 5 fixed and deployed, 1 deliberately in observation mode only (see Security) | ✅ |
+| 41 | **Durable incident queue** – `IncidentSpool` writes the batch to disk BEFORE the API acknowledges it, survives a process crash, replayed on restart; the "Incident queue (spool)" check on `/kontroly` | ✅ |
+| 42 | **First tests and CI** – 24 C# tests (0 before 2026-09-04), `.github/workflows/build-and-test.yml` on every push/PR | ✅ |
 | – | Per-serial **blocklist** + blocking of an already-connected device | 🔜 |
 | – | Signing certificate expiry monitoring | 🔜 |
 | – | **Activity-log retention** – `sp_PurgeActivityLog` exists but nothing calls it | 🔜 |
+| – | ACLs on the server's TLS/RSA keys (last open item from the audit) | 🔜 |
+| – | Tighten hostname verification (warn-only today) to a hard rejection | 🔜 |
 
 ## Architecture
 
@@ -362,6 +367,14 @@ GRANT INSERT, UPDATE ON dbo.WhitelistVersions TO [DOMENA\APP_SERVER$];          
 - **Separate deploy identities** – compromising one does not reach both tiers (fleet × server).
 - `*.local.json` gitignored.
 - Agent local console: loopback, local admins only, writes limited to break-glass and a service restart.
+- **API `FallbackPolicy`** (since 2026-09-04) – everything is protected by default, public only where
+  explicitly marked `[AllowAnonymous]`. A new endpoint with no attribute can no longer end up silently public
+  by accident.
+- **Hostname verification** (since 2026-09-04, warn-only for now) – the server compares the hostname in the
+  data against the caller's authenticated machine-account identity; for now it only logs a mismatch to
+  Activity, and will be tightened to a hard rejection after a few days with no false positives.
+- **Independent security audit** (2026-09-04) reviewed the repo after it went public – 6 findings, 5 fixed
+  and deployed the same day (see `docs/oponentura.en.md` §34.7 for the detail on each).
 
 ## Repo structure
 

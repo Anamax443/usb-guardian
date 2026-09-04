@@ -2298,12 +2298,14 @@ dokumentace, které to popisovaly jako funkci pro uživatele, byly opraveny.
 
 | Ukazatel | Hodnota |
 |----------|---------|
-| Stanic v evidenci (z AD) | 227 |
+| Stanic v evidenci (z AD) | 228 |
 | Stanic hlásících agenta | 4 (pilot) |
-| Stanic bez agenta | 200 |
-| Incidentů za 30 dní | 29 (z toho 20 varování, 0 blokováno) |
-| Schválených médií ve whitelistu | 3 |
+| Stanic bez agenta | 201 (auto-enrollment záměrně v opt-in gate, viz 34.8) |
+| Incidentů v databázi (celkem) | 146 |
+| Schválených médií ve whitelistu | 4 |
 | Režim vynucování | varování (blokování zatím nezapnuto) |
+| Kontrol stavu (`/kontroly`, `/api/health`) | 16 |
+| C# testů (2 projekty) | 24 (do 4. 9. 2026 dopoledne 0) |
 
 Jinými slovy: **systém je hotový a ověřený, plošné rozvezení a zapnutí blokování jsou rozhodnutí, ne
 technický dluh.** To je poctivější formulace než „nasazeno", kterou by tabulka bez čtvrtého řádku svedla
@@ -2318,6 +2320,86 @@ napsat.
 | 17 (Provoz, monitoring, retence) | Přibyly kontroly stavu a plánované restarty; retence deníku je otevřená. |
 | 13 / 19 (Vynucování, omezení) | Break-glass byl fakticky nedostupný kvůli filtrovanému tokenu — opraveno; rozpor kolem `localConsole.enabled` na fleetu trvá. |
 | 20 (Roadmapa) | Nově: retence deníku, sjednocení lokální konzole na fleetu, upgrade `Microsoft.AspNetCore.Authentication.Negotiate` (NU1903). |
+| 12 (Bezpečnostní a hrozbový model) | Doplněno o nezávislý audit a 6 konkrétních nálezů — viz 34.7. |
+| 18 (Testování a živé ověření) | 0 → 24 C# testů, první CI — viz 34.7.5. |
+| 19 (Omezení, rizika a známé slabiny) | Jedna položka z auditu (ACL na TLS/RSA klíče) zůstává otevřená jako known limitation, ne dořešená. |
+
+### 34.7 Externí bezpečnostní audit a náprava (4. 9. 2026)
+
+Nezávislý statický audit veřejného repa (po zveřejnění 4. 9. 2026, viz 34.9) ohodnotil architekturu 9,0/10,
+implementaci bezpečnosti 7,3/10, testování 4,5/10, celkem 7,9/10. Nálezy byly ověřeny přímo v kódu, ne
+převzaty bez kontroly — u dvou z nich se prokázalo, že popsaný scénář byl reprodukovatelný izolovaným
+testem mimo repo (5.12.3 v HANDOFF). Každá oprava vlastní commit, kvůli izolovatelnosti při rozbití.
+Postupně opraveno šest položek:
+
+**34.7.1 Vypršelý whitelist tiše autorizoval zařízení.** `WhitelistChecker.IsAllowed()` jen zalogoval
+warning a pokračoval v lookupu; `PolicyEnforcer.HandleDevice()` se vrátil na `if (isAllowed) return` dřív,
+než se `DetermineAction()` podíval na stav whitelistu — `onExpired` tedy nikdy neplatilo pro zařízení, které
+v (starém) seznamu zůstalo. Stejná díra byla v `DeviceMonitor.ReEnforceConnectedDevices()` pro už připojená
+média. Ověřeno regresním testem, který na starém kódu spadne. Nasazeno na fleet 4. 9. 2026 večer.
+
+**34.7.2 Autorizace zápisu na whitelist byla stejná jako pro čtení.** `WhitelistController` měl jednu
+policy (`USBGuardianClients`) na celém controlleru včetně `POST /api/whitelist/devices` — účet stanice tak
+teoreticky mohl zapisovat security policy, ne jen ji číst. Autorizace přesunuta na jednotlivé akce, nová
+policy `USBGuardianAdmins` (fail-closed — prázdné `AdminGroups` = ta jedna cesta zůstane nepřístupná, ne
+otevřená všem).
+
+**34.7.3 API poslouchalo nešifrovaně i v produkci.** Port 5050 (HTTP) měl být jen pro vývoj, ale reálný
+`appsettings.local.json` na serveru měl vlastní `Kestrel:Endpoints:Http:Url` — Kestrel čte tuhle sekci
+NEZÁVISLE na kódu a oba zdroje se sčítají, ne nahrazují. Pokus vynulovat hodnotu v `IConfiguration` za
+běhu **nefungoval** (ověřeno izolovaným testem) — řešením je fail-fast s jasnou hláškou, pokud produkce
+tuhle sekci vůbec uvidí existovat, plus ruční odstranění sekce z reálného configu na serveru.
+
+**34.7.4 `AllowedGroups.Length == 0` znamenalo fail-open.** Komentář v kódu to přiznával: „bez konfigurace
+nepřekážet". Prázdná nebo chybějící konfigurace by tak tiše pustila kohokoliv autentizovaného v doméně.
+Změněno na fail-fast při startu — radši nenaběhnout, než běžet s rozbitou konfigurací, která vypadá funkčně.
+
+**34.7.5 Repo nemělo žádné C# testy.** Do 4. 9. 2026 dopoledne jediný test v projektu byl jeden JS test na
+UI. Založen `tests/USBGuardian.Agent.Tests` (regrese na 34.7.1), rozšířeno o `tests/USBGuardian.Api.Tests`.
+Ke konci dne: **24 testů**, xUnit, bez mock frameworku — buď skutečné instance do dočasného adresáře
+(`Path.GetTempPath()/Guid`), nebo čisté funkce beze závislosti na infrastruktuře. Založena i **první CI**
+(`.github/workflows/build-and-test.yml`) — build tří hlavních komponent + oba testovací projekty na každý
+push/PR, `windows-latest` (nutnost kvůli `WindowsIdentity`/`AddWindowsService`/`EventLog`).
+
+**34.7.6 Zbytek nálezů, opravený v následné iteraci téhož dne:**
+
+| Nález | Oprava | Nasazeno |
+|-------|--------|----------|
+| `202 Accepted` se vracelo PŘED zápisem do DB — pád procesu mezi tím batch ztratil | `IncidentSpool`: atomický zápis na disk před 202, worker maže až po úspěšném zápisu do DB, replay při startu | Ano, ověřeno naživo |
+| Dedup klíč (`timestamp\|serial\|vendor`) chyběl `ProductId`/`PnpDeviceId` — kolize u zařízení se sdíleným sériovým číslem | Klíč rozšířen o oba údaje | Ano, ověřeno naživo |
+| API nemělo výchozí autorizační politiku — nový endpoint bez atributu by byl tiše veřejný | `FallbackPolicy = USBGuardianClients`, fail-closed jako konzole | Ano, ověřeno naživo |
+| Hostname v datech (`Hostname` v incidentech/heartbeatu) se bral bez ověření proti volajícímu | Porovnání s autentizovanou identitou strojového účtu — **záměrně jen loguje**, neblokuje (viz 34.7.7) | Ano, ověřeno naživo |
+
+**34.7.7 Proč hostname ověření zůstává warn-only.** Tvrdé odmítnutí při špatném předpokladu o formátu
+Windows identity (`DOMÉNA\HOSTNAME$`) by umlčelo celý fleet naráz — přesně ten typ tiché chyby, kvůli
+které existuje celá stránka Kontroly stavu. Formát nešlo ověřit izolovaným testem (na rozdíl od 34.7.3),
+protože vyžaduje skutečnou Kerberos autentizaci reálného agenta, ne jen jednotkový test. Rozhodnutí:
+nasadit v pozorovacím režimu (loguje do `ActivityLog`, kategorie „bezpecnost"), počkat několik dní bez
+falešných poplachů na živém provozu, teprve pak zpřísnit na `403`. Stejný vzorec jako u nálezu 34.7.1
+(code review místo živého testu tam, kde live test nejde bezpečně provést) — konzistentní přístup k riziku,
+ne výjimka.
+
+**34.7.8 Co zůstává otevřené.** ACL na `api-tls.pfx` a `whitelist_private.pem` na serveru — server-side
+zásah (`Set-Acl`), ne kód, mimo dosah automatizovaného review. `EventId`/`PnpDeviceId`-only dedup (34.7.6)
+řeší kolizi klíče, ale ne durabilní frontu whitelistu ani hostname enforcement (34.7.7) — obojí vědomě
+odložené, ne přehlédnuté.
+
+### 34.8 Vedlejší zjištění: pokrytí stanic vs. auto-enrollment (ne bug)
+
+Kontrola „Pokrytí stanic" hlásí 201 stanic bez agenta; kontrola „Auto-enrollment agenta" v ostrém režimu
+hlásí „žádné stanice k nasazení". Z kódu (`AgentDeployService.RunOnceAsync`) jde odvodit, že `deploy.
+defaultEnroll` musí být v Nastavení explicitně `false` — s výchozí hodnotou v kódu (`true`) by běh se 201
+kandidáty vrátil aspoň `deploy.maxPerRun` cílů, ne nulu. Jde tedy o **záměrný opt-in gate** (postup „pilot
+→ vzorek → fleet" z 34.4/34.5), ne o chybu v automatizaci — ověřeno odvozením z kódu bez přístupu k živé
+databázi, přesně proto, aby se rozdíl mezi „automatizace nefunguje" a „automatizace dělá přesně to, co má"
+dal rozeznat, ne jen odhadnout.
+
+### 34.9 Zveřejnění repozitáře (4. 9. 2026)
+
+Repo `Anamax443/usb-guardian` se stalo **veřejným** 4. 9. 2026. Firemní hodnoty (hostnames, IP adresy,
+doménové a účetní jméno) byly před zveřejněním nahrazeny placeholdery (`APP_SERVER`, `SQL_SERVER`,
+`DOMENA`…); skutečné hodnoty zůstávají lokálně v gitignored `docs/local-values.local.md`. Zveřejnění je i
+kontext pro 34.7 — externí audit byl možný právě proto, že kód je teď čitelný zvenčí.
 
 ---
 
@@ -2344,6 +2426,9 @@ napsat.
 | **AllSigned** | GPO politika vyžadující podpis všech PS skriptů spouštěných na stroji. |
 | **ToastHelper** | Pomocný proces v user session zobrazující Windows notifikace (agent = SYSTEM neumí přímo). |
 | **Watchdog** | Scheduled task hlídající běh služby agenta (à 3 min). |
+| **IncidentSpool** | Diskový mezisklad batche incidentů mezi příjmem na API a zápisem do DB — přežije pád procesu (od 4. 9. 2026). |
+| **FallbackPolicy** | Výchozí autorizační politika ASP.NET Core — chrání i endpoint bez vlastního `[Authorize]` atributu. |
+| **Warn-only** | Kontrola, která zjištěnou anomálii jen loguje, ale nezastaví zpracování — mezistupeň před tvrdým vynucením. |
 
 ## Příloha B — Přehled konfiguračních klíčů
 
@@ -2427,9 +2512,11 @@ GRANT INSERT, UPDATE         ON dbo.WhitelistVersions  TO [DOMENA\APP_SERVER$]; 
 | GET | `/api/incidents` | (konzole) | Výpis pro UI |
 | GET | `/api/whitelist` | Kerberos (skupina) | Podepsaný blob verbatim |
 | GET | `/api/whitelist/signature` | Kerberos (skupina) | Base64 podpis |
+| GET | `/api/incidents/queue/status` | — (anonymní, jen počty) | Stav paměťové fronty i diskového spoolu, pro Kontroly stavu (jiný stroj než API) |
 | GET | `/api/cert-info` | — | Otisk certu (pinning) |
 | GET | `/api/version` | — | Commit běžícího API |
 | GET | (konzole) `/api/version` | — | Commit konzole |
+| GET | (konzole) `/api/health` | konzole auth (FallbackPolicy) | 16 kontrol strojově, `200`=OK/`503`=aspoň jedna chyba |
 | GET | (konzole) `/export/incidents.csv` | konzole auth | CSV export (dědí filtr) |
 | GET | (konzole) `/export/manager` | konzole auth | Manažerský report |
 | — lokální konzole agenta (loopback :5080, admin-only) — | | | |
@@ -2437,6 +2524,11 @@ GRANT INSERT, UPDATE         ON dbo.WhitelistVersions  TO [DOMENA\APP_SERVER$]; 
 | POST | `/api/override` , `/api/override/clear` | lokální admin | Break-glass |
 | POST | `/api/unblock-all` | lokální admin | Okamžité vrácení blokovaných |
 | POST | `/api/restart` | lokální admin | Self-restart služby |
+
+> **Od 4. 9. 2026:** API má `FallbackPolicy = USBGuardianClients` — endpoint bez uvedeného Auth sloupce by
+> byl chráněný stejně jako `/api/heartbeat`, ne veřejný (viz 34.7.6). `POST /api/incidents` a
+> `GET /api/heartbeat` navíc porovnávají `Hostname`/`hostname` z dat s autentizovanou identitou volajícího
+> (34.7.7) — zatím jen loguje neshodu, nejde o další úroveň autorizace v tabulce výše.
 
 ## Příloha E — Mapování NIS2 / ISO 27001 → funkce
 

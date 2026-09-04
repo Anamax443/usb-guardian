@@ -199,8 +199,9 @@ Whitelist záznam obsahuje: `vendorId`, `productId`, `serialNumber`, `descriptio
 |--------|-------------|
 | Transport | TLS 1.2+ (Kestrel), agent ověřuje server **pinningem otisku** (bez CA) |
 | Autentizace | Windows Auth – Kerberos Negotiate |
-| Autorizace | AD skupiny – `USB-Guardian-Clients` (API), admin skupina + whitelist účtů (konzole) |
-| Integrita dat | RSA podpis whitelistu, fail-secure (co agent neověří, nepoužije) |
+| Autorizace | AD skupiny – `USB-Guardian-Clients` (API), admin skupina + whitelist účtů (konzole); API má navíc **`FallbackPolicy`** (fail-closed default – nový endpoint bez atributu je chráněný, ne tiše veřejný, viz níže) |
+| Identita volajícího | hostname z payloadu se porovnává s autentizovanou identitou strojového účtu (`CallerIdentity.cs`) – **zatím jen loguje neshodu**, nezakazuje (audit 04.09.2026) |
+| Integrita dat | RSA podpis whitelistu, fail-secure (co agent neověří, nepoužije); dedup incidentů `timestamp\|serial\|vendor\|ProductId\|PnpDeviceId` (dřív chybělo poslední dvojici – kolize u zařízení se sdíleným sériovým číslem) |
 | Service účet | gMSA `DOMENA\gmsa-api$` – bez hesla v konfiguraci |
 | Oddělení vrstev | tři deploy identity: fleet × server × běžící konzole (ta není admin nikde) |
 | Auditní stopa | incidenty + **deník provozu** (kdo s kým mluvil, kdo co změnil) |
@@ -210,6 +211,20 @@ Whitelist záznam obsahuje: `vendorId`, `productId`, `serialNumber`, `descriptio
 > Je to vědomý kompromis za plně automatickou publikaci — ruční offline podpis po každé změně katalogu byl
 > provozně neúnosný. Klíč je interní klíč nástroje (agenti mají jen veřejnou část), ne firemní CA; chrání ho
 > ACL na serveru. Offline `WhitelistSigner` zůstává pro generování klíčů a ruční ověření.
+
+> **FallbackPolicy (04.09.2026):** do té doby stálo zabezpečení API jen na tom, že si autor nezapomene napsat
+> `[Authorize]` na každou novou akci – přesně tenhle typ chyby už jednou našel audit (`POST /api/whitelist/devices`
+> dřív jelo na stejné policy jako GET). `FallbackPolicy = USBGuardianClients` dělá z API fail-closed jako z konzole
+> už dřív: chráněno je defaultně vše, veřejné jen to, co má explicitní `[AllowAnonymous]`/`.AllowAnonymous()`
+> (`/api/version`, `/api/cert-info`, `IncidentsController.QueueStatus`).
+
+> **Ověření hostname (04.09.2026, warn-only):** agent běží jako SYSTEM = autentizuje se strojovým účtem
+> (`DOMÉNA\HOSTNAME$`). Server proto může porovnat, čím se volající doopravdy prokázal, s tím, za koho se
+> v datech (`Hostname` v incidentech/heartbeatu) vydává – dřív se bralo bez ověření. Záměrně **jen loguje**
+> neshodu (Event Log + `ActivityLog`, kategorie „bezpecnost"), request neodmítá: formát identity v produkci
+> nešlo ověřit naživo, tvrdé odmítnutí při chybném předpokladu by umlčelo celý fleet naráz. Po pár dnech
+> bez falešných poplachů se má zpřísnit na `403` (`CallerIdentity.ParseMachineHostname`, čistá funkce, testy
+> v `tests/USBGuardian.Api.Tests/CallerIdentityTests.cs`).
 
 ## Konfigurace – klíčové hodnoty
 
@@ -273,6 +288,27 @@ jinak nezměnil žádný `.cs`. Dřív (`BeforeTargets=CoreGenerateAssemblyInfo`
 | API | `:5443/api/version` |
 | Agent | hlásí commit v heartbeatu → konzole „Agent verze" |
 
+## Testy a CI
+
+Do 04.09.2026 repo nemělo žádné C# testy (jen jeden JS test na UI). Dnes: **24 testů** ve dvou projektech,
+oba xUnit, bez mock frameworku – buď skutečné instance směrované do dočasného adresáře (agent), nebo čisté
+funkce beze závislosti na infrastruktuře (API):
+
+| Projekt | Co testuje | Počet |
+|---------|-----------|-------|
+| `tests/USBGuardian.Agent.Tests` | `WhitelistChecker`, `PolicyEnforcer` – expirace whitelistu, rozhodovací logika | 8 |
+| `tests/USBGuardian.Api.Tests` | `IncidentSpool` (zápis/čtení/mazání/karanténa poškozeného souboru), dedup klíč (`IncidentQueueWorker.MakeKey`), `CallerIdentity` (parsování Windows identity) | 16 |
+
+API testy sahají na `internal` metody přes `InternalsVisibleTo` (`server/USBGuardian.Api/AssemblyInfo.cs`) –
+řeší se tím, že např. `WindowsIdentity` nejde v testu snadno sestrojit, takže testovaná logika je rozdělená
+na čistou parsovací funkci (testovatelná) a tenký obal nad frameworkem (netestovaný, triviální).
+
+**CI (`.github/workflows/build-and-test.yml`, od 04.09.2026):** na každý push/PR do `main` buildne agenta,
+API i konzoli zvlášť (žádná společná `.sln` je nepokrývá) a spustí oba testovací projekty. Běží na
+`windows-latest` – nutnost, ne volba: agent/API/konzole používají Windows-only API (`WindowsIdentity`/
+`WindowsPrincipal` pro Negotiate auth, `AddWindowsService`, `EventLog` provider), na Linuxu by se to
+vůbec nezrestorovalo.
+
 ## Datový tok – incident
 
 ```
@@ -283,10 +319,43 @@ jinak nezměnil žádný `.cs`. Dřív (`BeforeTargets=CoreGenerateAssemblyInfo`
 5. NotificationService: Toast uživateli
 6. IncidentLogger: uložit do queue/log_MACHINE_DATE.json
 7. IncidentSync (1 min): odeslat na server /api/incidents
-8. IncidentsController: zařadit do IncidentQueue → vrátit 202 Accepted (NEpíše do DB)
-9. IncidentQueueWorker (async): odebrat z fronty a zapsat do SQL tabulky Incidents
-10. ActivityLogger: řádek do deníku „přijata dávka N incidentů ze stanice X" (fire-and-forget)
+8. IncidentsController: porovnat tvrzený `Hostname` s autentizovanou identitou volajícího (strojový účet) –
+   zatím jen loguje neshodu, request neodmítá (audit 04.09.2026, warn-only – viz níže)
+9. IncidentsController: `IncidentSpool` zapíše batch atomicky na disk (přežije pád procesu) → teprve PAK
+   zařadit do `IncidentQueue` → vrátit 202 Accepted
+10. IncidentQueueWorker (async): odebrat z fronty, dedup (`timestamp|serial|vendor|ProductId|PnpDeviceId`),
+    zapsat do SQL tabulky Incidents → smazat spool soubor (jen po úspěšném zápisu)
+11. ActivityLogger: řádek do deníku „přijata dávka N incidentů ze stanice X" (fire-and-forget)
 ```
+
+### Durabilita fronty incidentů (IncidentSpool)
+
+Do 04.09.2026 se `202 Accepted` vracelo hned po zařazení batche do paměťové `IncidentQueue` – pád API procesu
+mezi tímto potvrzením a zápisem do DB batch nenávratně ztratil (agent po 2xx odpovědi posune offset a víc ho
+nepošle, viz `IncidentSync.cs`). `IncidentSpool` (`server/USBGuardian.Api/Queue/IncidentSpool.cs`) tohle řeší
+vrstvou navíc mezi controllerem a frontou:
+
+```
+POST /api/incidents
+   → IncidentSpool.Write()  – atomický zápis (temp + move) na disk,
+                               C:\ProgramData\USBGuardian\incident-spool
+   → IncidentQueue.TryEnqueue()
+   ← 202 Accepted            (teprve TEĎ – "přijato" = přežije i pád procesu)
+
+IncidentQueueWorker (Channel reader)
+   → ProcessBatch() → SaveChangesAsync()
+   → IncidentSpool.Delete()  – POUZE po úspěšném zápisu do DB
+```
+
+Cokoliv zůstane na disku (pád procesu, nebo prostě běžný restart služby dřív, než `Channel` stihl
+vyprázdnit) se při **dalším startu služby přehraje jako první** (`ReplaySpoolAsync`), před čerstvým provozem.
+Případné vícenásobné přehrání dělá neškodným existující dedup v `ProcessBatch` – proto je dedup klíč
+rozšířený o `ProductId`/`PnpDeviceId` (viz níže) důležitý i pro tuhle vlastnost, ne jen pro samotnou
+deduplikaci resendů.
+
+Stav spoolu (počet čekajících souborů + stáří nejstaršího) je vidět na `/kontroly` (kontrola „Fronta
+incidentů (spool)") i strojově na `GET /api/incidents/queue/status` (anonymní endpoint, jen počty – bez
+obsahu incidentů, konzole na jiném stroji než API k tomu jinak nemá přístup).
 
 ## Deník provozu (ActivityLog)
 
@@ -475,13 +544,17 @@ Konzole má na `AppSettings` jen write (ne delete na `Incidents`), proto je enfo
 |---------|-------|
 | Per-serial blocklist | Zákaz konkrétního média, near-real-time k agentům (přednost před whitelistem) |
 | Hardening konzole | gMSA místo LocalSystem; dedikovaná `USB-Guardian-Admins`; HTTPS konzole; přesun API na APP_SERVER |
+| **ACL na TLS/RSA klíče** | `api-tls.pfx` a `whitelist_private.pem` na serveru – poslední nedořešená položka z auditu 04.09.2026, server-side zásah (Set-Acl), ne kód |
 | **Retence deníku** | `sp_PurgeActivityLog` existuje, ale **nikdo ji nevolá** – doplnit `activity.retentionDays` do Nastavení a volání do API (vzor: `RetentionService`) |
 | ~~Lokální konzole na fleetu~~ | **Rozhodnuto 04.09.2026: na fleetu ZAPNUTÁ, výhradně pro lokálního admina stanice.** Šablona v repu zůstává `false` (bezpečný default pro jiné prostředí), balíček pro fleet se staví s `true`; build na opačný stav upozorní |
 | Toast Privilege Separation | Helper process v user session – jednosměrné Pipes SYSTEM → user |
+| **Zpřísnění ověření hostname** | dnes warn-only (`CallerIdentity`) – po pár dnech bez falešných poplachů v Aktivitě přepnout na tvrdé odmítnutí (403) |
 
 > Hotovo (dřív pending): Admin UI (Blazor konzole + AD sync), **šifrovaná komunikace agent↔API**
 > (self-cert + pinning), centrální nastavení (vynucování/přístup/e-mail + alerty), **publikační/podpisový
-> workflow whitelistu** (klient = 1:1 kopie serveru, viz níže).
+> workflow whitelistu** (klient = 1:1 kopie serveru, viz níže), **durabilní fronta incidentů** (`IncidentSpool`),
+> **FallbackPolicy na API**, **dedup klíč rozšířený o ProductId/PnpDeviceId**, **první CI**
+> (`.github/workflows/build-and-test.yml` – build + testy na `windows-latest` při každém push/PR).
 
 ## Publikační/podpisový workflow whitelistu (automatický, klient = 1:1 kopie serveru)
 

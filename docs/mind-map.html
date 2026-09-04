@@ -86,14 +86,16 @@
         children:[
           {label:{cs:'Deník provozu', en:'Activity log'}, note:{cs:'kdo s kým mluvil a kdo co změnil', en:'who talked to whom and who changed what'}},
           {label:{cs:'Zmlklí agenti', en:'Silent agents'}, note:{cs:'práh v nastavení, dlaždice + ikona', en:'threshold in settings, tile + icon'}},
-          {label:{cs:'Kontroly stavu', en:'Health checks'}, note:{cs:'odškrtávaný seznam, export CSV/HTML/PDF', en:'checklist with results, CSV/HTML/PDF export'}},
+          {label:{cs:'Kontroly stavu', en:'Health checks'}, note:{cs:'16 kontrol, i strojově /api/health', en:'16 checks, also machine-readable via /api/health'}},
           {label:{cs:'E-mail a alerty', en:'E-mail and alerts'}, note:{cs:'upozornění nad incidenty', en:'notifications over incidents'}},
-          {label:{cs:'Retence dat', en:'Data retention'}, note:{cs:'incidenty se po nastavené době mažou', en:'incidents deleted after the configured period'}}
+          {label:{cs:'Retence dat', en:'Data retention'}, note:{cs:'incidenty se po nastavené době mažou', en:'incidents deleted after the configured period'}},
+          {label:{cs:'CI (GitHub Actions)', en:'CI (GitHub Actions)'}, note:{cs:'build + testy na každý push/PR', en:'build + tests on every push/PR'}}
         ]},
       { side:'right', color:'--c2',
         label:{cs:'Server', en:'Server'},
         children:[
           {label:{cs:'API', en:'API'}, note:{cs:'příjem incidentů, heartbeat, distribuce whitelistu', en:'incident intake, heartbeat, whitelist distribution'}},
+          {label:{cs:'IncidentSpool', en:'IncidentSpool'}, note:{cs:'batch přežije pád procesu, přehraje se při startu', en:'batch survives a process crash, replayed on startup'}},
           {label:{cs:'Admin konzole', en:'Admin console'}, note:{cs:'Blazor na app serveru, Windows autentizace', en:'Blazor on the app server, Windows authentication'}},
           {label:{cs:'SQL databáze', en:'SQL database'}, note:{cs:'incidenty, stanice, whitelist, deník', en:'incidents, stations, whitelist, activity log'}},
           {label:{cs:'AD sync', en:'AD sync'}, note:{cs:'inventář stanic z domény, klíč = hostname', en:'station inventory from the domain, key = hostname'}},
@@ -107,7 +109,9 @@
           {label:{cs:'Windows autentizace', en:'Windows authentication'}, note:{cs:'Kerberos; do konzole jen členové skupiny', en:'Kerberos; only group members reach the console'}},
           {label:{cs:'Oddělené deploy účty', en:'Separate deploy accounts'}, note:{cs:'jeden na stanice, druhý na server, konzole nikde', en:'one for stations, one for the server, the console nowhere'}},
           {label:{cs:'Least-privilege v SQL', en:'Least privilege in SQL'}, note:{cs:'zápis jen tam, kam komponenta opravdu píše', en:'writes only where the component really writes'}},
-          {label:{cs:'Podepsané PS skripty', en:'Signed PS scripts'}, note:{cs:'prostředí vynucuje AllSigned přes GPO', en:'the environment enforces AllSigned through GPO'}}
+          {label:{cs:'Podepsané PS skripty', en:'Signed PS scripts'}, note:{cs:'prostředí vynucuje AllSigned přes GPO', en:'the environment enforces AllSigned through GPO'}},
+          {label:{cs:'FallbackPolicy (API)', en:'FallbackPolicy (API)'}, note:{cs:'fail-closed defaultně, nezapomenutý [Authorize]', en:'fail-closed by default, no forgotten [Authorize]'}},
+          {label:{cs:'Ověření hostname', en:'Hostname verification'}, note:{cs:'tvrzení vs. autentizovaná identita, zatím warn-only', en:'claim vs. authenticated identity, warn-only for now'}}
         ]},
       { side:'right', color:'--c4',
         label:{cs:'Proč to je', en:'Why it exists'},

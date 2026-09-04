@@ -2389,12 +2389,14 @@ has been corrected.
 
 | Indicator | Value |
 |-----------|-------|
-| Stations on record (from AD) | 227 |
+| Stations on record (from AD) | 228 |
 | Stations reporting an agent | 4 (the pilot) |
-| Stations without an agent | 200 |
-| Incidents in 30 days | 29 (of which 20 warnings, 0 blocked) |
-| Approved media in the whitelist | 3 |
+| Stations without an agent | 201 (auto-enrollment deliberately in an opt-in gate, see 34.8) |
+| Incidents in the database (total) | 146 |
+| Approved media in the whitelist | 4 |
 | Enforcement mode | warning (blocking not switched on yet) |
+| Health checks (`/kontroly`, `/api/health`) | 16 |
+| C# tests (2 projects) | 24 (0 as of the morning of 2026-09-04) |
 
 In other words: **the system is finished and verified; the fleet-wide rollout and switching blocking on are
 decisions, not technical debt.** That is a more honest formulation than "deployed", which a table without
@@ -2409,6 +2411,91 @@ its fourth row would tempt one to write.
 | 17 (Operations, monitoring, retention) | Health checks and scheduled restarts were added; activity-log retention is open. |
 | 13 / 19 (Enforcement, limitations) | Break-glass was effectively unavailable because of the filtered token — fixed; the inconsistency around `localConsole.enabled` on the fleet persists. |
 | 20 (Roadmap) | New: activity-log retention, reconciling the local console on the fleet, upgrading `Microsoft.AspNetCore.Authentication.Negotiate` (NU1903). |
+| 12 (Security and threat model) | Extended with an independent audit and 6 concrete findings — see 34.7. |
+| 18 (Testing and live verification) | 0 → 24 C# tests, first CI — see 34.7.5. |
+| 19 (Limitations, risks and known weaknesses) | One audit item (ACL on the TLS/RSA keys) remains open as a documented known limitation, not an oversight. |
+
+### 34.7 External security audit and remediation (4 Sep 2026)
+
+An independent static audit of the public repo (after it went public on 4 Sep 2026, see 34.9) scored the
+architecture 9.0/10, the security implementation 7.3/10, testing 4.5/10, overall 7.9/10. Findings were
+verified directly in the code, not taken on faith — two of them turned out to be reproducible with an
+isolated test outside the repo (5.12.3 in HANDOFF). Each fix got its own commit, for isolation if something
+breaks. Six items were fixed in order:
+
+**34.7.1 An expired whitelist silently authorized devices.** `WhitelistChecker.IsAllowed()` just logged a
+warning and continued the lookup; `PolicyEnforcer.HandleDevice()` returned on `if (isAllowed) return` before
+`DetermineAction()` ever looked at the whitelist status — `onExpired` therefore never applied to a device
+that stayed in the (stale) list. The same hole existed in `DeviceMonitor.ReEnforceConnectedDevices()` for
+media already attached. Verified with a regression test that fails against the old code. Rolled out to the
+fleet the evening of 4 Sep 2026.
+
+**34.7.2 Whitelist write authorization was the same as for reads.** `WhitelistController` had a single
+policy (`USBGuardianClients`) across the whole controller, including `POST /api/whitelist/devices` — a
+station account could theoretically write security policy, not just read it. Authorization moved to
+individual actions, a new policy `USBGuardianAdmins` (fail-closed — an empty `AdminGroups` leaves that one
+path inaccessible, not open to everyone).
+
+**34.7.3 The API listened unencrypted even in production.** Port 5050 (HTTP) was meant for development
+only, but the real `appsettings.local.json` on the server carried its own `Kestrel:Endpoints:Http:Url` —
+Kestrel reads that section INDEPENDENTLY of the code and the two sources add up rather than replace each
+other. Trying to null the value out of `IConfiguration` at runtime **did not work** (verified with an
+isolated test) — the fix is a fail-fast with a clear message if production ever sees that section exist,
+plus manually removing the section from the real config on the server.
+
+**34.7.4 `AllowedGroups.Length == 0` meant fail-open.** The code comment admitted it: "don't get in the way
+when unconfigured." An empty or missing configuration would therefore silently let in anyone authenticated
+in the domain. Changed to fail-fast at startup — better not to start than to run with a broken configuration
+that looks functional.
+
+**34.7.5 The repo had no C# tests at all.** As of the morning of 4 Sep 2026 the only test in the project was
+a single JS test for the UI. `tests/USBGuardian.Agent.Tests` was created (a regression for 34.7.1), then
+extended with `tests/USBGuardian.Api.Tests`. By the end of the day: **24 tests**, xUnit, no mock framework —
+either real instances routed into a temp directory (`Path.GetTempPath()/Guid`), or pure functions with no
+infrastructure dependency. The **first CI** was also set up
+(`.github/workflows/build-and-test.yml`) — builds the three main components plus runs both test projects on
+every push/PR, on `windows-latest` (required because of `WindowsIdentity`/`AddWindowsService`/`EventLog`).
+
+**34.7.6 The remaining findings, fixed in a follow-up iteration the same day:**
+
+| Finding | Fix | Deployed |
+|---------|-----|----------|
+| `202 Accepted` was returned BEFORE the DB write — a crash in between lost the batch | `IncidentSpool`: atomic disk write before the 202, the worker deletes only after a successful DB write, replayed on startup | Yes, verified live |
+| The dedup key (`timestamp\|serial\|vendor`) was missing `ProductId`/`PnpDeviceId` — a collision risk for devices sharing a serial number | The key extended with both fields | Yes, verified live |
+| The API had no default authorization policy — a new endpoint with no attribute would be silently public | `FallbackPolicy = USBGuardianClients`, fail-closed like the console | Yes, verified live |
+| The hostname in the data (`Hostname` in incidents/heartbeat) was taken on faith, unverified against the caller | Compared against the caller's authenticated machine-account identity — **deliberately logs only**, doesn't block (see 34.7.7) | Yes, verified live |
+
+**34.7.7 Why hostname verification stays warn-only.** A hard rejection on a wrong assumption about the
+Windows identity format (`DOMAIN\HOSTNAME$`) would silence the whole fleet at once — exactly the kind of
+silent failure the entire health-checks page exists to catch. The format couldn't be verified with an
+isolated test (unlike 34.7.3), because it requires a real Kerberos authentication from a real agent, not
+just a unit test. Decision: deploy in observation mode (logs to `ActivityLog`, category "bezpecnost"), wait
+a few days with no false positives in live traffic, only then tighten to `403`. The same pattern as finding
+34.7.1 (code review instead of a live test where a live test cannot be run safely) — a consistent approach
+to risk, not an exception.
+
+**34.7.8 What remains open.** ACLs on `api-tls.pfx` and `whitelist_private.pem` on the server — a
+server-side action (`Set-Acl`), not code, outside the reach of automated review. The `EventId`/`PnpDeviceId`-only
+dedup (34.7.6) fixes the key collision, but not a durable whitelist queue or hostname enforcement
+(34.7.7) — both consciously deferred, not overlooked.
+
+### 34.8 Side finding: station coverage vs. auto-enrollment (not a bug)
+
+The "Station coverage" check reports 201 stations without an agent; "Agent auto-enrollment" in live mode
+reports "no stations to deploy." The code (`AgentDeployService.RunOnceAsync`) implies `deploy.defaultEnroll`
+must be explicitly `false` in Settings — with the code's own default (`true`), a run against 201 candidates
+would return at least `deploy.maxPerRun` targets, not zero. So this is a **deliberate opt-in gate** (the
+"pilot → sample → fleet" rollout from 34.4/34.5), not a bug in the automation — confirmed by reasoning from
+the code without access to the live database, precisely so the difference between "the automation is broken"
+and "the automation is doing exactly what it's supposed to" can be told apart, not just guessed at.
+
+### 34.9 The repository going public (4 Sep 2026)
+
+The repo `Anamax443/usb-guardian` became **public** on 4 Sep 2026. Company-specific values (hostnames, IP
+addresses, the domain and account names) were replaced with placeholders before publishing (`APP_SERVER`,
+`SQL_SERVER`, `DOMENA`…); the real values stay local in the gitignored `docs/local-values.local.md`. Going
+public is also context for 34.7 — the external audit was possible precisely because the code became
+readable from the outside.
 
 ---
 
@@ -2435,6 +2522,9 @@ its fourth row would tempt one to write.
 | **AllSigned** | The GPO policy requiring every PS script run on a machine to be signed. |
 | **ToastHelper** | A helper process in the user session that shows Windows notifications (the agent as SYSTEM cannot do it directly). |
 | **Watchdog** | A scheduled task guarding that the agent service runs (every 3 min). |
+| **IncidentSpool** | An on-disk staging area for incident batches between receipt on the API and the DB write — survives a process crash (since 4 Sep 2026). |
+| **FallbackPolicy** | The default ASP.NET Core authorization policy — protects even an endpoint with no `[Authorize]` attribute of its own. |
+| **Warn-only** | A check that only logs a detected anomaly but does not stop processing — a step before hard enforcement. |
 
 ## Appendix B — Configuration key reference
 
@@ -2522,9 +2612,11 @@ GRANT SELECT, INSERT         ON dbo.ActivityLog        TO [DOMAIN\APP_SERVER$]; 
 | GET | `/api/incidents` | (the console) | A listing for the UI |
 | GET | `/api/whitelist` | Kerberos (group) | The signed blob verbatim |
 | GET | `/api/whitelist/signature` | Kerberos (group) | The base64 signature |
+| GET | `/api/incidents/queue/status` | — (anonymous, counts only) | Status of the in-memory queue and the disk spool, for health checks (a different machine than the API) |
 | GET | `/api/cert-info` | — | The cert thumbprint (pinning) |
 | GET | `/api/version` | — | The running API's commit |
 | GET | (console) `/api/version` | — | The console's commit |
+| GET | (console) `/api/health` | console auth (FallbackPolicy) | 16 checks, machine-readable, `200`=OK/`503`=at least one failure |
 | GET | (console) `/export/incidents.csv` | console auth | A CSV export (inherits the filter) |
 | GET | (console) `/export/manager` | console auth | The management report |
 | — the agent's local console (loopback :5080, admin-only) — | | | |
@@ -2532,6 +2624,12 @@ GRANT SELECT, INSERT         ON dbo.ActivityLog        TO [DOMAIN\APP_SERVER$]; 
 | POST | `/api/override` , `/api/override/clear` | a local admin | Break-glass |
 | POST | `/api/unblock-all` | a local admin | An immediate return of blocked media |
 | POST | `/api/restart` | a local admin | A self-restart of the service |
+
+> **Since 4 Sep 2026:** the API has `FallbackPolicy = USBGuardianClients` — an endpoint with no Auth column
+> shown above would be protected the same as `/api/heartbeat`, not public (see 34.7.6). `POST /api/incidents`
+> and `GET /api/heartbeat` also compare `Hostname`/`hostname` from the data against the caller's
+> authenticated identity (34.7.7) — for now this only logs a mismatch, it is not an additional authorization
+> tier beyond the table above.
 
 ## Appendix E — Mapping NIS2 / ISO 27001 → features
 

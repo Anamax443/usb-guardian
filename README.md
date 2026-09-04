@@ -33,7 +33,7 @@ technické opatření pro **NIS2 / zákon 181/2014 Sb. / ISO 27001**.
 | 23 | **Retence dat** – Nastavení (konzole) + `RetentionService` v API (maže staré incidenty); **stránka Databáze** (přehled obsahu DB) | ✅ |
 | 24 | **Deploy targeting** – default pro nové PC (Nastavení) + per-stanice a hromadné zařazení/vyřazení v Stanicích | ✅ |
 | 25 | **Lokální konzole agenta** ukazuje i seznam schválených zařízení (whitelist) + verzi agenta | ✅ |
-| 26 | **HTML animace** fungování systému (`/how-it-works.html`, 13 kroků: datový tok + vynucování) | ✅ |
+| 26 | **HTML animace** fungování systému (`/how-it-works.html`, 16 kroků: datový tok + vynucování + spool) | ✅ |
 | 27 | **Publikační/podpisový workflow whitelistu (automatický)** – změna katalogu → konzole sama vydá a **interně podepíše** (server-side RSA, klíč na APP_SERVER) → API servíruje podepsaný blob verbatim → **klient = 1:1 kopie serveru** do ~2 min; agent O(1) match (scale 10k) | ✅ |
 | 28 | **Vynucování server→agent (Fáze 2)** – heartbeat nese `policy.enforce` (APP_SERVER = pravda) → agent reálně **blokuje/varuje** dle serveru | ✅ |
 | 29 | **Lokální break-glass (Fáze 3)** – admin stanice dočasně vypne blokování offline (lokální konzole), perzistované, **logované** → server; při spojení se serverem se zruší | ✅ |
@@ -47,9 +47,14 @@ technické opatření pro **NIS2 / zákon 181/2014 Sb. / ISO 27001**.
 | 37 | **Deník provozu (Aktivita)** – `ActivityLog`: heartbeaty a odpovědi serveru, příjem dávek, publikace whitelistu, ruční zásahy operátora; API i konzole píšou do téže tabulky, stránka s filtry, živým režimem a exportem CSV | ✅ |
 | 38 | **Lokální konzole: přihlášení lokálního admina** – loopback token je síťový a u lokálního účtu z něj Windows odebere Administrators (`LocalAccountTokenFilterPolicy`); kontrola nově uznává i filtrovaný token a odmítnutí ukáže, **jako kdo** byl člověk viděn | ✅ |
 | 39 | **Zavřeno nešifrované HTTP 5050** – naslouchá jen v `Development`, produkce (Windows služba) jen HTTPS `:5443` | ✅ |
+| 40 | **Externí bezpečnostní audit + náprava** (04.09.2026) – 6 nálezů, 5 opravených a nasazených, 1 záměrně jen v pozorovacím režimu (viz Bezpečnost) | ✅ |
+| 41 | **Durabilní fronta incidentů** – `IncidentSpool` zapíše batch na disk PŘED potvrzením API, přežije pád procesu, přehraje se při restartu; kontrola „Fronta incidentů (spool)" na `/kontroly` | ✅ |
+| 42 | **První testy a CI** – 24 C# testů (0 do 04.09.2026), `.github/workflows/build-and-test.yml` na každý push/PR | ✅ |
 | – | Per-serial **blocklist** + blokace už-připojeného média | 🔜 |
 | – | Monitoring expirace podpisového certu | 🔜 |
 | – | **Retence deníku** – `sp_PurgeActivityLog` existuje, ale nikdo ji nevolá | 🔜 |
+| – | ACL na TLS/RSA klíče na serveru (poslední otevřená položka z auditu) | 🔜 |
+| – | Zpřísnění ověření hostname (dnes warn-only) na tvrdé odmítnutí | 🔜 |
 
 ## Architektura
 
@@ -355,6 +360,13 @@ GRANT INSERT, UPDATE ON dbo.WhitelistVersions TO [DOMENA\APP_SERVER$];          
 - **Oddělené deploy identity** – kompromitace jedné nesáhne na obě vrstvy (fleet × server).
 - `*.local.json` gitignored.
 - Lokální konzole agenta: loopback, jen lokální admin, zápis omezený na break-glass a restart služby.
+- **`FallbackPolicy` na API** (od 04.09.2026) – chráněno je defaultně vše, veřejné jen to, co má explicitní
+  `[AllowAnonymous]`. Nový endpoint bez atributu tak nemůže omylem skončit tiše veřejný.
+- **Ověření hostname** (od 04.09.2026, zatím warn-only) – server porovnává hostname z dat s autentizovanou
+  identitou strojového účtu volajícího; zatím jen loguje neshodu do Aktivity, po pár dnech bez falešných
+  poplachů se zpřísní na tvrdé odmítnutí.
+- **Nezávislý bezpečnostní audit** (04.09.2026) prošel repo po zveřejnění – 6 nálezů, 5 opravených a
+  nasazených týž den (viz `docs/oponentura.md` kap. 34.7 pro detail každého).
 
 ## Repo struktura
 

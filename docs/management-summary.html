@@ -69,22 +69,22 @@
 
 <div class="page">
   <h1>USB Guardian</h1>
-  <p class="sub" data-cs="Kontrola paměťových médií na firemních počítačích · shrnutí pro vedení · stav k 4. 9. 2026"
-                 data-en="Control of removable media on company computers · management summary · status as of 4 Sep 2026"></p>
+  <p class="sub" data-cs="Kontrola paměťových médií na firemních počítačích · shrnutí pro vedení · stav k 4. 9. 2026 (16:00)"
+                 data-en="Control of removable media on company computers · management summary · status as of 4 Sep 2026 (16:00)"></p>
 
   <p class="lead" data-cs="Cizí USB flash disk zapojený do firemního počítače je nejjednodušší cesta, jak z firmy odejdou data — a zároveň jak se do ní dostane škodlivý kód. USB Guardian dává IT přehled o tom, jaká média se ve firmě používají, umožní schválit jen ta vlastní a ostatní zablokovat. Vše je doložitelné: kdo, kdy, jaké médium a co se s ním stalo."
                     data-en="A foreign USB stick plugged into a company computer is the easiest way for data to leave the company — and for malicious code to enter it. USB Guardian gives IT a picture of which media are in use, lets it approve only company-owned ones and block the rest. Everything is evidenced: who, when, which medium and what happened."></p>
 
   <h2 data-cs="Kde jsme dnes" data-en="Where we are today"></h2>
   <div class="kpi">
-    <div><b>227</b><span data-cs="počítačů v evidenci" data-en="computers on record"></span></div>
+    <div><b>228</b><span data-cs="počítačů v evidenci" data-en="computers on record"></span></div>
     <div><b>4</b><span data-cs="s nainstalovaným agentem" data-en="with the agent installed"></span></div>
-    <div><b>29</b><span data-cs="událostí za 30 dní" data-en="events in 30 days"></span></div>
-    <div><b>20</b><span data-cs="z toho neschválené médium" data-en="of them an unapproved medium"></span></div>
-    <div><b>3</b><span data-cs="schválená média" data-en="approved media"></span></div>
+    <div><b>146</b><span data-cs="uložených incidentů celkem" data-en="incidents on record, total"></span></div>
+    <div><b>4</b><span data-cs="schválená média" data-en="approved media"></span></div>
+    <div><b>16</b><span data-cs="automatických kontrol provozu" data-en="automated operations checks"></span></div>
   </div>
-  <p data-cs="Systém je hotový a v provozu: server, databáze i konzole běží, čtyři pilotní stanice hlásí data spolehlivě. Zbývá plošné rozvezení agenta na zbývající počítače — technicky je připravené a probíhá bez zásahu uživatele."
-     data-en="The system is finished and running: server, database and console are live and four pilot workstations report reliably. What remains is the fleet-wide rollout of the agent to the rest of the computers — it is technically ready and runs without user involvement."></p>
+  <p data-cs="Systém je hotový a v provozu: server, databáze i konzole běží, čtyři pilotní stanice hlásí data spolehlivě. Nezávislý bezpečnostní audit (4. 9. 2026) našel šest dílčích zlepšení — všechna jsou dnes opravená a nasazená, poslední záměrně jen v pozorovacím režimu, než se pár dní potvrdí na provozu. Přibyla i automatická kontrola při každé změně kódu (CI), ať se chyba odhalí dřív, než se dostane na server. Zbývá plošné rozvezení agenta na zbývající počítače — technicky je připravené a probíhá bez zásahu uživatele."
+     data-en="The system is finished and running: server, database and console are live and four pilot workstations report reliably. An independent security audit (4 Sep 2026) found six areas to improve — all are now fixed and deployed, the last one deliberately in observation mode until confirmed in production for a few days. Every code change is now also checked automatically (CI) before it can reach the server. What remains is the fleet-wide rollout of the agent to the rest of the computers — it is technically ready and runs without user involvement."></p>
 
   <h2 data-cs="Jak to funguje" data-en="How it works"></h2>
   <div class="flow">
@@ -114,6 +114,8 @@
         <tr><td data-cs="Seznam schválených firemních médií" data-en="List of approved company media"></td><td><span class="tag wip" data-cs="doplnit" data-en="to complete"></span></td></tr>
         <tr><td data-cs="Přehled provozu a auditní deník" data-en="Operations overview and audit log"></td><td><span class="tag ok" data-cs="hotovo" data-en="done"></span></td></tr>
         <tr><td data-cs="Šifrovaná komunikace a podepsaný seznam" data-en="Encrypted communication and signed list"></td><td><span class="tag ok" data-cs="hotovo" data-en="done"></span></td></tr>
+        <tr><td data-cs="Nezávislý bezpečnostní audit" data-en="Independent security audit"></td><td><span class="tag ok" data-cs="hotovo" data-en="done"></span></td></tr>
+        <tr><td data-cs="Automatická kontrola kódu (CI)" data-en="Automated code checks (CI)"></td><td><span class="tag ok" data-cs="hotovo" data-en="done"></span></td></tr>
       </table>
     </div>
   </div>
