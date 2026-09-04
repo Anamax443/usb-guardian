@@ -37,9 +37,16 @@ if /I "%KANAL%"=="stable" (
 )
 
 set "ZDROJ=%ARCH%\%COMMIT%"
-set "LOGDIR=%ProgramData%\USBGuardian\deploy"
+
+rem Log vedle archivu, NE v ProgramData\USBGuardian - viz Archive-AgentVersion.cmd:
+rem ten adresar je ACL zamceny na SYSTEM/Administrators, bezny ucet do nej nezapise.
+set "LOGDIR=%ARCH%\_logs"
 if not exist "%LOGDIR%" mkdir "%LOGDIR%" >nul 2>&1
 set "LOG=%LOGDIR%\agent-version.log"
+if not exist "%LOGDIR%" (
+  echo CHYBA: log adresar "%LOGDIR%" se nepodarilo vytvorit - zkontroluj prava zapisu do "%ARCH%".
+  exit /b 9
+)
 
 echo.
 if not exist "%ZDROJ%\USBGuardian.exe" (
@@ -69,6 +76,11 @@ robocopy "%ZDROJ%" "%PUB%" /MIR /XF VERSION.txt /R:2 /W:2 /NFL /NDL /NJH /NP >> 
 if %ERRORLEVEL% GEQ 8 (
   echo CHYBA: kopie z archivu selhala ^(robocopy %ERRORLEVEL%^).
   call :log "CHYBA robocopy %ERRORLEVEL%"
+  exit /b 4
+)
+if not exist "%PUB%\USBGuardian.exe" (
+  echo CHYBA: po kopii neni v "%PUB%" USBGuardian.exe - prepnuti kanalu fakticky neprobehlo.
+  call :log "CHYBA: %PUB% bez USBGuardian.exe po kopii"
   exit /b 4
 )
 

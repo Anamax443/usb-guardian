@@ -27,21 +27,38 @@ if "%PUB%"=="" set "PUB=C:\Apps\USBGuardianAgentPublish"
 if "%SRC%"=="" goto :usage
 if "%COMMIT%"=="" goto :usage
 
-set "LOGDIR=%ProgramData%\USBGuardian\deploy"
-if not exist "%LOGDIR%" mkdir "%LOGDIR%" >nul 2>&1
-set "LOG=%LOGDIR%\agent-version.log"
-
 if not exist "%SRC%\USBGuardian.exe" (
   echo CHYBA: ve zdroji "%SRC%" neni USBGuardian.exe.
   exit /b 2
 )
 
 if not exist "%ARCH%" mkdir "%ARCH%" >nul 2>&1
+if not exist "%ARCH%" (
+  echo CHYBA: archiv "%ARCH%" se nepodarilo vytvorit - zkontroluj prava zapisu.
+  exit /b 8
+)
+
+rem Log vedle archivu, NE v ProgramData\USBGuardian - ten adresar je ACL zamceny na
+rem SYSTEM/Administrators (agent tam drzi whitelist a frontu incidentu), bezny ucet
+rem do nej nezapise. Drive "mkdir" ticha selhal a nasledujici presmerovani ">>" do
+rem neexistujici cesty vypadlo s chybou na obrazovku - a i tak skript vypsal "HOTOVO",
+rem i kdyz se nezkopirovalo vubec nic.
+set "LOGDIR=%ARCH%\_logs"
+if not exist "%LOGDIR%" mkdir "%LOGDIR%" >nul 2>&1
+set "LOG=%LOGDIR%\agent-version.log"
+if not exist "%LOGDIR%" (
+  echo CHYBA: log adresar "%LOGDIR%" se nepodarilo vytvorit - zkontroluj prava zapisu do "%ARCH%".
+  exit /b 9
+)
 
 echo Ukladam verzi %COMMIT% do archivu...
 robocopy "%SRC%" "%ARCH%\%COMMIT%" /MIR /R:2 /W:2 /NFL /NDL /NJH /NP >> "%LOG%" 2>&1
 if %ERRORLEVEL% GEQ 8 (
   echo CHYBA: ulozeni do archivu selhalo ^(robocopy %ERRORLEVEL%^).
+  exit /b 3
+)
+if not exist "%ARCH%\%COMMIT%\USBGuardian.exe" (
+  echo CHYBA: po kopii neni v archivu "%ARCH%\%COMMIT%\USBGuardian.exe" - archivace fakticky neprobehla.
   exit /b 3
 )
 call :log "%DATE% %TIME%  archiv += %COMMIT%  (%USERNAME%)"
