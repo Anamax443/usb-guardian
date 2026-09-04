@@ -50,9 +50,11 @@ public class DeviceMonitor : BackgroundService
     private readonly ConcurrentDictionary<int, (string DriveLetter, DateTime DetectedAt)>
         _pendingDriveLetters = new();
 
-    // Aktivní spojení – pro korelaci s disconnect eventem
-    // Key: PnpDeviceId, Value: (FriendlyName, ConnectedAt)
-    private readonly ConcurrentDictionary<string, (string FriendlyName, DateTime ConnectedAt)>
+    // Aktivní spojení – pro korelaci s disconnect eventem.
+    // Key: PnpDeviceId, Value: (FriendlyName, ConnectedAt, DeviceKey, Size)
+    // DeviceKey a Size se drží proto, aby uživatelská konzole uměla u připojeného média ukázat,
+    // čím se prokazuje (VID:PID:sériové číslo) — bez toho nemá uživatel co poslat IT.
+    private readonly ConcurrentDictionary<string, (string FriendlyName, DateTime ConnectedAt, string DeviceKey, string Size)>
         _activeConnections = new();
 
     private const int PairingTimeoutSeconds  = 30;
@@ -79,12 +81,14 @@ public class DeviceMonitor : BackgroundService
     // --------------------------------------------------------
     // Read-only snapshot pro lokální konzoli (živý stav)
     // --------------------------------------------------------
-    public record ActiveConnectionInfo(string PnpDeviceId, string FriendlyName, DateTime ConnectedAt);
+    public record ActiveConnectionInfo(
+        string PnpDeviceId, string FriendlyName, DateTime ConnectedAt, string DeviceKey, string Size);
 
     /// <summary>Aktuálně připojená sledovaná média (kopie, thread-safe).</summary>
     public IReadOnlyList<ActiveConnectionInfo> GetActiveConnections() =>
         _activeConnections
-            .Select(kv => new ActiveConnectionInfo(kv.Key, kv.Value.FriendlyName, kv.Value.ConnectedAt))
+            .Select(kv => new ActiveConnectionInfo(
+                kv.Key, kv.Value.FriendlyName, kv.Value.ConnectedAt, kv.Value.DeviceKey, kv.Value.Size))
             .ToList();
 
     /// <summary>Čas poslední WMI události (UTC) – indikátor živosti monitoringu.</summary>
@@ -467,7 +471,8 @@ public class DeviceMonitor : BackgroundService
                 _policyEnforcer.HandleDevice(device, _whitelistChecker.GetVersion(), false, _whitelistChecker.GetStatus());
 
                 if (!string.IsNullOrEmpty(device.PnpDeviceId))
-                    _activeConnections.TryAdd(device.PnpDeviceId, (device.FriendlyName, DateTime.UtcNow));
+                    _activeConnections.TryAdd(device.PnpDeviceId,
+                        (device.FriendlyName, DateTime.UtcNow, device.UniqueKey, device.SizeFormatted));
                 n++;
             }
 
@@ -525,7 +530,8 @@ public class DeviceMonitor : BackgroundService
         // Zaregistrovat do aktivních spojení pro budoucí disconnect tracking
         if (!string.IsNullOrEmpty(device.PnpDeviceId))
         {
-            _activeConnections[device.PnpDeviceId] = (device.FriendlyName, connectedAt);
+            _activeConnections[device.PnpDeviceId] =
+                (device.FriendlyName, connectedAt, device.UniqueKey, device.SizeFormatted);
             _logger.LogDebug(
                 "Aktivní spojení registrováno: {PnpId}", device.PnpDeviceId);
         }

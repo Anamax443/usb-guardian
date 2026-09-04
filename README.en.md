@@ -154,10 +154,28 @@ them into `Computers`. Keyed by **hostname** (not IP – stations have dynamic a
 automatically from the server (`new DirectoryEntry()`, nothing hardcoded). Reconciliation:
 *in AD ⨯ reporting an agent* → list of stations missing the agent.
 
-## Agent local admin console
+## Agent local console (two views by role)
 
-Optional (`localConsole.enabled` in `agent.config.local.json`, off in the template). `HttpListener`
-on `127.0.0.1:5080`, **local admins only** – live agent state: **the list of approved devices (whitelist)**,
+One port, two views — **the role decides what a person sees**:
+
+| | An ordinary account (user page) | A local admin (full console) |
+|---|---|---|
+| Protection state (blocking / warning only / temporarily off) | ✅ | ✅ |
+| Attached media + whether they are approved | ✅ | ✅ |
+| The identification of an unapproved medium + "copy for IT" | ✅ | ✅ |
+| The list of approved media (whitelist) | ❌ | ✅ |
+| Incident queue, WMI watchdog, diagnostics | ❌ | ✅ |
+| Break-glass, return media, restart the service | ❌ | ✅ |
+
+The **user page** (`GET /`, data from `GET /api/muj-stav`) answers the question people call IT about:
+*"why doesn't my flash drive work."* It shows whether media are being checked, which of the attached ones is
+unapproved and **what identifies it** (`VID:PID:serial`) — with a button that copies it into a message for IT.
+The whitelist is deliberately **not** shown there: knowing approved serial numbers weakens the protection.
+An admin can open the same view at `/uzivatel`, to see exactly what the user is looking at during a call.
+Render check: `node tests/user-page.test.mjs`.
+
+The **full console** is unchanged (`localConsole.enabled` in `agent.config.local.json`, off in the template).
+`HttpListener` on `127.0.0.1:5080`, **local admins only** – live agent state: **the list of approved devices (whitelist)**,
 whitelist status+version, **agent version (commit)**, WMI watchdog, queue, connected media and recent events.
 Besides reading it offers three actions: **break-glass** (switch blocking off temporarily while offline),
 **return all media now** and **restart the service**. Uses `HttpListener` (not Kestrel) so the agent needs no

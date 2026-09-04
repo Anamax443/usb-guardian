@@ -135,6 +135,29 @@ agent itself disabled, at once** – a manual safety net next to the automatic r
 `cmd: sc stop → pause → sc start`; a local admin triggers it from the dashboard, no server or domain admin
 on the clients is needed).
 
+### Two views on one port (the role decides what a person sees)
+
+The console does not turn an ordinary account away — it **shows that person their own situation**. The fork is
+a single place in `HandleRequest`: a local admin goes to the full dashboard, anyone else to the user page.
+
+| Endpoint | Who | What it returns |
+|----------|-----|-----------------|
+| `GET /`, `GET /uzivatel` | anyone logged on locally | the user page (HTML) |
+| `GET /api/muj-stav` | anyone logged on locally | a narrow slice of the state: the protection mode, attached media and their `VID:PID:SN` key |
+| `GET /api/status`, every `POST` | a local admin only | the full state and the writing actions; otherwise 403 with an explanation |
+
+The user page does **not** see the whitelist (knowing approved serial numbers weakens the protection), the
+incident queue or the diagnostics, and it has no writing action at all — break-glass stays with the admin.
+What it does show for an unapproved medium is its identification, with a button that copies it into a message
+for IT; that is the whole point of the page: to answer "why doesn't my flash drive work" before the person
+picks up the phone.
+
+So that there is something to show, `DeviceMonitor` now keeps the **medium's key and size** alongside an
+active connection (previously only the name and the connect time). The rendering is guarded by
+`node tests/user-page.test.mjs`: it reads the HTML straight out of the agent's source and checks that the
+states and badges match the data (blocking / warning only / break-glass, approved / blocked, the
+identification only for an unapproved medium).
+
 ### Local console authorization – the filtered token
 
 A request to `127.0.0.1` is, as far as Windows is concerned, a **network logon**. For a **local** account,

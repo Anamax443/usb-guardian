@@ -2290,6 +2290,7 @@ dokumentace, které to popisovaly jako funkci pro uživatele, byly opraveny.
 | **Denní self-restart agenta** | Totéž z druhé strany: agent si restart řídí sám, i když na server nedosáhne. |
 | **Filtry a vyřazení v Stanicích** | Filtry po sloupcích + trvalé „Ignorovat", které hromadné akce nepřepíšou. |
 | **Vzhled z banky UI** | Přepínatelný v Nastavení, přežije překliknutí mezi stránkami. |
+| **Uživatelská stránka lokální konzole** | Běžný účet místo odmítnutí vidí svou situaci: jestli se média kontrolují, které z připojených je neschválené a čím se prokazuje (`VID:PID:SN` + „zkopírovat pro IT"). Whitelist, diagnostika ani break-glass tam nejsou — ty zůstávají lokálnímu adminovi. Řeší nejčastější dotaz na helpdesk, aniž by komukoli rozšířila práva. |
 
 ### 34.5 Aktuální provozní čísla (4. 9. 2026)
 

@@ -2381,6 +2381,7 @@ has been corrected.
 | **A daily agent self-restart** | The same from the other side: the agent handles its own restart even when it cannot reach the server. |
 | **Filters and exclusion in Stations** | Per-column filters + a permanent "Ignore" that bulk actions do not override. |
 | **The bank UI look** | Switchable in Settings, surviving navigation between pages. |
+| **The local console's user page** | Instead of a refusal, an ordinary account sees its own situation: whether media are being checked, which attached medium is unapproved and what identifies it (`VID:PID:SN` + "copy for IT"). The whitelist, the diagnostics and break-glass are not there — those stay with the local admin. It answers the most common helpdesk question without widening anyone's rights. |
 
 ### 34.5 Current operational figures (4 Sep 2026)
 

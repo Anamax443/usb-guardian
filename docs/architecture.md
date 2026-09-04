@@ -131,6 +131,27 @@ vedle automatického vrácení) · `POST /api/restart` (**restart klientské slu
 restartne vlastní službu odděleným `cmd: sc stop → pauza → sc start`; lokální admin to spustí z dashboardu, žádný
 server/admin na klientech netřeba).
 
+### Dva pohledy na jednom portu (role rozhoduje, co člověk uvidí)
+
+Konzole běžný účet neodmítá — **ukáže mu jeho vlastní situaci**. Rozcestí je jediné místo v `HandleRequest`:
+je-li volající lokální admin, jde na plný dashboard, jinak na uživatelskou stránku.
+
+| Endpoint | Kdo | Co vrací |
+|----------|-----|----------|
+| `GET /`, `GET /uzivatel` | kdokoli lokálně přihlášený | uživatelská stránka (HTML) |
+| `GET /api/muj-stav` | kdokoli lokálně přihlášený | úzký výřez stavu: režim ochrany, připojená média a jejich klíč `VID:PID:SN` |
+| `GET /api/status`, všechny `POST` | jen lokální admin | plný stav a zapisující akce; jinak 403 s vysvětlením |
+
+Uživatelská stránka **nevidí** whitelist (znalost schválených sériových čísel ochranu oslabuje), frontu
+incidentů ani diagnostiku a nemá jedinou zapisující akci — break-glass zůstává adminovi. Zato u neschváleného
+média ukáže jeho identifikaci a tlačítkem ji zkopíruje do zprávy pro IT; to je celý smysl té stránky:
+odpovědět na „proč mi nejde flashka" dřív, než člověk zvedne telefon.
+
+Aby bylo co ukázat, drží `DeviceMonitor` u aktivního spojení i **klíč média a velikost** (dřív jen jméno a čas
+připojení). Vykreslení hlídá `node tests/user-page.test.mjs`: čte HTML přímo ze zdrojáku agenta a kontroluje,
+že stavy a značky odpovídají datům (blokuje / jen hlásí / break-glass, schváleno / zablokováno, identifikace
+jen u neschváleného).
+
 ### Autorizace lokální konzole – filtrovaný token
 
 Požadavek na `127.0.0.1` je z pohledu Windows **síťové přihlášení**. U **lokálního** účtu z takového tokenu

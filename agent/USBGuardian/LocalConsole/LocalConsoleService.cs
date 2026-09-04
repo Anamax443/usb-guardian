@@ -120,18 +120,19 @@ public class LocalConsoleService : BackgroundService
     {
         try
         {
-            // ── Authorizace: pouze lokální admin ──────────────────
-            if (!IsLocalAdmin(ctx.User))
-            {
-                var kdo = PopisIdentity(ctx.User);
-                _logger.LogWarning("Lokální konzole: odmítnut přístup ({User})", kdo);
-                WriteBytes(ctx, 403, "text/html; charset=utf-8",
-                    Encoding.UTF8.GetBytes(OdmitnutoHtml(kdo)));
-                return;
-            }
-
             var path   = ctx.Request.Url?.AbsolutePath ?? "/";
             var method = ctx.Request.HttpMethod;
+
+            // ── Autorizace: role rozhoduje, CO člověk uvidí ───────
+            // Lokální admin → plná konzole (diagnostika, whitelist, break-glass, restart).
+            // Kdokoli jiný → uživatelská stránka: jen jeho vlastní situace (co má připojené,
+            // jestli se blokuje, čím se médium prokazuje). Žádný whitelist, žádná fronta,
+            // žádná zapisující akce — blokování smí vypnout dál jen admin.
+            if (!IsLocalAdmin(ctx.User))
+            {
+                HandleUzivatel(ctx, path, method);
+                return;
+            }
 
             // Break-glass (jediná zapisující akce – admin-only, loopback): dočasné vypnutí blokování offline.
             if (method == "POST" && path.Equals("/api/override", StringComparison.OrdinalIgnoreCase))
@@ -168,6 +169,16 @@ public class LocalConsoleService : BackgroundService
             {
                 WriteJson(ctx, BuildStatus());
             }
+            // Admin si může zobrazit uživatelský pohled — aby při hovoru s uživatelem viděl
+            // přesně to, co má ten člověk před sebou, a ne jen svůj dashboard.
+            else if (path.Equals("/uzivatel", StringComparison.OrdinalIgnoreCase))
+            {
+                WriteHtml(ctx, UzivatelHtml);
+            }
+            else if (path.Equals("/api/muj-stav", StringComparison.OrdinalIgnoreCase))
+            {
+                WriteJson(ctx, BuildUserStatus());
+            }
             else
             {
                 WriteHtml(ctx, DashboardHtml);
@@ -178,6 +189,87 @@ public class LocalConsoleService : BackgroundService
             _logger.LogWarning(ex, "Chyba při zpracování požadavku lokální konzole");
             try { ctx.Response.StatusCode = 500; ctx.Response.Close(); } catch { }
         }
+    }
+
+    // --------------------------------------------------------
+    // Uživatelská konzole (běžný účet, bez admin práv).
+    //
+    // Proč vůbec je: člověk, kterému nejde flashka, dosud viděl jen odmítnutí a jediná cesta
+    // dál byla zavolat IT. Tahle stránka mu odpoví na to, na co se ptá — jestli se média
+    // kontrolují, jestli je to jeho médium neschválené a čím se prokazuje, aby měl co poslat.
+    //
+    // Co NEuvidí: seznam schválených médií (znalost schválených sériových čísel oslabuje
+    // whitelist), frontu incidentů, diagnostiku ani jedinou zapisující akci.
+    // --------------------------------------------------------
+    private void HandleUzivatel(HttpListenerContext ctx, string path, string method)
+    {
+        var kdo = PopisIdentity(ctx.User);
+
+        if (method == "GET" && (path == "/"
+                             || path.Equals("/index.html", StringComparison.OrdinalIgnoreCase)
+                             || path.Equals("/uzivatel", StringComparison.OrdinalIgnoreCase)))
+        {
+            // Debug, ne Warning: stránka se sama obnovuje, jinak by zaplavila Event Log.
+            _logger.LogDebug("Uživatelská konzole zobrazena ({User})", kdo);
+            WriteHtml(ctx, UzivatelHtml);
+            return;
+        }
+
+        if (method == "GET" && path.Equals("/api/muj-stav", StringComparison.OrdinalIgnoreCase))
+        {
+            WriteJson(ctx, BuildUserStatus());
+            return;
+        }
+
+        // Adminské endpointy a jakýkoli zápis: odmítnout a zalogovat — tohle už je pokus jít dál.
+        _logger.LogWarning("Lokální konzole: odmítnut přístup na {Method} {Path} ({User})", method, path, kdo);
+        WriteBytes(ctx, 403, "text/html; charset=utf-8",
+            Encoding.UTF8.GetBytes(OdmitnutoHtml(kdo)));
+    }
+
+    // --------------------------------------------------------
+    // Stav pro uživatelskou stránku – záměrně úzký výřez toho, co ví BuildStatus().
+    // --------------------------------------------------------
+    private object BuildUserStatus()
+    {
+        var blokuje = _policy.EffectiveMode(_policyMode) == "block";
+        var blocked = _blocker.GetBlocked();
+
+        var media = _monitor.GetActiveConnections()
+            .OrderByDescending(c => c.ConnectedAt)
+            .Select(c =>
+            {
+                var schvaleno   = !string.IsNullOrWhiteSpace(c.DeviceKey) && _whitelist.IsAllowedKey(c.DeviceKey);
+                var zablokovano = blocked.ContainsKey(c.PnpDeviceId);
+                return new
+                {
+                    nazev       = c.FriendlyName,
+                    klic        = c.DeviceKey,
+                    velikost    = c.Size,
+                    pripojeno   = c.ConnectedAt,
+                    schvaleno,
+                    zablokovano,
+                    stav = zablokovano ? "zablokováno"
+                         : schvaleno   ? "schváleno"
+                         : blokuje     ? "neschválené – bude zablokováno"
+                                       : "neschválené – zatím jen hlášeno"
+                };
+            })
+            .ToList();
+
+        return new
+        {
+            hostname   = Environment.MachineName,
+            generovano = DateTime.UtcNow,
+            ochrana = new
+            {
+                blokuje,
+                docasneVypnuto = _policy.OverrideActive,
+                docasneDoKdy   = _policy.OverrideActive ? _policy.OverrideUntil : (DateTime?)null
+            },
+            agentVerze = AppInfo.Commit,
+            media
+        };
     }
 
     // --------------------------------------------------------
@@ -468,6 +560,172 @@ public class LocalConsoleService : BackgroundService
     }
 
     // --------------------------------------------------------
+    // Uživatelská stránka – co vidí běžný účet. Self-contained, bez externích assetů.
+    // Cíl: odpovědět na „proč mi nejde flashka" dřív, než člověk zvedne telefon na IT.
+    // --------------------------------------------------------
+    private const string UzivatelHtml = """
+        <!DOCTYPE html>
+        <html lang="cs">
+        <head>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1">
+          <title>USB Guardian – moje média</title>
+          <style>
+            :root { color-scheme: dark; }
+            body { margin:0; font-family:Segoe UI, system-ui, sans-serif; background:#0f1419; color:#e6e6e6;
+                   display:flex; justify-content:center; padding:34px 16px; }
+            .w { width:100%; max-width:640px; }
+            h1 { font-size:19px; margin:0 0 2px; }
+            .sub { color:#8b949e; font-size:13px; margin:0 0 20px; }
+            .karta { background:#161b22; border:1px solid #2a2f37; border-radius:10px; padding:18px 20px; margin-bottom:14px; }
+            .stav { display:flex; align-items:center; gap:11px; }
+            .tecka { width:11px; height:11px; border-radius:50%; flex:0 0 auto; }
+            .zelena { background:#2ea043; } .zluta { background:#d29922; } .seda { background:#6e7681; }
+            .stav b { font-size:14.5px; font-weight:600; }
+            .stav .d { color:#8b949e; font-size:12.5px; margin-top:3px; }
+            h2 { font-size:12.5px; text-transform:uppercase; letter-spacing:.06em; color:#8b949e; margin:0 0 10px; font-weight:600; }
+            .m { border-top:1px solid #21262d; padding:13px 0; }
+            .m:first-of-type { border-top:none; padding-top:0; }
+            .m .r { display:flex; justify-content:space-between; align-items:baseline; gap:12px; }
+            .m .n { font-size:14px; font-weight:600; }
+            .m .v { color:#8b949e; font-size:12px; margin-top:2px; }
+            .znacka { font-size:11.5px; padding:2px 9px; border-radius:20px; white-space:nowrap; }
+            .ok   { background:rgba(46,160,67,.16);  color:#5fd07a; border:1px solid rgba(46,160,67,.4); }
+            .bad  { background:rgba(248,81,73,.14);  color:#ff7b72; border:1px solid rgba(248,81,73,.4); }
+            .warn { background:rgba(210,153,34,.16); color:#e3b341; border:1px solid rgba(210,153,34,.4); }
+            .id { margin-top:10px; background:#0d1117; border:1px solid #21262d; border-radius:8px; padding:10px 12px; }
+            .id .l { color:#8b949e; font-size:11.5px; margin-bottom:5px; }
+            .id .k { font-family:Consolas, monospace; font-size:12.5px; word-break:break-all; }
+            button { margin-top:9px; font:inherit; font-size:12.5px; padding:6px 12px; border-radius:7px; cursor:pointer;
+                     background:#21262d; color:#e6e6e6; border:1px solid #30363d; }
+            button:hover { background:#2a3038; }
+            .prazdno { color:#8b949e; font-size:13px; }
+            .pomoc { font-size:13px; line-height:1.65; color:#c9d1d9; margin:0; padding-left:18px; }
+            .pata { color:#6e7681; font-size:11.5px; text-align:center; margin-top:16px; font-family:Consolas, monospace; }
+          </style>
+        </head>
+        <body>
+        <div class="w">
+          <h1>Moje média</h1>
+          <p class="sub">Co má tenhle počítač právě připojené a jak se k tomu USB Guardian staví.</p>
+
+          <div class="karta">
+            <div class="stav">
+              <span class="tecka seda" id="tecka"></span>
+              <div><b id="ochrana">Načítám…</b><div class="d" id="ochranaD"></div></div>
+            </div>
+          </div>
+
+          <div class="karta">
+            <h2>Připojená média</h2>
+            <div id="media"><div class="prazdno">Načítám…</div></div>
+          </div>
+
+          <div class="karta">
+            <h2>Potřebuju schválit médium</h2>
+            <ul class="pomoc">
+              <li>U neschváleného média zkopíruj jeho identifikaci tlačítkem výš a pošli ji IT.</li>
+              <li>Schvaluje se konkrétní kus média, ne typ — každý další kus se musí schválit zvlášť.</li>
+              <li>Než je médium schválené, nekopíruj na něj pracovní data.</li>
+            </ul>
+          </div>
+
+          <div class="pata" id="pata"></div>
+        </div>
+        <script>
+        (function () {
+          "use strict";
+          var $ = function (id) { return document.getElementById(id); };
+
+          function esc(s) {
+            return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) {
+              return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c];
+            });
+          }
+
+          function cas(iso) {
+            try { return new Date(iso).toLocaleTimeString("cs-CZ", { hour: "2-digit", minute: "2-digit" }); }
+            catch (e) { return "?"; }
+          }
+
+          function zaloha(text, hotovo) {
+            var t = document.createElement("textarea");
+            t.value = text; t.style.position = "fixed"; t.style.opacity = "0";
+            document.body.appendChild(t); t.select();
+            try { document.execCommand("copy"); hotovo(); } catch (e) { }
+            document.body.removeChild(t);
+          }
+
+          function kopiruj(text, btn) {
+            function hotovo() {
+              btn.textContent = "Zkopírováno";
+              setTimeout(function () { btn.textContent = "Zkopírovat pro IT"; }, 2000);
+            }
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+              navigator.clipboard.writeText(text).then(hotovo, function () { zaloha(text, hotovo); });
+            } else { zaloha(text, hotovo); }
+          }
+
+          function vykresli(s) {
+            var vypnuto = s.ochrana.docasneVypnuto;
+            var blokuje = s.ochrana.blokuje;
+
+            $("tecka").className = "tecka " + (vypnuto ? "zluta" : blokuje ? "zelena" : "zluta");
+            $("ochrana").textContent = vypnuto ? "Blokování je dočasně vypnuté"
+                                     : blokuje ? "Média se kontrolují a neschválená se blokují"
+                                               : "Média se kontrolují, neschválená se zatím jen hlásí";
+            $("ochranaD").textContent = vypnuto
+              ? "Vypnul to správce tohoto počítače" + (s.ochrana.docasneDoKdy ? " do " + cas(s.ochrana.docasneDoKdy) : "") + "."
+              : blokuje ? "Schválené firemní médium funguje bez omezení."
+                        : "Neschválené médium teď funguje, ale zůstane o něm záznam.";
+
+            var el = $("media");
+            if (!s.media.length) {
+              el.innerHTML = '<div class="prazdno">Teď není připojené žádné médium.</div>';
+            } else {
+              el.innerHTML = s.media.map(function (m) {
+                var tr = m.zablokovano ? "bad" : m.schvaleno ? "ok" : "warn";
+                var h = '<div class="m"><div class="r"><div>' +
+                        '<div class="n">' + esc(m.nazev || "Neznámé médium") + '</div>' +
+                        '<div class="v">připojeno v ' + cas(m.pripojeno) + (m.velikost ? " · " + esc(m.velikost) : "") + '</div>' +
+                        '</div><span class="znacka ' + tr + '">' + esc(m.stav) + '</span></div>';
+                if (!m.schvaleno && m.klic) {
+                  h += '<div class="id"><div class="l">Identifikace média — tohle pošli IT:</div>' +
+                       '<div class="k">' + esc(m.klic) + '</div>' +
+                       '<button data-k="' + esc(m.klic) + '" data-n="' + esc(m.nazev || "") + '">Zkopírovat pro IT</button></div>';
+                }
+                return h + '</div>';
+              }).join("");
+
+              Array.prototype.forEach.call(el.querySelectorAll("button"), function (b) {
+                b.onclick = function () {
+                  kopiruj("USB Guardian – zadost o schvaleni media\n" +
+                          "Pocitac: " + s.hostname + "\n" +
+                          "Medium: " + b.getAttribute("data-n") + "\n" +
+                          "Identifikace: " + b.getAttribute("data-k"), b);
+                };
+              });
+            }
+
+            $("pata").textContent = s.hostname + " · agent " + s.agentVerze;
+          }
+
+          function nacti() {
+            fetch("/api/muj-stav", { cache: "no-store" })
+              .then(function (r) { return r.json(); })
+              .then(vykresli)
+              .catch(function () { $("ochrana").textContent = "Stav se nepodařilo načíst"; });
+          }
+
+          nacti();
+          setInterval(nacti, 5000);
+        })();
+        </script>
+        </body>
+        </html>
+        """;
+
+    // --------------------------------------------------------
     // Dashboard – self-contained (žádné externí assety, CSP-friendly)
     // Načítá /api/status a periodicky překresluje.
     // --------------------------------------------------------
@@ -618,7 +876,7 @@ public class LocalConsoleService : BackgroundService
                 <div class="card">
                   <h2>Vynucování</h2>
                   <div class="big">${enfPill}</div>
-                  <div class="row"><span>Server (.213)</span><span>${enf.serverReceived ? (enf.serverEnforce ? 'vynucovat' : 'jen varovat') : 'nepřijato'}</span></div>
+                  <div class="row"><span>Server (APP_SERVER)</span><span>${enf.serverReceived ? (enf.serverEnforce ? 'vynucovat' : 'jen varovat') : 'nepřijato'}</span></div>
                   <div class="row"><span>Break-glass</span><span>${enf.overrideActive ? ('do ' + dt(enf.overrideUntil)) : '—'}</span></div>
                   <div class="row"><span>Zablokováno teď</span><span>${enf.blockedCount ?? 0}</span></div>
                   ${enf.overrideActive

@@ -151,10 +151,28 @@ Background služba (i na vyžádání tlačítkem) načte počítače z Active D
 automaticky podle serveru (`new DirectoryEntry()`, nic natvrdo). Reconciliation:
 *v AD ⨯ hlásí agenta* → seznam stanic, kam agent chybí.
 
-## Lokální admin konzole agenta
+## Lokální konzole agenta (dva pohledy podle role)
 
-Volitelná (`localConsole.enabled` v `agent.config.local.json`, v šabloně vypnutá). `HttpListener`
-na `127.0.0.1:5080`, **jen lokální admin** – živý stav agenta: **seznam schválených zařízení (whitelist)**,
+Jeden port, dva pohledy — **role rozhoduje, co člověk uvidí**:
+
+| | Běžný účet (uživatelská stránka) | Lokální admin (plná konzole) |
+|---|---|---|
+| Stav ochrany (blokuje / jen hlásí / dočasně vypnuto) | ✅ | ✅ |
+| Připojená média + zda jsou schválená | ✅ | ✅ |
+| Identifikace neschváleného média + „zkopírovat pro IT" | ✅ | ✅ |
+| Seznam schválených médií (whitelist) | ❌ | ✅ |
+| Fronta incidentů, WMI watchdog, diagnostika | ❌ | ✅ |
+| Break-glass, vrátit média, restart služby | ❌ | ✅ |
+
+**Uživatelská stránka** (`GET /`, data `GET /api/muj-stav`) odpovídá na to, kvůli čemu lidé volají IT:
+*„proč mi nejde flashka."* Ukáže, jestli se média kontrolují, které z připojených je neschválené a
+**čím se prokazuje** (`VID:PID:sériové číslo`) — s tlačítkem, které to zkopíruje do zprávy pro IT.
+Whitelist se jí záměrně **neukazuje**: znalost schválených sériových čísel ochranu oslabuje.
+Admin si tenhle pohled otevře na `/uzivatel`, aby při hovoru viděl přesně to, co má uživatel před sebou.
+Kontrola vykreslení: `node tests/user-page.test.mjs`.
+
+**Plná konzole** zůstává nezměněná (`localConsole.enabled` v `agent.config.local.json`, v šabloně vypnutá).
+`HttpListener` na `127.0.0.1:5080`, **jen lokální admin** – živý stav agenta: **seznam schválených zařízení (whitelist)**,
 stav+verze whitelistu, **verze agenta (commit)**, WMI watchdog, fronta, připojená média a poslední události.
 Kromě čtení umí tři akce: **break-glass** (dočasně vypnout blokování offline), **vrátit všechna média hned**
 a **restart služby**. Použit `HttpListener` (ne Kestrel), aby agent nepotřeboval ASP.NET Core runtime.
