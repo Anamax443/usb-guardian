@@ -10,8 +10,13 @@
   },
 
   "Authorization": {
+    // Cteni (heartbeat, stazeni whitelistu) - ucty stanic + admini.
     "AllowedGroups": [
       "DOMENA\\USB-Guardian-Clients",
+      "DOMENA\\IT-Admins"
+    ],
+    // Zapis (POST /api/whitelist/devices) - jen admini. Prazdne = nikdo (fail-closed).
+    "AdminGroups": [
       "DOMENA\\IT-Admins"
     ]
   }

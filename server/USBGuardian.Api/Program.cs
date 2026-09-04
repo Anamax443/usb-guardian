@@ -88,6 +88,12 @@ builder.Services.AddAuthentication(
 // Policy "USBGuardianClients" – přístup k API jen pro členy AD skupin z konfigurace
 var allowedGroups = builder.Configuration.GetSection("Authorization:AllowedGroups").Get<string[]>()
                     ?? Array.Empty<string>();
+// Policy "USBGuardianAdmins" – zápisové/administrativní endpointy (např. přidání zařízení
+// na whitelist přes API). Záměrně SAMOSTATNÁ od USBGuardianClients: agent smí číst
+// (heartbeat, stažení whitelistu), ale nemá důvod umět zapisovat security policy – účet
+// stanice v USB-Guardian-Clients dřív procházel i na POST /api/whitelist/devices.
+var adminGroups = builder.Configuration.GetSection("Authorization:AdminGroups").Get<string[]>()
+                    ?? Array.Empty<string>();
 builder.Services.AddAuthorization(options =>
 {
     options.AddPolicy("USBGuardianClients", policy => policy.RequireAssertion(ctx =>
@@ -96,6 +102,17 @@ builder.Services.AddAuthorization(options =>
         if (allowedGroups.Length == 0) return true;            // bez konfigurace nepřekážet
         var principal = new WindowsPrincipal(wi);
         return allowedGroups.Any(principal.IsInRole);
+    }));
+
+    // Fail-closed záměrně (na rozdíl od USBGuardianClients výše): tohle je nová, admin-only
+    // cesta bez existujícího nasazení, které by se prázdnou konfigurací mohlo rozbít. Prázdné
+    // AdminGroups tedy znamená "nikdo", ne "kdokoli" – dokud si to operátor nenastaví sám.
+    options.AddPolicy("USBGuardianAdmins", policy => policy.RequireAssertion(ctx =>
+    {
+        if (ctx.User.Identity is not WindowsIdentity { IsAuthenticated: true } wi) return false;
+        if (adminGroups.Length == 0) return false;
+        var principal = new WindowsPrincipal(wi);
+        return adminGroups.Any(principal.IsInRole);
     }));
 });
 

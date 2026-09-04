@@ -1,9 +1,14 @@
 // ============================================================
 // WhitelistController.cs
 // Distribuce whitelistu agentům + správa
-// GET  /api/whitelist          – stáhnutí aktuálního whitelistu
-// GET  /api/whitelist/version  – jen číslo verze (pro heartbeat)
-// POST /api/whitelist          – přidání nového zařízení (IT admin)
+// GET  /api/whitelist          – stáhnutí aktuálního whitelistu (agent)
+// GET  /api/whitelist/version  – jen číslo verze, pro heartbeat (agent)
+// POST /api/whitelist/devices  – přidání nového zařízení (IT admin / L1)
+//
+// Autorizace je záměrně PO AKCI, ne na controlleru: GET* smí agent
+// (policy USBGuardianClients), POST smí jen admin (policy USBGuardianAdmins).
+// Dřív měl POST stejnou policy jako agent - účet stanice tak teoreticky mohl
+// zapisovat security policy, ne jen ji číst.
 // ============================================================
 
 using Microsoft.AspNetCore.Mvc;
@@ -15,7 +20,6 @@ namespace USBGuardian.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-[Microsoft.AspNetCore.Authorization.Authorize(Policy = "USBGuardianClients")]
 public class WhitelistController : ControllerBase
 {
     private readonly AppDbContext _db;
@@ -32,6 +36,7 @@ public class WhitelistController : ControllerBase
     // Agent stáhne aktuální whitelist (volá se při sync)
     // --------------------------------------------------------
     [HttpGet]
+    [Microsoft.AspNetCore.Authorization.Authorize(Policy = "USBGuardianClients")]
     public async Task<IActionResult> GetWhitelist()
     {
         // Aktivní = PUBLIKOVANÁ + PODEPSANÁ verze. Servírujeme PŘESNÝ blob (`Json`), který byl offline
@@ -55,6 +60,7 @@ public class WhitelistController : ControllerBase
     // Detached RSA podpis aktivního blobu (base64) – agent ukládá jako whitelist.json.sig.
     // --------------------------------------------------------
     [HttpGet("signature")]
+    [Microsoft.AspNetCore.Authorization.Authorize(Policy = "USBGuardianClients")]
     public async Task<IActionResult> GetSignature()
     {
         var version = await _db.WhitelistVersions
@@ -73,6 +79,7 @@ public class WhitelistController : ControllerBase
     // Rychlá kontrola verze bez stažení celého whitelistu
     // --------------------------------------------------------
     [HttpGet("version")]
+    [Microsoft.AspNetCore.Authorization.Authorize(Policy = "USBGuardianClients")]
     public async Task<IActionResult> GetCurrentVersion()
     {
         var version = await _db.WhitelistVersions
@@ -89,6 +96,7 @@ public class WhitelistController : ControllerBase
     // Přidání nového zařízení do whitelistu (IT admin / L1)
     // --------------------------------------------------------
     [HttpPost("devices")]
+    [Microsoft.AspNetCore.Authorization.Authorize(Policy = "USBGuardianAdmins")]
     public async Task<IActionResult> AddDevice([FromBody] WhitelistDeviceDto dto)
     {
         // Kontrola duplicity
