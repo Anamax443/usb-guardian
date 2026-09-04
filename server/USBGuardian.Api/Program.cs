@@ -116,6 +116,24 @@ builder.Services.AddAuthorization(options =>
     }));
 });
 
+// appsettings.local.json na serveru může nést vlastní "Kestrel:Endpoints:*" - Kestrel tuhle
+// sekci čte NEZÁVISLE na ConfigureKestrel níž a oba zdroje se SČÍTAJÍ (config otevře port
+// navíc, ne nahradí kód). Reálný appsettings.local.json na SQL_SERVER měl "Http": "http://0.0.0.0:5050" -
+// bez týhle pojistky by port 5050 v produkci zůstal otevřený i po fixu níž.
+//
+// Vynulovat tu hodnotu v kódu (`builder.Configuration["...:Url"] = null`) NEFUNGUJE -
+// ověřeno izolovaným testem: klíč zůstane v konfiguraci "existovat" (jen s null hodnotou),
+// Kestrel proto pořád najde endpoint "Http" a spadne na "missing required Url parameter" -
+// to by v produkci znamenalo, že se API vůbec nerozjede. Fail-fast s jasnou hláškou je proto
+// spolehlivější než tichý pokus config obejít.
+if (!builder.Environment.IsDevelopment()
+    && builder.Configuration.GetSection("Kestrel:Endpoints:Http").Exists())
+{
+    throw new InvalidOperationException(
+        "appsettings.local.json definuje Kestrel:Endpoints:Http (nešifrované HTTP) - " +
+        "v produkci NENÍ povoleno (NIS2). Odeber tuhle sekci z appsettings.local.json na serveru.");
+}
+
 // ── Self-contained TLS (vlastní self-signed cert, bez CA / cert store) ──
 var tlsCertPath = builder.Configuration["tls:certPath"] ?? @"C:\ProgramData\USBGuardian\api-tls.pfx";
 var tlsCert     = USBGuardian.Api.SelfCert.LoadOrCreate(tlsCertPath, Environment.MachineName);
