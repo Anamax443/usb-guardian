@@ -357,13 +357,20 @@ on faith. Fixed today, each item its own commit (for isolation if something brea
   **Deployed and verified** (`/api/version` OK after the redeploy).
 - **`ac73571`** – the first C# test project (`tests/USBGuardian.Agent.Tests`, xUnit), 8 tests, a
   regression test for the whitelist-expiry fix. Before this the repo had exactly one JS test (UI).
+- **`8fbfa6d`** – `POST /api/incidents` returned `202 Accepted` as soon as the batch was queued in the
+  in-memory `Channel` – a process crash between that acknowledgement and the DB write lost the batch
+  for good (the agent advances its offset on 2xx and never resends). A new `IncidentSpool` writes the
+  batch to disk atomically (`C:\ProgramData\USBGuardian\incident-spool`, overridable via
+  `incidents:spoolPath`) **before** the 202; the worker deletes the file only after a successful DB
+  write. Anything left on disk (a crash, or just a routine service restart) is replayed first on the
+  next start – the existing dedup in `ProcessBatch` makes a repeated replay harmless. New test project
+  `tests/USBGuardian.Api.Tests` (the API had no tests before), 4 tests. **Git-only so far, not deployed
+  to the fleet** (needs an API redeploy on `SQL_SERVER`).
 
 **Still open from the audit** (priority for next time): ACL on the TLS PFX and the RSA signing key, an
 `EventId` GUID for reliable incident deduplication (today's key `timestamp-to-the-second|serial|vendor`
-is missing `ProductId`/`PnpDeviceId`), a durable incident queue (`202 Accepted` is returned BEFORE the
-DB write – a process crash between accept and write loses the batch), verifying the payload's hostname
-against the authenticated Windows identity, more tests, CI (`.github/workflows` is entirely absent from
-the repo).
+is missing `ProductId`/`PnpDeviceId`), verifying the payload's hostname against the authenticated
+Windows identity, more tests, CI (`.github/workflows` is entirely absent from the repo).
 
 ### 5.5 Roadmap (pending)
 - **Monitoring of signing cert expiry** – `CN=powershell.domena.loc` valid until 2028-06-17; alert via e-mail from the console.

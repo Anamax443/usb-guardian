@@ -370,12 +370,20 @@ bez kontroly. Opraveno dnes, každá věc samostatný commit (kvůli izolovateln
   **Nasazeno a ověřeno** (`/api/version` po redeployi OK).
 - **`ac73571`** – první C# testovací projekt (`tests/USBGuardian.Agent.Tests`, xUnit), 8 testů,
   regrese na opravu expirace whitelistu. Do té doby repo mělo jen jeden JS test (UI).
+- **`8fbfa6d`** – `POST /api/incidents` vracelo `202 Accepted` hned po zařazení batche do
+  paměťové fronty (`Channel`) – pád API procesu mezi tímto potvrzením a zápisem do DB batch
+  nenávratně ztratil (agent po 2xx posune offset a znovu ho nepošle). Nový `IncidentSpool`
+  zapíše batch atomicky na disk (`C:\ProgramData\USBGuardian\incident-spool`, konfigurovatelné
+  přes `incidents:spoolPath`) **ještě před** 202; worker soubor smaže až po úspěšném zápisu do
+  DB. Cokoliv zůstane na disku (pád, i běžný restart služby) se při příštím startu přehraje
+  jako první – existující dedup v `ProcessBatch` dělá případné opakované přehrání neškodným.
+  Nový testovací projekt `tests/USBGuardian.Api.Tests` (dosud API nemělo žádné testy), 4 testy.
+  **Zatím jen v gitu, na fleet nenasazeno** (vyžaduje redeploy API na `SQL_SERVER`).
 
 **Zatím neřešeno z auditu** (priorita pro příště): ACL na TLS PFX a RSA signing klíč, `EventId` GUID
 pro spolehlivou deduplikaci incidentů (dnešní klíč `timestamp-na-sekundu|serial|vendor` chybí
-`ProductId`/`PnpDeviceId`), durabilní fronta incidentů (`202 Accepted` se vrací PŘED zápisem do DB –
-při pádu procesu mezi přijetím a zápisem se batch ztratí), ověření hostname z payloadu proti
-autentizované Windows identitě, víc testů, CI (`.github/workflows` v repu chybí úplně).
+`ProductId`/`PnpDeviceId`), ověření hostname z payloadu proti autentizované Windows identitě,
+víc testů, CI (`.github/workflows` v repu chybí úplně).
 
 ### 5.5 Roadmapa (pending)
 - **Monitoring expirace podpisového certu** – `CN=powershell.domena.loc` platí do 2028-06-17; alert e-mailem z konzole.
