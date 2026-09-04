@@ -30,7 +30,7 @@
                               ┌───────────┘
                               ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│  Server (B-S-W-SQL-04 nebo dedikovaný Windows Server)               │
+│  Server (SQL_SERVER nebo dedikovaný Windows Server)               │
 │                                                                     │
 │  ┌──────────────────────────────────┐   ┌────────────────────────┐ │
 │  │  USB Guardian API                │   │  SQL Server            │ │
@@ -41,7 +41,7 @@
 │  │  /api/heartbeat  (GET)           │   │  Computers             │ │
 │  │  ActivityLogger (deník)          │   │  AppSettings           │ │
 │  │  Windows Auth (Kerberos)         │   │  ActivityLog  ◄──────┐ │ │
-│  │  AD skupiny: USB-Guardian-Clients│   │  gMSA: gmsa-SQL$     │ │ │
+│  │  AD skupiny: USB-Guardian-Clients│   │  gMSA: gmsa-api$     │ │ │
 │  └──────────────────────────────────┘   └──────────────────────┼─┘ │
 │                                                                │   │
 │  ┌──────────────────────────────────┐                          │   │
@@ -89,9 +89,9 @@
 
 ## Serverová admin konzole (USBGuardian.Admin)
 
-Samostatná **Blazor Server** aplikace na app serveru (`10.8.2.213`), Windows služba
+Samostatná **Blazor Server** aplikace na app serveru (`APP_SERVER_IP`), Windows služba
 `USBGuardianConsole`, port `:4200`. Oddělená od ingestion API (odolnost – příjem incidentů
-od 500+ agentů nesmí ovlivnit adminní použití). Čte/píše SQL-04, modely reusnuté z API
+od 500+ agentů nesmí ovlivnit adminní použití). Čte/píše SQL_SERVER, modely reusnuté z API
 (slinkované `DbModels.cs` + `AppDbContext.cs` – žádná duplikace).
 
 | Komponenta | Popis |
@@ -139,7 +139,7 @@ Požadavek na `127.0.0.1` je z pohledu Windows **síťové přihlášení**. U *
 break-glass nedostupný přesně v situaci, na kterou je určený (technik u stanice, která nedosáhne na server).
 
 > **Kdo se do konzole dostane:** **jen lokální administrátor té stanice** — konzole není pro koncového
-> uživatele. V prostředí, kde jsou admin práva na oddělených účtech (`pcadmin.*` ve skupině `PC Admins`),
+> uživatele. V prostředí, kde jsou admin práva na oddělených účtech (`pcadmin.*` ve skupině `Workstation-Admins`),
 > je break-glass fakticky nástroj IT, ne uživatele; běžný účet dostane vysvětlující odmítnutí. Je to
 > záměr: vypnutí blokování je zásah do vynucované politiky, i když dočasný a logovaný.
 
@@ -180,7 +180,7 @@ Whitelist záznam obsahuje: `vendorId`, `productId`, `serialNumber`, `descriptio
 | Autentizace | Windows Auth – Kerberos Negotiate |
 | Autorizace | AD skupiny – `USB-Guardian-Clients` (API), admin skupina + whitelist účtů (konzole) |
 | Integrita dat | RSA podpis whitelistu, fail-secure (co agent neověří, nepoužije) |
-| Service účet | gMSA `AXINETWORK\gmsa-SQL$` – bez hesla v konfiguraci |
+| Service účet | gMSA `DOMENA\gmsa-api$` – bez hesla v konfiguraci |
 | Oddělení vrstev | tři deploy identity: fleet × server × běžící konzole (ta není admin nikde) |
 | Auditní stopa | incidenty + **deník provozu** (kdo s kým mluvil, kdo co změnil) |
 | Konfigurace | `appsettings.local.json` gitignored – citlivé hodnoty mimo repo |
@@ -310,7 +310,7 @@ dotnet run                 (server)
 - **ToastHelper:** scheduled task `\USBGuardian\USBGuardian-ToastHelper` (trigger přihlášení + odemčení, běh v user
   session, least-privilege) – registrace **PS-free** přes `schtasks /XML` (`tasks\USBGuardian-ToastHelper.xml`).
 - **Watchdog:** scheduled task `\USBGuardian\USBGuardian-Watchdog` (à 3 min, PS-free `sc start`).
-- Fleet rozvoz obojího: `Deploy-AgentFleet.ps1` (robocopy balíček + sc.exe create + oba tasky), pod gMSA z `.213`.
+- Fleet rozvoz obojího: `Deploy-AgentFleet.ps1` (robocopy balíček + sc.exe create + oba tasky), pod gMSA z `APP_SERVER`.
 - Server: Windows Service, spouštěn pod gMSA
 - HTTPS certifikát: `scripts\New-Certificate.ps1` na produkčním serveru
 - AD skupiny: `USB-Guardian-Clients` – stroje s nasazeným agentem
@@ -321,11 +321,11 @@ Instalace a aktualizace jsou **dvě různé úlohy**. Fleet skript uměl jen či
 robocopy" by na běžícím agentovi přepsala část DLL, kopie zamčeného `.exe` by selhala a na stanici by zůstala
 **směs verzí**, zatímco deploy hlásí úspěch.
 
-| Krok | Skript | Úloha na `.213` | Účet |
+| Krok | Skript | Úloha na `APP_SERVER` | Účet |
 |------|--------|-----------------|------|
-| Čistá instalace na stanice bez agenta | `Deploy-AgentFleet.ps1` | `USBGuardian-AutoDeploy` | `gmsa-USBGdep$` |
-| Aktualizace nasazeného agenta | `Update-Agent.cmd` | `USBGuardian-UpdateAgent` (+ `-UpdateAgentBeta`) | `gmsa-USBGdep$` |
-| Nasazení API na jeho server | `Deploy-Api.cmd` | `USBGuardian-ApiDeploy` | `gmsa-USBGsrv$` |
+| Čistá instalace na stanice bez agenta | `Deploy-AgentFleet.ps1` | `USBGuardian-AutoDeploy` | `gmsa-deploy$` |
+| Aktualizace nasazeného agenta | `Update-Agent.cmd` | `USBGuardian-UpdateAgent` (+ `-UpdateAgentBeta`) | `gmsa-deploy$` |
+| Nasazení API na jeho server | `Deploy-Api.cmd` | `USBGuardian-ApiDeploy` | `gmsa-srvdeploy$` |
 
 Oba `.cmd` drží stejný vzor: **zastav službu → počkej na `STOPPED` → zkopíruj (bez `*.local.json`) → nastartuj →
 ověř `RUNNING`**; návratový kód = počet neúspěšných stanic, log v `C:\ProgramData\USBGuardian\deploy\`.
@@ -348,11 +348,11 @@ Jeden účet nesmí držet fleet i server současně — kompromitace deploy ide
 
 | Role | Účet | Kde je admin |
 |---|---|---|
-| Klienti (auto-enrollment, update) | `gmsa-USBGdep$` | skupina `PC Admins` → jen stanice |
-| Server (nasazení API) | `gmsa-USBGsrv$` | lokální admin jen na serveru API |
+| Klienti (auto-enrollment, update) | `gmsa-deploy$` | skupina `Workstation-Admins` → jen stanice |
+| Server (nasazení API) | `gmsa-srvdeploy$` | lokální admin jen na serveru API |
 | Konzole (běžící aplikace) | strojový účet app serveru | **nikde** |
 
-`gmsa-USBGsrv$` je záměrně **mimo** skupinu serverových adminů; členství je lokální, jen na tom jednom stroji.
+`gmsa-srvdeploy$` je záměrně **mimo** skupinu serverových adminů; členství je lokální, jen na tom jednom stroji.
 Když deploy úloha začne hlásit `ERROR_LOGON_FAILURE (0x8007052E)`, není to o právech — je to zastaralá lokální
 kopie hesla gMSA (`Install-ADServiceAccount`).
 
@@ -399,16 +399,16 @@ Tabulka `AppSettings` (key/value, migrace 06) spravovaná z Nastavení; `AccessC
 AdSync → Computers (kdo nemá agenta)
 AgentDeployService (24/7, default VYPNUTO + dry-run)
    ↓ ostrý režim
-deploy.targetsFile (seznam stanic bez agenta)         [konzole = B-S-W-MIKOS$, jen zápis]
+deploy.targetsFile (seznam stanic bez agenta)         [konzole = APP_SERVER$, jen zápis]
    ↓ čte
-Scheduled task na .213 pod gMSA gmsa-USBGdep$         [least-privilege: admin jen na klientech]
+Scheduled task na APP_SERVER pod gMSA gmsa-deploy$         [least-privilege: admin jen na klientech]
    ↓ Deploy-AgentFleet.ps1
 \\HOST\C$ robocopy + sc.exe \\HOST create + watchdog + start  → agent na klientovi (LocalSystem)
 ```
 
-Least-privilege: konzole **nemění identitu** (zůstává `B-S-W-MIKOS$`, SQL granty beze změny), instalaci dělá
+Least-privilege: konzole **nemění identitu** (zůstává `APP_SERVER$`, SQL granty beze změny), instalaci dělá
 oddělený task pod deploy účtem. **Prostředí (AXIMA): PS skripty musí být podepsané** (AllSigned GPO) prod certem
-`CN=powershell.axinetwork.loc` + publisher v `LocalMachine\TrustedPublisher`; před podpisem CRLF+UTF-8 BOM.
+`CN=powershell.domena.loc` + publisher v `LocalMachine\TrustedPublisher`; před podpisem CRLF+UTF-8 BOM.
 Nastavení: [auto-deploy-setup.md](auto-deploy-setup.md).
 
 ## Konzole – funkce stránek
@@ -452,9 +452,9 @@ Konzole má na `AppSettings` jen write (ne delete na `Incidents`), proto je enfo
 
 | Položka | Popis |
 |---------|-------|
-| Zavřít HTTP 5050 | NIS2 – jen HTTPS (firewall block / přebindovat API na SQL-04) |
+| Zavřít HTTP 5050 | NIS2 – jen HTTPS (firewall block / přebindovat API na SQL_SERVER) |
 | Per-serial blocklist | Zákaz konkrétního média, near-real-time k agentům (přednost před whitelistem) |
-| Hardening konzole | gMSA místo LocalSystem; dedikovaná `USB-Guardian-Admins`; HTTPS konzole; přesun API na .213 |
+| Hardening konzole | gMSA místo LocalSystem; dedikovaná `USB-Guardian-Admins`; HTTPS konzole; přesun API na APP_SERVER |
 | **Retence deníku** | `sp_PurgeActivityLog` existuje, ale **nikdo ji nevolá** – doplnit `activity.retentionDays` do Nastavení a volání do API (vzor: `RetentionService`) |
 | ~~Lokální konzole na fleetu~~ | **Rozhodnuto 04.09.2026: na fleetu ZAPNUTÁ, výhradně pro lokálního admina stanice.** Šablona v repu zůstává `false` (bezpečný default pro jiné prostředí), balíček pro fleet se staví s `true`; build na opačný stav upozorní |
 | Toast Privilege Separation | Helper process v user session – jednosměrné Pipes SYSTEM → user |
@@ -475,7 +475,7 @@ i ručně „Publikovat nyní") konzole sama:
 
 ```
 změna katalogu → snapshot aktivního katalogu → kanonický whitelist.json blob (nová verze yyyy-MM-dd-vN, platnost
-        whitelist.validityDays default 365) → PODEPÍŠE interním klíčem (Whitelist:PrivateKeyPath na .213)
+        whitelist.validityDays default 365) → PODEPÍŠE interním klíčem (Whitelist:PrivateKeyPath na APP_SERVER)
         → uloží Json+Signature, aktivuje (deaktivuje staré)
 API: GET /api/whitelist = blob verbatim · GET /api/whitelist/signature = base64 podpis
    ↓ heartbeat hlásí novou verzi (≤2 min)
@@ -484,13 +484,13 @@ Agent: stáhne blob+podpis → SignatureVerifier ověří (fail-secure) → ulo�
 ```
 
 Bajt-exact: stejný blob string se **podepisuje** i **servíruje** (`/api/whitelist`) a **ověřuje** (agent) — vše UTF-8
-bez BOM (SHA-256 / Pkcs1), takže RSA podpis sedí. **Trade-off (vědomě zvolený):** privátní klíč je na serveru `.213`
+bez BOM (SHA-256 / Pkcs1), takže RSA podpis sedí. **Trade-off (vědomě zvolený):** privátní klíč je na serveru `APP_SERVER`
 (chránit ACL/DPAPI) výměnou za **plnou automatizaci** (žádný ruční offline krok). Offline `WhitelistSigner` zůstává
 jako nástroj pro generování klíčů / ruční ověření.
 
 ## Vynucování: server → agent + lokální break-glass (Fáze 2+3)
 
-**Fáze 2 – distribuce politiky:** `HeartbeatController` vrací `Enforce` (z `AppSettings policy.enforce`, .213 = zdroj
+**Fáze 2 – distribuce politiky:** `HeartbeatController` vrací `Enforce` (z `AppSettings policy.enforce`, APP_SERVER = zdroj
 pravdy). Agent (`WhitelistSync`) ho při každém heartbeatu předá do `PolicyState`; `PolicyEnforcer` pak místo fixního
 lokálního `policy.mode` použije **efektivní režim** (`PolicyState.EffectiveMode`): server enforce=true → `block`,
 false → `warn`. Před prvním heartbeatem fallback na lokální config.
@@ -523,8 +523,8 @@ konzoli je vidět **počet právě blokovaných** a tlačítko **„Vrátit vše
 
 **Fáze 3 – lokální break-glass (offline):** lokální **admin** stanice může v lokální konzoli (`127.0.0.1:5080`,
 admin-only, loopback) **dočasně vypnout blokování** (`POST /api/override?hours=N`, strop 72 h) — pro práci, když
-stanice nedosáhne na .213. Override je **perzistovaný** (`C:\ProgramData\USBGuardian\override.json` → přežije restart),
-**logovaný** jako auditní incident (`Action=OverrideDisabled`, kdo/jak dlouho) a nahlášený na .213. **Při příštím
+stanice nedosáhne na APP_SERVER. Override je **perzistovaný** (`C:\ProgramData\USBGuardian\override.json` → přežije restart),
+**logovaný** jako auditní incident (`Action=OverrideDisabled`, kdo/jak dlouho) a nahlášený na APP_SERVER. **Při příštím
 spojení se serverem se override ZRUŠÍ** (úspěšný heartbeat → `PolicyState.OnServerHeartbeat` → server reasertuje politiku).
 Efektivní režim: `override aktivní ? warn : (server přijat ? enforce : lokální default)`.
 

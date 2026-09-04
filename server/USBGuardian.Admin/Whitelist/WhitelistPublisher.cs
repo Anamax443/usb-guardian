@@ -11,7 +11,7 @@
 // NE AXIMA code-signing cert. Agent se nemění – ověřuje stejným veřejným klíčem.
 //
 // Byte-exact: podepisují se PŘESNĚ ty bajty (UTF-8 bez BOM), které API servíruje na /api/whitelist.
-// Trade-off (vědomě zvolený): privátní klíč je na serveru .213 (chránit ACL/DPAPI) výměnou za plnou automatizaci.
+// Trade-off (vědomě zvolený): privátní klíč je na serveru APP_SERVER (chránit ACL/DPAPI) výměnou za plnou automatizaci.
 // ============================================================
 
 using System.Security.Cryptography;
@@ -31,7 +31,7 @@ public static class WhitelistPublisher
     {
         var keyPath = cfg["Whitelist:PrivateKeyPath"];
         if (string.IsNullOrWhiteSpace(keyPath) || !File.Exists(keyPath))
-            return (false, "Auto-podpis VYPNUTÝ: chybí privátní klíč (nastav Whitelist:PrivateKeyPath na .213). " +
+            return (false, "Auto-podpis VYPNUTÝ: chybí privátní klíč (nastav Whitelist:PrivateKeyPath na APP_SERVER). " +
                            "Změny katalogu se k agentům nedostanou, dokud klíč nedoplníš.");
 
         var active = await db.WhitelistDevices.Where(d => d.IsActive)

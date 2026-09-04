@@ -1,9 +1,9 @@
 // ============================================================
 // AgentDeployService.cs
-// Auto-enrollment: konzole (.213) periodicky najde stanice z AD
+// Auto-enrollment: konzole (APP_SERVER) periodicky najde stanice z AD
 // BEZ agenta. Sama je NEINSTALUJE (least-privilege – konzole nemá
 // admin na klientech). Místo toho zapíše seznam do targets souboru;
-// vlastní instalaci provede scheduled task na .213 pod dedikovaným
+// vlastní instalaci provede scheduled task na APP_SERVER pod dedikovaným
 // deploy účtem (viz docs/auto-deploy-setup.md).
 //
 // BEZPEČNOST:

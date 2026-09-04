@@ -12,7 +12,7 @@
 | **Document version** | 1.1 — chapters 1–33 as in version 1.0, chapter 34 = an addendum dated 4 Sep 2026 |
 | **Date** | 2026-06-19, extended 2026-09-04 |
 | **Classification** | Internal — material for an opponent review |
-| **Domain environment** | `axinetwork.loc` (AXIMA) |
+| **Domain environment** | `domena.loc` (AXIMA) |
 | **Language** | [🇨🇿 Čeština](oponentura.md) · 🇬🇧 English |
 | **Related documents** | [README.en.md](../README.en.md), [HANDOFF.en.md](../HANDOFF.en.md), [architecture.en.md](architecture.en.md), [auto-deploy-setup.en.md](auto-deploy-setup.en.md), [oponentura-komercni.en.md](oponentura-komercni.en.md) · graphical outputs: [how-it-works.html](how-it-works.html), [mind-map.html](mind-map.html), [flowchart.html](flowchart.html), [management-summary.html](management-summary.html) |
 
@@ -135,9 +135,9 @@ repository in `*.local.json`).
 ### 1.4 Conventions
 
 - Component, class and file names are written in `code font`.
-- IP addresses and hostnames correspond to the real pilot deployment in the `axinetwork.loc` domain.
-- "**.213**" = the application server `B-S-W-MIKOS` (`10.8.2.213`), "**SQL-04**" = the database server
-  `B-S-W-SQL-04` (`10.8.2.225`), "**.181**" = the pilot station `TRNKAMW11`.
+- IP addresses and hostnames correspond to the real pilot deployment in the `domena.loc` domain.
+- "**APP_SERVER**" = the application server `APP_SERVER` (`APP_SERVER_IP`), "**SQL_SERVER**" = the database server
+  `SQL_SERVER` (`SQL_SERVER_IP`), "**PC-01**" = the pilot station `PC-01`.
 
 ---
 
@@ -278,9 +278,9 @@ The design had to respect real constraints of the production environment, which 
 decisions:
 
 - **AllSigned GPO** — every PowerShell script run on the machines must be signed with the prod certificate
-  `CN=powershell.axinetwork.loc`; `-ExecutionPolicy Bypass` does not get around it. Consequence: operational
+  `CN=powershell.domena.loc`; `-ExecutionPolicy Bypass` does not get around it. Consequence: operational
   scripts (deployment, watchdog) must be either signed or **PS-free** (scheduled tasks via `schtasks`).
-- **A security classifier** — automatically blocks some operations on the production SQL-04 and changes to
+- **A security classifier** — automatically blocks some operations on the production SQL_SERVER and changes to
   one's own permissions. Consequence: production API deployment and SQL grants are run by a **human
   operator**; only the build is prepared.
 - **NAT / firewall** — stations behind NAT, dynamic IPs. Consequence: a **push model** and keying on
@@ -312,7 +312,7 @@ The system consists of four logical components:
 ```
 ┌──────────────────────────┐     push (HTTPS :5443)    ┌───────────────────────────┐
 │  AGENT (client station)   │ ─────────────────────────►│  API (ingest)             │
-│  .NET 8 Windows Service   │   heartbeat / incidents   │  ASP.NET Core, SQL-04     │
+│  .NET 8 Windows Service   │   heartbeat / incidents   │  ASP.NET Core, SQL_SERVER     │
 │  runs as SYSTEM           │ ◄───────────────────────── │  :5443 (HTTPS) / :5050    │
 │  - DeviceMonitor (WMI)    │   whitelist + policy       │  - incident intake (202)  │
 │  - WhitelistChecker (RSA) │                            │  - whitelist distribution │
@@ -322,8 +322,8 @@ The system consists of four logical components:
 └──────────────────────────┘                                         ▼
                                                           ┌───────────────────────────┐
 ┌──────────────────────────┐     read/write (SQL)        │  DATABASE (SQL Server)    │
-│  CONSOLE (administration) │ ───────────────────────────►│  SQL-04, DB USBGuardian   │
-│  Blazor Server, .213 :4200│                             │  Incidents / Computers /  │
+│  CONSOLE (administration) │ ───────────────────────────►│  SQL_SERVER, DB USBGuardian   │
+│  Blazor Server, APP_SERVER :4200│                             │  Incidents / Computers /  │
 │  - Overview / Stations    │ ◄── AD sync ── Active Dir.  │  WhitelistDevices /       │
 │  - Whitelist (signing)    │                             │  WhitelistVersions /      │
 │  - Settings / Database    │                             │  AppSettings              │
@@ -334,9 +334,9 @@ The system consists of four logical components:
 | Component | Technology | Location | Identity |
 |-----------|------------|----------|----------|
 | Agent | C# .NET 8, Windows Service | every station | LocalSystem (SYSTEM) |
-| API | ASP.NET Core (Kestrel) | SQL-04, `C:\USBGuardian.Api` | gMSA `gmsa-SQL$` |
-| Console | Blazor Server | .213, `C:\Apps\USBGuardianConsole` | LocalSystem (= `B-S-W-MIKOS$`) |
-| Database | SQL Server | SQL-04, DB `USBGuardian` | — |
+| API | ASP.NET Core (Kestrel) | SQL_SERVER, `C:\USBGuardian.Api` | gMSA `gmsa-api$` |
+| Console | Blazor Server | APP_SERVER, `C:\Apps\USBGuardianConsole` | LocalSystem (= `APP_SERVER$`) |
+| Database | SQL Server | SQL_SERVER, DB `USBGuardian` | — |
 
 ### 5.2 Two key architectural axes
 
@@ -347,8 +347,8 @@ The server has no back-channel to the agent — everything "from the server" is 
 the heartbeat response**.
 
 **(b) A two-tier server.** The operational side (console, AD sync, whitelist publishing) runs on the
-application server **.213**; the database is pure storage on **SQL-04**. The ingestion API currently runs on
-SQL-04 (a move to .213 is planned — see the roadmap). Incident intake (the API) is **separated** from
+application server **APP_SERVER**; the database is pure storage on **SQL_SERVER**. The ingestion API currently runs on
+SQL_SERVER (a move to APP_SERVER is planned — see the roadmap). Incident intake (the API) is **separated** from
 administration (the console), so that the load of 500+ agents does not affect the usability of
 administration.
 
@@ -443,8 +443,8 @@ This chapter is the core of the document for a review. Each decision is stated t
   auto-signing** — the private key on the server, the console signs automatically after every catalog change.
 - **Chosen:** **Server-side auto-signing** (`WhitelistPublisher`). After every catalog change (including a
   manual "Publish now") the console issues a new version, signs it with the internal RSA key
-  (`Whitelist:PrivateKeyPath` on .213), stores `Json`+`Signature` in the DB and activates it.
-- **Trade-off (consciously chosen and central to the review):** The private key **is** on the .213 server
+  (`Whitelist:PrivateKeyPath` on APP_SERVER), stores `Json`+`Signature` in the DB and activates it.
+- **Trade-off (consciously chosen and central to the review):** The private key **is** on the APP_SERVER server
   (protected by ACL/DPAPI) in exchange for **full automation**. The original principle of "the private key
   is never on the server" was **deliberately abandoned**, because a manual offline step after every catalog
   change was operationally unbearable and would have led to the whitelist not being kept up to date (a
@@ -498,8 +498,8 @@ This chapter is the core of the document for a review. Each decision is stated t
 
 - **Context:** Auto-deployment of the agent requires admin rights on the clients; the console must not have
   them.
-- **Chosen:** The console (identity `B-S-W-MIKOS$`) only **writes the list of targets**; the installation is
-  performed by a **separate scheduled task on .213 under a dedicated gMSA** (`gmsa-USBGdep$`), which is an
+- **Chosen:** The console (identity `APP_SERVER$`) only **writes the list of targets**; the installation is
+  performed by a **separate scheduled task on APP_SERVER under a dedicated gMSA** (`gmsa-deploy$`), which is an
   admin on the clients only. The console therefore changes neither its identity nor its SQL grants.
 - **Trade-off:** More moving parts (a task, a gMSA, a targets file), but a strict separation of roles —
   compromising the console does not grant admin on the clients.
@@ -549,7 +549,7 @@ an FK).
 ```
 An admin changes the catalog (console) → WhitelistPublisher:
    snapshot of active devices → canonical whitelist.json blob (version yyyy-MM-dd-vN)
-   → signature with the internal RSA key (.213) → store Json+Signature, activate
+   → signature with the internal RSA key (APP_SERVER) → store Json+Signature, activate
 API: GET /api/whitelist (the blob verbatim) · GET /api/whitelist/signature (base64)
 Agent (the heartbeat within ≤2 min reports WhitelistUpdateAvailable):
    downloads blob+signature → SignatureVerifier verifies (fail-secure) → stores whitelist.json (+.sig)
@@ -559,7 +559,7 @@ Agent (the heartbeat within ≤2 min reports WhitelistUpdateAvailable):
 ### 7.4 Data flow — enforcement and reconciliation
 
 ```
-Heartbeat → HeartbeatController returns Enforce (from AppSettings policy.enforce, .213 = the truth)
+Heartbeat → HeartbeatController returns Enforce (from AppSettings policy.enforce, APP_SERVER = the truth)
 Agent: PolicyState.OnServerHeartbeat(enforce) (+ clears the local break-glass override)
 WhitelistSync.ReconcileBlocked (every cycle):
    - blocking ON  → ReEnforceConnectedDevices() (re-block attached unapproved media)
@@ -576,7 +576,7 @@ AdSyncRunner (60 min + on demand): AD (objectCategory=computer, not disabled)
    → reconciliation: InActiveDirectory && LastSeen==null && AgentVersion=="" = the agent is missing
 AgentDeployService (after the sync, default OFF + dry-run):
    applies defaultEnroll + include/exclude → writes deploy.targetsFile
-   → a scheduled task on .213 (gMSA) → Deploy-AgentFleet.ps1 → installation on the clients
+   → a scheduled task on APP_SERVER (gMSA) → Deploy-AgentFleet.ps1 → installation on the clients
 ```
 
 ---
@@ -701,8 +701,8 @@ media, recent events and the **number of blocked** media. Writing actions (admin
 
 ## 9. The server API (ingest)
 
-An ASP.NET Core application on SQL-04, Kestrel bound to **HTTPS :5443** (+ HTTP :5050, planned to be
-closed). It runs under the gMSA `gmsa-SQL$`. Agents authenticate with Windows Auth (Kerberos/Negotiate) and
+An ASP.NET Core application on SQL_SERVER, Kestrel bound to **HTTPS :5443** (+ HTTP :5050, planned to be
+closed). It runs under the gMSA `gmsa-api$`. Agents authenticate with Windows Auth (Kerberos/Negotiate) and
 are authorized through the `USBGuardianClients` policy (membership in `Authorization:AllowedGroups`).
 
 ### 9.1 Controllers
@@ -748,8 +748,8 @@ needed).
 
 ## 10. The administration console
 
-Blazor Server on .213 (:4200), the AXIMA UI standard (dark/light, a footer with the service line). It
-reads/writes SQL-04 through EF Core (models linked from the API). Authorization: Windows Auth; only members
+Blazor Server on APP_SERVER (:4200), the AXIMA UI standard (dark/light, a footer with the service line). It
+reads/writes SQL_SERVER through EF Core (models linked from the API). Authorization: Windows Auth; only members
 of `Authorization:AdminGroups` / accounts in `AllowedUsers` (appsettings = a lockout-safe bootstrap) **or**
 the DB list from Settings get in.
 
@@ -787,7 +787,7 @@ RSA key → storing `Json`+`Signature`, activation. See §6.7, §11.
 A 24/7 orchestrator (default OFF + dry-run). After the AD sync it finds stations without an agent
 (`InActiveDirectory && LastSeen==null && AgentVersion==""`), applies `defaultEnroll` + include/exclude
 exceptions and (in live mode) writes the targets into `deploy.targetsFile`. The installation is performed by
-a scheduled task on .213 under a gMSA (see §6.12, §15).
+a scheduled task on APP_SERVER under a gMSA (see §6.12, §15).
 
 ### 10.5 `IncidentAlertService` + `EmailSender`
 
@@ -809,7 +809,7 @@ cause (e.g. "DELETE permission denied on WhitelistDevices") would never reach th
 
 The whitelist is signed with **RSA-4096** (SHA-256, PKCS#1). The agent verifies the signature before every
 use (`SignatureVerifier`), **fail-secure** (an invalid/missing signature → the whitelist is not used). The
-public key sits on the agents (`whitelist_public.pem`), the private one on the .213 server
+public key sits on the agents (`whitelist_public.pem`), the private one on the APP_SERVER server
 (`Whitelist:PrivateKeyPath`, gitignored, ACL-protected).
 
 ### 11.2 Byte accuracy (canonicalisation)
@@ -823,7 +823,7 @@ That eliminates differences in key order, escaping or encoding, which would othe
 The whitelist signing key is USB Guardian's **own internal key**, **not** a company code-signing cert or a
 CA. Its sole purpose is whitelist integrity. This is distinct from:
 - **TLS** (the API's self-signed cert + pinning — §6.5),
-- **signing PowerShell scripts** (the company cert `CN=powershell.axinetwork.loc`, AllSigned GPO — §15).
+- **signing PowerShell scripts** (the company cert `CN=powershell.domena.loc`, AllSigned GPO — §15).
 
 The three independent "cryptographic worlds" are deliberately separated so that compromising one does not
 endanger the others.
@@ -831,7 +831,7 @@ endanger the others.
 ### 11.4 Key lifecycle and risks
 
 - **Generation:** the offline `WhitelistSigner` (`tools/WhitelistSigner`).
-- **Storage of the private key:** the .213 server, gitignored, ACL/DPAPI.
+- **Storage of the private key:** the APP_SERVER server, gitignored, ACL/DPAPI.
 - **Risk:** compromising the private key would allow forging the whitelist → mitigated by ACLs plus the
   limited blast radius (whitelist integrity only). The "key on the server" trade-off is discussed in §6.7
   and §19.
@@ -846,7 +846,7 @@ endanger the others.
 
 - **Assets:** the integrity of the whitelist (the rules), the audit trail (incidents), the availability of
   enforcement, the confidentiality of company data (indirectly — preventing exfiltration).
-- **Trust boundaries:** the .213 server (= the source of truth, holds the private key), the API/DB (gMSA),
+- **Trust boundaries:** the APP_SERVER server (= the source of truth, holds the private key), the API/DB (gMSA),
   the agent (runs as SYSTEM, holds only the public key and a signed copy).
 
 ### 12.2 Threats and countermeasures (STRIDE)
@@ -886,7 +886,7 @@ The model **assumes** that:
 - the attacker does **not** have persistent local admin/SYSTEM on the station (otherwise they can disable
   the agent — which is true of any host-based agent and lies beyond any achievable guarantee);
 - the domain infrastructure (AD, Kerberos, gMSA) is trustworthy;
-- the .213 server and the ACL on the private key are protected.
+- the APP_SERVER server and the ACL on the private key are protected.
 
 These assumptions are stated explicitly, because a reviewer will rightly aim at them. The mitigations
 (the watchdog,
@@ -901,7 +901,7 @@ local admin — which is a fundamental limitation of the host-based approach (se
 
 - **Phase 1 — whitelist distribution (1:1).** Automatic server-side signing, the agent as a byte copy
   (§6.7, §6.8, §7.3).
-- **Phase 2 — policy distribution.** The heartbeat carries `enforce` (`AppSettings policy.enforce`, .213 =
+- **Phase 2 — policy distribution.** The heartbeat carries `enforce` (`AppSettings policy.enforce`, APP_SERVER =
   the truth); the agent uses the effective mode (enforce → block, otherwise warn).
 - **Phase 3 — local break-glass.** A local admin can temporarily (capped at 72 h) switch blocking off to
   work offline; persisted, logged as an incident, and **cleared at the next heartbeat** (the server is the
@@ -990,18 +990,18 @@ For a detailed mapping of NIS2 / ISO 27001 → specific features see **Appendix 
 WinRM is closed, so deployment goes over **SMB + remote `sc.exe`** (ports 135/445), i.e. a network token of
 an account without UAC on the target:
 
-- **The console (.213):** `robocopy` → `\\.213\C$\Apps\USBGuardianConsole` (with
-  `/XF appsettings.local.json`) + `sc.exe \\.213 stop/start`. Careful: wait for `STOPPED` (otherwise the exe
+- **The console (APP_SERVER):** `robocopy` → `\\APP_SERVER\C$\Apps\USBGuardianConsole` (with
+  `/XF appsettings.local.json`) + `sc.exe \\APP_SERVER stop/start`. Careful: wait for `STOPPED` (otherwise the exe
   is locked).
-- **The API (SQL-04):** the build is staged on .213 and installed onto SQL-04; run by the **operator** (the
-  classifier blocks prod SQL-04 operations for the assistant). Wait for `STOPPED` before `robocopy`.
+- **The API (SQL_SERVER):** the build is staged on APP_SERVER and installed onto SQL_SERVER; run by the **operator** (the
+  classifier blocks prod SQL_SERVER operations for the assistant). Wait for `STOPPED` before `robocopy`.
 - **The agent (fleet):** `Deploy-AgentFleet.ps1` (a runspace pool, PS 5.1 and 7) — `robocopy` of the package
   + `sc.exe \\HOST create` + recovery + **PS-free** watchdog and ToastHelper tasks (`schtasks`).
 
 ### 15.3 Auto-enrollment
 
 After opt-in the console deploys the agent to stations without one by itself: it writes the targets and a
-gMSA scheduled task on .213 runs `Deploy-AgentFleet.ps1`. Least privilege (§6.12). Default OFF + dry-run;
+gMSA scheduled task on APP_SERVER runs `Deploy-AgentFleet.ps1`. Least privilege (§6.12). Default OFF + dry-run;
 the recommended sequence is `pilot station → a pilot group → the fleet`. Details:
 [auto-deploy-setup.en.md](auto-deploy-setup.en.md).
 
@@ -1022,7 +1022,7 @@ was on the roadmap. The proposed procedure (reusing the existing pipeline):
 
 The **"self-update by the agent"** alternative (downloading and overwriting its own exe) was considered and
 **rejected** as riskier (a service overwriting its own binary, the need for a hosted and signed build); a
-push from .213 is simpler and largely already built.
+push from APP_SERVER is simpler and largely already built.
 
 > **Status as of 09/2026:** this design has been implemented as a separate `Update-Agent.cmd` task
 > (stop → wait for `STOPPED` → copy → verify `RUNNING`), together with stable/beta channels and a version
@@ -1030,8 +1030,8 @@ push from .213 is simpler and largely already built.
 
 ### 15.5 The AXIMA environment — PowerShell signing
 
-Scripts running on machines (Deploy-AgentFleet on .213) must be **signed** with the prod cert
-`CN=powershell.axinetwork.loc` (AllSigned GPO), with the publisher in `LocalMachine\TrustedPublisher`;
+Scripts running on machines (Deploy-AgentFleet on APP_SERVER) must be **signed** with the prod cert
+`CN=powershell.domena.loc` (AllSigned GPO), with the publisher in `LocalMachine\TrustedPublisher`;
 before signing, CRLF + UTF-8 BOM. The watchdog and ToastHelper are **PS-free** (`schtasks`), so they need no
 signature on the clients.
 
@@ -1082,7 +1082,7 @@ solution and as confirmation of a successful deployment or update.
 
 ### 18.1 Methodology
 
-Verification was done **end-to-end on the pilot station .181 (TRNKAMW11)** in the real domain, with an
+Verification was done **end-to-end on the pilot station PC-01 (PC-01)** in the real domain, with an
 emphasis on **runtime evidence** from the Windows Event Log (not merely static code analysis). That proved
 essential: some defects (the false success of `Enable-PnpDevice` on a non-terminating error) were invisible
 from a static view and only showed up at runtime.
@@ -1097,8 +1097,8 @@ from a static view and only showed up at runtime.
 | Remove a medium from the whitelist (server) | Block it | After downloading v7 + a restart: `1 re-blocked` (Kingston 3.0) ✅ |
 | Add a medium to the whitelist (server) | Allow / return it | Reconcile `IsAllowedKey` → returned ✅ |
 | Switch enforcement off on the server | Return blocked media | After the heartbeat: Kingston `Status=OK`, `blocked.json` empty ✅ |
-| User attribution | `DOMAIN\user`, not `HOST$` | Incidents show `AXINETWORK\trnkam` ✅ |
-| Incident delivery | agent→API→DB→console | The Overview shows incidents from .181 ✅ |
+| User attribution | `DOMAIN\user`, not `HOST$` | Incidents show `DOMENA\it-admin` ✅ |
+| Incident delivery | agent→API→DB→console | The Overview shows incidents from PC-01 ✅ |
 | The commit stamp | the footer = the deployed git | The footer shows `agent f2bb194` after the redeploy ✅ |
 
 ### 18.3 Defects found and fixed (regressions/latent)
@@ -1154,7 +1154,7 @@ This chapter is key for a review — it lists **deliberate** limitations, not om
 
 ### 19.3 The private signing key on the server
 
-- A deliberate trade-off (§6.7): the key is on .213 (ACL) in exchange for automation. The risk of key
+- A deliberate trade-off (§6.7): the key is on APP_SERVER (ACL) in exchange for automation. The risk of key
   compromise = forging the whitelist; the impact is limited to whitelist integrity (not a CA, not code
   signing). Mitigations: ACL/DPAPI, monitoring, possibly a future HSM or removal of the right.
 
@@ -1165,7 +1165,7 @@ This chapter is key for a review — it lists **deliberate** limitations, not om
 
 ### 19.5 Single points / topology
 
-- The API still runs on SQL-04 (a move to .213 is planned). The DB is a single instance (backup/HA are
+- The API still runs on SQL_SERVER (a move to APP_SERVER is planned). The DB is a single instance (backup/HA are
   outside the scope of this tool and are handled at the infrastructure level). The console and the API are
   single-instance (sufficient for this scale).
 
@@ -1217,7 +1217,7 @@ This chapter is key for a review — it lists **deliberate** limitations, not om
 | High | Client updates (an update-safe fleet + version targeting) | design done *(implemented 09/2026, §34.2)* |
 | High | Guaranteed pre-mount blocking (GPO Device Installation Restrictions / a kernel driver) | 🔜 |
 | Medium | Close HTTP :5050 (HTTPS only) | 🔜 |
-| Medium | Move the API to .213 ("everything on the app server") | 🔜 |
+| Medium | Move the API to APP_SERVER ("everything on the app server") | 🔜 |
 | Medium | Monitoring the signing certificate's expiry | 🔜 |
 | Medium | A load test on the full fleet | 🔜 |
 | Low | Hardening: a dedicated `USB-Guardian-Admins`, an HTTPS console | 🔜 |
@@ -1396,7 +1396,7 @@ environment (AD, gMSA, the domain), no dependency on a cloud or a vendor, and ad
 specifics (AllSigned, the classifier). Commercial products are a valid alternative; the choice was
 deliberate.
 
-**Q22: What if the console (.213) or the API (SQL-04) goes down?**
+**Q22: What if the console (APP_SERVER) or the API (SQL_SERVER) goes down?**
 Agents work **offline** — they hold the local signed whitelist and the last policy and keep blocking or
 warning. The heartbeat merely reports and picks up changes; its outage only means new changes are not
 distributed and incidents are not collected (the agent's queue is persistent and catches up once service is
@@ -1566,7 +1566,7 @@ combining with GPO.
 
 ## 24. Detailed test catalogue
 
-A structured overview of test cases. The state "✅ verified live" = confirmed on .181 from the Event Log;
+A structured overview of test cases. The state "✅ verified live" = confirmed on PC-01 from the Event Log;
 "⏳" = designed/recommended, not yet performed systematically.
 
 ### 24.1 Detection and identification
@@ -1620,11 +1620,11 @@ A structured overview of test cases. The state "✅ verified live" = confirmed o
 
 | TC | Scenario | Expected result | State |
 |----|----------|-----------------|-------|
-| TC-40 | A fresh install (fleet) | The service runs, heartbeat+incidents | ✅ (.181) |
+| TC-40 | A fresh install (fleet) | The service runs, heartbeat+incidents | ✅ (PC-01) |
 | TC-41 | Reinstall/update of a running agent | Update-safe (stop→copy→start) | ⏳ (the gap in §19.6) *(implemented 09/2026, §34.2)* |
 | TC-42 | The commit stamp | The footer = git HEAD | ✅ |
 | TC-43 | The watchdog brings a stopped service back | The service is restarted | ⏳ |
-| TC-44 | Auto-enrollment (dry-run → live) | Targets written, installation through the gMSA | ✅ (.181) |
+| TC-44 | Auto-enrollment (dry-run → live) | Targets written, installation through the gMSA | ✅ (PC-01) |
 
 ### 24.6 Console and DB
 
@@ -1695,20 +1695,20 @@ API latency, queue depth and the worker's write throughput (§19.9).
 
 ## 26. Operational runbooks
 
-### 26.1 Deploying a new console version (.213)
+### 26.1 Deploying a new console version (APP_SERVER)
 
 1. `git commit` (deployment = the last step after a commit).
 2. `dotnet publish ... -o D:\deploy\USBGuardianConsole`.
-3. `sc.exe \\10.8.2.213 stop USBGuardianConsole`; wait for `STOPPED`.
-4. `robocopy ... \\10.8.2.213\C$\Apps\USBGuardianConsole /E /XF appsettings.local.json`.
-5. `sc.exe \\10.8.2.213 start USBGuardianConsole`.
+3. `sc.exe \\APP_SERVER_IP stop USBGuardianConsole`; wait for `STOPPED`.
+4. `robocopy ... \\APP_SERVER_IP\C$\Apps\USBGuardianConsole /E /XF appsettings.local.json`.
+5. `sc.exe \\APP_SERVER_IP start USBGuardianConsole`.
 6. Verify that the footer shows the live commit.
 
-### 26.2 Deploying a new API version (SQL-04)
+### 26.2 Deploying a new API version (SQL_SERVER)
 
-1. The build is staged on .213 (`C:\Apps\USBGuardianApiPublish`).
+1. The build is staged on APP_SERVER (`C:\Apps\USBGuardianApiPublish`).
 2. `sc stop "USB Guardian API"`; **wait for STOPPED** (otherwise the exe is locked → robocopy FAILS).
-3. `robocopy` onto SQL-04 `C:\USBGuardian.Api` (with `/XF appsettings.local.json`).
+3. `robocopy` onto SQL_SERVER `C:\USBGuardian.Api` (with `/XF appsettings.local.json`).
 4. `sc start`; verify `:5050/api/version`.
 
 *(Since 09/2026 this runs as the `USBGuardian-ApiDeploy` task under the server gMSA — see §34.2. Previously
@@ -1753,7 +1753,7 @@ Verify the local console's footer (`agent <commit>`) and the Event Log.
 
 1. Generate a new pair (`tools/WhitelistSigner`).
 2. Distribute the new `whitelist_public.pem` to the agents (part of the package/config).
-3. Set `Whitelist:PrivateKeyPath` on .213 and re-publish the whitelist (it will be signed with the new key).
+3. Set `Whitelist:PrivateKeyPath` on APP_SERVER and re-publish the whitelist (it will be signed with the new key).
 4. Verify that the agents accept the new signed version.
 
 ---
@@ -1812,12 +1812,12 @@ Admin    Console(WhitelistPublisher)   DB         API        Agent(WhitelistSync
 ### 27.4 Deployment component diagram
 
 ```
-        Active Directory  ◄── LDAP ── Console(.213, Blazor :4200) ── SQL ──►  SQL-04
-                                          │  (B-S-W-MIKOS$)                    DB USBGuardian
+        Active Directory  ◄── LDAP ── Console(APP_SERVER, Blazor :4200) ── SQL ──►  SQL_SERVER
+                                          │  (APP_SERVER$)                    DB USBGuardian
                                           │  WhitelistPublisher (private key)       ▲
-                                          │  AgentDeployService                     │ SQL (gMSA gmsa-SQL$)
+                                          │  AgentDeployService                     │ SQL (gMSA gmsa-api$)
                                           ▼                                          │
-                          gMSA task (gmsa-USBGdep$) ── SMB+sc ──► Clients    API(.SQL-04 :5443) ── to the DB
+                          gMSA task (gmsa-deploy$) ── SMB+sc ──► Clients    API(.SQL_SERVER :5443) ── to the DB
                                                                      │  ▲
                                                   push HTTPS :5443   │  │ heartbeat/whitelist/enforce
                                                                      ▼  │
@@ -2135,13 +2135,13 @@ MITM agent↔API
 ### 31.4 The attacker's goal: compromising the server / the key
 
 ```
-Compromising the .213 server
+Compromising the APP_SERVER server
 ├── Obtain the whitelist private key → forge the whitelist
-│   ├── Mitigation: ACL/DPAPI on the key, restricted access to .213               [MITIGATION]
+│   ├── Mitigation: ACL/DPAPI on the key, restricted access to APP_SERVER               [MITIGATION]
 │   └── Bounded impact: whitelist integrity only (not a CA, not code signing)     [LIMITED IMPACT]
 ├── Change the policy (enforce=false) → agents stop blocking
 │   └── Detectable (an audit of settings changes); requires console access        [DETECTION/AUTHORIZATION]
-└── Recommendation: monitor access to .213, a future HSM, key rotation (§26.7)
+└── Recommendation: monitor access to APP_SERVER, a future HSM, key rotation (§26.7)
 ```
 
 ### 31.5 Coverage summary
@@ -2170,7 +2170,7 @@ Compromising the .213 server
     "overridePath": "C:\\ProgramData\\USBGuardian\\override.json"
   },
   "whitelist": {
-    "syncUrl": "https://10.8.2.225:5443",   // the API (HTTPS)
+    "syncUrl": "https://SQL_SERVER_IP:5443",   // the API (HTTPS)
     "localPath": "C:\\ProgramData\\USBGuardian\\whitelist\\whitelist.json",
     "allowWildcards": false          // true = allow records without a serial (a security warning)
   },
@@ -2180,7 +2180,7 @@ Compromising the .213 server
   },
   "tls": {
     "validateServerCertificate": true,
-    "pinnedThumbprint": "E6F6B4FCE0BB627F564E85D6509DE7C4B82CF2F0"   // the API cert's thumbprint
+    "pinnedThumbprint": "API_CERT_THUMBPRINT"   // the API cert's thumbprint
   },
   "signing": {
     "enabled": true,                 // production: ALWAYS true (verify the whitelist signature)
@@ -2196,9 +2196,9 @@ Compromising the .213 server
 ```json
 {
   "ConnectionStrings": {
-    "DefaultConnection": "Server=tcp:10.8.2.225,1433;Database=USBGuardian;Integrated Security=true;TrustServerCertificate=true;"
+    "DefaultConnection": "Server=tcp:SQL_SERVER_IP,1433;Database=USBGuardian;Integrated Security=true;TrustServerCertificate=true;"
   },
-  "Authorization": { "AllowedGroups": [ "AXINETWORK\\USBGuardianClients" ] },
+  "Authorization": { "AllowedGroups": [ "DOMENA\\USBGuardianClients" ] },
   "Kestrel": { "Endpoints": {
     "Https": { "Url": "https://0.0.0.0:5443" },
     "Http":  { "Url": "http://0.0.0.0:5050" }     // roadmap: close it (HTTPS only)
@@ -2211,11 +2211,11 @@ Compromising the .213 server
 ```json
 {
   "ConnectionStrings": {
-    "DefaultConnection": "Server=tcp:10.8.2.225,1433;Database=USBGuardian;Integrated Security=true;TrustServerCertificate=true;"
+    "DefaultConnection": "Server=tcp:SQL_SERVER_IP,1433;Database=USBGuardian;Integrated Security=true;TrustServerCertificate=true;"
   },
   "Authorization": {
-    "AdminGroups": [ "AXINETWORK\\USB-Guardian-Admins" ],
-    "AllowedUsers": [ "AXINETWORK\\trnkam" ],     // a lockout-safe bootstrap
+    "AdminGroups": [ "DOMENA\\USB-Guardian-Admins" ],
+    "AllowedUsers": [ "DOMENA\\it-admin" ],     // a lockout-safe bootstrap
     "DevAllowAll": false
   },
   "Whitelist": { "PrivateKeyPath": "C:\\Apps\\USBGuardianConsole\\whitelist_private.pem" },
@@ -2244,7 +2244,7 @@ undefined states.
 
 | Situation | The system's behaviour | Design principle |
 |-----------|------------------------|------------------|
-| The server (.213/API) is unavailable | The agent runs offline: the local whitelist + the last policy; the incident queue accumulates (persistent) | The client is self-sufficient; an outage does not open protection |
+| The server (APP_SERVER/API) is unavailable | The agent runs offline: the local whitelist + the last policy; the incident queue accumulates (persistent) | The client is self-sufficient; an outage does not open protection |
 | The whitelist file is missing | `WhitelistChecker` returns `null` → the medium cannot be verified → per `onExpired`/the policy (fail-secure) | Fail-secure |
 | The `.sig` signature is missing/mismatched | The whitelist is rejected, the last valid version stays; the new one is not stored | Fail-secure, atomic writing |
 | The whitelist download is interrupted mid-way | Atomic writing (temp → rename, the .sig first then the .json); an inconsistent combination is rejected | Atomicity |
@@ -2326,7 +2326,7 @@ station would be left with a **mix of versions** — while the deploy reports su
 
 **(b) One identity held both tiers.** The client deploy account was also an admin on the database server, so
 compromising it would have reached both the fleet and the server. It has been split into three roles:
-`gmsa-USBGdep$` (stations only), `gmsa-USBGsrv$` (the API server only, deliberately outside the server-admin
+`gmsa-deploy$` (stations only), `gmsa-srvdeploy$` (the API server only, deliberately outside the server-admin
 group) and the account the console runs under, which is **an admin nowhere**.
 
 **A finding during verification (4 Sep 2026):** the `USBGuardian-ApiDeploy` task, which the documentation
@@ -2366,7 +2366,7 @@ other environments, portability), the fleet package is built with `true`, and th
 opposite state.
 
 **A consequence for reading this document:** in an environment where admin rights live on separate accounts
-(`pcadmin.*` in the `PC Admins` group), break-glass is not a tool for *the user in the field* but for **a
+(`pcadmin.*` in the `Workstation-Admins` group), break-glass is not a tool for *the user in the field* but for **a
 technician at a station that cannot reach the server**. An ordinary account gets the explanatory refusal —
 verified in production on 4 Sep 2026, when a colleague tried to reach the console under his everyday
 account. The behaviour was correct; the wording in the few places that described it as a user-facing feature
@@ -2475,7 +2475,7 @@ its fourth row would tempt one to write.
 | `ConnectionStrings.DefaultConnection` | The SQL connection (Integrated Security). |
 | `Authorization.AdminGroups` / `AllowedUsers` | Console access (a lockout-safe bootstrap). |
 | `Authorization.AllowedGroups` (API) | The agents' AD group (`USBGuardianClients`). |
-| `Whitelist.PrivateKeyPath` | The private RSA key for signing the whitelist (.213, gitignored). |
+| `Whitelist.PrivateKeyPath` | The private RSA key for signing the whitelist (APP_SERVER, gitignored). |
 | `Kestrel.Endpoints` | Bind addresses/ports. |
 | `AdSync.*` | AD sync (the interval, SearchBase, IncludeDisabled). |
 
@@ -2498,14 +2498,14 @@ its fourth row would tempt one to write.
 ### C.2 SQL grants (least privilege, the console account)
 
 ```sql
-CREATE LOGIN [DOMAIN\B-S-W-MIKOS$] FROM WINDOWS;
+CREATE LOGIN [DOMAIN\APP_SERVER$] FROM WINDOWS;
 USE USBGuardian;
-CREATE USER  [DOMAIN\B-S-W-MIKOS$] FOR LOGIN [DOMAIN\B-S-W-MIKOS$];
-ALTER ROLE db_datareader ADD MEMBER [DOMAIN\B-S-W-MIKOS$];           -- reads everything
-GRANT INSERT, UPDATE, DELETE ON dbo.Computers          TO [DOMAIN\B-S-W-MIKOS$];
-GRANT INSERT, UPDATE, DELETE ON dbo.WhitelistDevices   TO [DOMAIN\B-S-W-MIKOS$];  -- DELETE = removal from the catalog
-GRANT INSERT, UPDATE         ON dbo.WhitelistVersions  TO [DOMAIN\B-S-W-MIKOS$];  -- no DELETE (append-only audit)
-GRANT SELECT, INSERT         ON dbo.ActivityLog        TO [DOMAIN\B-S-W-MIKOS$];  -- the activity log (§34.1)
+CREATE USER  [DOMAIN\APP_SERVER$] FOR LOGIN [DOMAIN\APP_SERVER$];
+ALTER ROLE db_datareader ADD MEMBER [DOMAIN\APP_SERVER$];           -- reads everything
+GRANT INSERT, UPDATE, DELETE ON dbo.Computers          TO [DOMAIN\APP_SERVER$];
+GRANT INSERT, UPDATE, DELETE ON dbo.WhitelistDevices   TO [DOMAIN\APP_SERVER$];  -- DELETE = removal from the catalog
+GRANT INSERT, UPDATE         ON dbo.WhitelistVersions  TO [DOMAIN\APP_SERVER$];  -- no DELETE (append-only audit)
+GRANT SELECT, INSERT         ON dbo.ActivityLog        TO [DOMAIN\APP_SERVER$];  -- the activity log (§34.1)
 -- For the AppSettings grant see 06_appsettings.sql
 -- Note: the console does NOT have DELETE on Incidents (retention is done by the API under a gMSA).
 ```

@@ -121,7 +121,7 @@ exit /b 0
 
 :usage
 echo Pouziti: Update-Agent.cmd ^<ZDROJ^> ^<HOST ^| SOUBOR_S_HOSTY^> [NAZEV_SLUZBY]
-echo   napr.: Update-Agent.cmd "C:\Apps\USBGuardianAgentPublish" TRNKAMW11
+echo   napr.: Update-Agent.cmd "C:\Apps\USBGuardianAgentPublish" PC-01
 echo          Update-Agent.cmd "C:\Apps\USBGuardianAgentPublish" "C:\ProgramData\USBGuardian\deploy\update.txt"
 exit /b 1
 

@@ -32,3 +32,4 @@ tools/WhitelistSigner/private_key.pem
 
 # fleet deploy audit CSV (generovane)
 scripts/deploy-fleet-*.csv
+*.local.md

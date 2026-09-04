@@ -16,7 +16,7 @@ Unapproved media are warned or blocked. Designed as a technical control for
 |------|-------|------|
 | 1–7 | Agent (WMI/warn/block), API+SQL+gMSA+Kerberos, RSA-4096 whitelist signature, incident queue, log tagging | ✅ |
 | 8 | **Agent local admin console** (HttpListener, loopback, read-only) | ✅ |
-| 9 | **Server admin console** (Blazor on .213) per **AXIMA UI standard** (dark/light, footer, /api/version) | ✅ |
+| 9 | **Server admin console** (Blazor on APP_SERVER) per **AXIMA UI standard** (dark/light, footer, /api/version) | ✅ |
 | 10 | **AD sync** – station inventory from AD + reconciliation (who lacks the agent) + AD path; communication icon | ✅ |
 | 11 | **Overview** – cross-page tile summary, filter (period/action/search), aggregation, "Approved" column | ✅ |
 | 12 | **Whitelist** – entry by serial number only + autofill from incidents + import + inline field edit + active checkbox | ✅ |
@@ -24,25 +24,25 @@ Unapproved media are warned or blocked. Designed as a technical control for
 | 14 | **Encrypted agent↔API comms** – self-signed cert (no CA, MachineKeySet) + thumbprint pinning | ✅ |
 | 15 | **Communication oversight** – "Silent agents" tile + configurable threshold; **"Request data" on click**; sortable Detailed table | ✅ |
 | 16 | **Startup scan** of already-connected media; whitelist poll 2 min; central `onExpired`/`enforce` | ✅ |
-| 17 | **Agent auto-enrollment** – the console deploys the agent itself onto stations without it (gMSA + scheduled task, dry-run/opt-in); **PILOT SUCCESSFUL on .181 (no creds, via gMSA)** | ✅ pilot OK |
+| 17 | **Agent auto-enrollment** – the console deploys the agent itself onto stations without it (gMSA + scheduled task, dry-run/opt-in); **PILOT SUCCESSFUL on PC-01 (no creds, via gMSA)** | ✅ pilot OK |
 | 18 | **DB/incidents flowing** (agent→API→DB→console) | ✅ |
 | 19 | **Version/commit on all components** (`/api/version`, agent reports commit; **reliable stamp** = footer/`/api/version` = git HEAD) | ✅ |
 | 20 | **User attribution** – the real logged-in user via the **WTS API** (agent=SYSTEM → not the machine account); verified live | ✅ |
-| 21 | **Complete client** – ToastHelper (notifications, logon+unlock) + **PS-free watchdog**, all in `Build-AgentPackage`; verified on .181 | ✅ |
+| 21 | **Complete client** – ToastHelper (notifications, logon+unlock) + **PS-free watchdog**, all in `Build-AgentPackage`; verified on PC-01 | ✅ |
 | 22 | **Media capacity** in Overview and Whitelist; **CSV export** + **manager report** with charts (inline SVG, 1–2 A4) | ✅ |
 | 23 | **Data retention** – Settings (console) + `RetentionService` in the API (purges old incidents); **Database page** (DB content overview) | ✅ |
 | 24 | **Deploy targeting** – default for new PCs (Settings) + per-station and bulk include/exclude in Stations | ✅ |
 | 25 | **Agent local console** also shows the list of approved devices (whitelist) + agent version | ✅ |
 | 26 | **HTML animation** of how the system works (`/how-it-works.html`, 13 steps: data flow + enforcement) | ✅ |
-| 27 | **Whitelist signing/publishing workflow (automatic)** – catalog change → console publishes and **signs internally** (server-side RSA, key on .213) → API serves the signed blob verbatim → **client = a 1:1 copy of the server** within ~2 min; agent O(1) match (scales to 10k) | ✅ |
-| 28 | **Enforcement server→agent (Phase 2)** – heartbeat carries `policy.enforce` (.213 = truth) → agent really **blocks/warns** per the server | ✅ |
+| 27 | **Whitelist signing/publishing workflow (automatic)** – catalog change → console publishes and **signs internally** (server-side RSA, key on APP_SERVER) → API serves the signed blob verbatim → **client = a 1:1 copy of the server** within ~2 min; agent O(1) match (scales to 10k) | ✅ |
+| 28 | **Enforcement server→agent (Phase 2)** – heartbeat carries `policy.enforce` (APP_SERVER = truth) → agent really **blocks/warns** per the server | ✅ |
 | 29 | **Local break-glass (Phase 3)** – station admin temporarily disables blocking offline (local console), persisted, **logged** → server; cleared on reconnect | ✅ |
 | 30 | **Auto-re-enable + reconciliation** – on blocking off / break-glass the agent restores previously blocked media; a now-approved medium is restored even while blocking is on | ✅ |
 | 31 | **Client service restart** (local console, agent self-restart) + **settings reload** (server console, AccessCache) | ✅ |
 | 32 | **Reliable enforcement (symmetry)** – disable blocking = return **everything at once** (exact `Enable-PnpDevice`, unplugged-media cleanup); re-enable = re-block **already-connected** unauthorized media; a newly approved medium applies **immediately after download** (whitelist cache invalidation); ✕ delete from catalog (DELETE grant); console error message unwrapped | ✅ |
 | 33 | **Health checks** – a checklist of checks (server and client) ticked off with running results and **CSV / HTML / PDF / TXT export**; **scheduled restart** of services (server and agent) | ✅ |
 | 34 | **Bank UI look** – switchable in Settings, dark/light without FOUC, survives navigation between pages | ✅ |
-| 35 | **Separate deploy accounts** – `gmsa-USBGdep$` (stations only) × `gmsa-USBGsrv$` (API server only) × console (admin nowhere); one identity no longer holds both the fleet and the server | ✅ |
+| 35 | **Separate deploy accounts** – `gmsa-deploy$` (stations only) × `gmsa-srvdeploy$` (API server only) × console (admin nowhere); one identity no longer holds both the fleet and the server | ✅ |
 | 36 | **Updating a deployed agent** – `Update-Agent.cmd` (stop → wait for `STOPPED` → copy → verify `RUNNING`), **offline installer** in the package, **stable/beta channels**, **version archive** + rollback | ✅ |
 | 37 | **Activity log** – `ActivityLog`: heartbeats and the server's answers, incident batches received, whitelist publications, manual operator actions; API and console write into the same table, page with filters, live mode and CSV export | ✅ |
 | 38 | **Local console: local admin login** – a loopback token is a *network* token and for a local account Windows strips Administrators from it (`LocalAccountTokenFilterPolicy`) → the check now accepts a filtered token as well, and a refusal shows **who** the person was seen as | ✅ |
@@ -56,7 +56,7 @@ Unapproved media are warned or blocked. Designed as a technical control for
 Three components, push model (agent → API), two-tier server (logic on the app server, DB = storage):
 
 ```
-[Client station]                     [App server .213]            [DB server SQL-04]
+[Client station]                     [App server APP_SERVER]            [DB server SQL_SERVER]
 ┌────────────────────┐               ┌─────────────────────┐      ┌───────────────────┐
 │ Agent (.NET8 svc)  │               │ Admin console       │      │ SQL Server        │
 │  WMI detection     │  push  HTTPS  │ (Blazor :4200)      │ read/│ DB USBGuardian    │
@@ -86,14 +86,14 @@ Visually: [data-flow animation](docs/how-it-works.html) · [mind map](docs/mind-
 | Component | Technology | Where it runs |
 |-----------|-------------|----------|
 | **Agent** | C# .NET 8, Windows Service | every station (SYSTEM) |
-| **API** | ASP.NET Core, :5050 / :5443 | `B-S-W-SQL-04`, installed at `C:\USBGuardian.Api`, Windows service "USB Guardian API" |
-| **Admin console** | Blazor Server, :4200 | `10.8.2.213` (`B-S-W-MIKOS`, Windows service `USBGuardianConsole`) |
-| **Database** | SQL Server | `B-S-W-SQL-04`, DB `USBGuardian` |
+| **API** | ASP.NET Core, :5050 / :5443 | `SQL_SERVER`, installed at `C:\USBGuardian.Api`, Windows service "USB Guardian API" |
+| **Admin console** | Blazor Server, :4200 | `APP_SERVER_IP` (`APP_SERVER`, Windows service `USBGuardianConsole`) |
+| **Database** | SQL Server | `SQL_SERVER`, DB `USBGuardian` |
 | **Authentication** | Windows Auth (Kerberos / Negotiate) | API: AD group; console: AD group + account whitelist |
 
 ## Server admin console (Blazor)
 
-Runs on the app server (`10.8.2.213`), reads/writes SQL-04, **AXIMA UI standard** (archetype A – IT-ops:
+Runs on the app server (`APP_SERVER_IP`), reads/writes SQL_SERVER, **AXIMA UI standard** (archetype A – IT-ops:
 dark/light toggle `axima.theme` without FOUC, print = light, status traffic-lights). Pages:
 
 - **Overview** – cross-page tile summary (Stations in AD / Missing agent / Approved media /
@@ -197,7 +197,7 @@ Stations without an agent are visible under **Stations** (the "Missing agent" ti
   + **ToastHelper** logon/unlock via `schtasks /XML`); skips offline/already-installed; audit CSV. (PS 5.1 and 7.)
 - **Auto-enrollment (the console deploys on its own):** `AgentDeployService`, after AD sync, finds stations without an agent,
   applies the **default `deploy.defaultEnroll` + exceptions** (`includeHosts`/`excludeHosts` managed in Stations) and
-  (in live mode) writes the targets into `deploy.targetsFile`; the install is performed by a **scheduled task on .213 under a
+  (in live mode) writes the targets into `deploy.targetsFile`; the install is performed by a **scheduled task on APP_SERVER under a
   dedicated gMSA** (least-privilege). **Default OFF + dry-run.** Account setup: [docs/auto-deploy-setup.en.md](docs/auto-deploy-setup.en.md).
 - **Updating a deployed agent:** `scripts\Update-Agent.cmd <SOURCE> <HOST|FILE> [SERVICE]` – stops the service,
   **waits for `STOPPED`**, copies, and **verifies `RUNNING`**. Without that the running `.exe` is locked, only part
@@ -216,13 +216,13 @@ Stations without an agent are visible under **Stations** (the "Missing agent" ti
 
 | Role | Account | Where it is an admin |
 |---|---|---|
-| Clients (auto-enrollment, update) | `gmsa-USBGdep$` | stations only |
-| Server (API deployment) | `gmsa-USBGsrv$` | the API server only |
+| Clients (auto-enrollment, update) | `gmsa-deploy$` | stations only |
+| Server (API deployment) | `gmsa-srvdeploy$` | the API server only |
 | Console (the running app) | app server machine account | **nowhere** |
 
 > **AXIMA environment:** PS scripts running on machines **must be signed** (execution policy AllSigned via GPO)
-> with the prod cert `CN=powershell.axinetwork.loc`, and the publisher must be in `LocalMachine\TrustedPublisher`
-> (on .213 and the clients, fleet via GPO). Before signing **CRLF + UTF-8 BOM** (otherwise HashMismatch).
+> with the prod cert `CN=powershell.domena.loc`, and the publisher must be in `LocalMachine\TrustedPublisher`
+> (on APP_SERVER and the clients, fleet via GPO). Before signing **CRLF + UTF-8 BOM** (otherwise HashMismatch).
 
 ## Configuration
 
@@ -235,6 +235,21 @@ placeholder templates are in the repo.
 | Agent | `agent/USBGuardian/Config/agent.config.json` | `agent.config.local.json` |
 | API | `server/USBGuardian.Api/appsettings.json` | `appsettings.local.json` |
 | Console | `server/USBGuardian.Admin/appsettings.local.json.example` | `appsettings.local.json` |
+
+### Placeholders in the documentation
+
+The documentation describes the real pilot deployment, but server, workstation and account
+names are replaced with placeholders — substitute your own values:
+
+| Placeholder | Meaning |
+|---|---|
+| `APP_SERVER` / `APP_SERVER_IP` | application server — hosts the admin console and the deploy tasks |
+| `SQL_SERVER` / `SQL_SERVER_IP` | SQL Server with the `USBGuardian` database and the API service |
+| `DOMENA`, `domena.loc` | Active Directory domain |
+| `PC-01` … `PC-04` | workstations running the agent |
+| `gmsa-api`, `gmsa-deploy`, `gmsa-srvdeploy` | gMSA accounts (API, client deploy, API deploy) |
+| `IT-Admins`, `Workstation-Admins` | AD groups (console access, local admin on workstations) |
+| `API_CERT_THUMBPRINT` | thumbprint of the self-signed API certificate (pinning) |
 
 ### Console – `appsettings.local.json`
 
@@ -287,32 +302,32 @@ cd server\USBGuardian.Admin
 dotnet run
 ```
 
-## Deploying the console to the app server (.213)
+## Deploying the console to the app server (APP_SERVER)
 
 ```powershell
 # Build (self-contained – the target server needs no .NET)
 dotnet publish server\USBGuardian.Admin -c Release -r win-x64 --self-contained -o D:\deploy\USBGuardianConsole
 
 # Copy via SMB + service via remote sc.exe (no WinRM needed)
-robocopy D:\deploy\USBGuardianConsole \\10.8.2.213\C$\Apps\USBGuardianConsole /E /XF appsettings.local.json
-# create \\10.8.2.213\C$\Apps\USBGuardianConsole\appsettings.local.json (see .example)
-sc.exe \\10.8.2.213 create USBGuardianConsole binPath= "C:\Apps\USBGuardianConsole\USBGuardian.Admin.exe" start= auto
-sc.exe \\10.8.2.213 start USBGuardianConsole
+robocopy D:\deploy\USBGuardianConsole \\APP_SERVER_IP\C$\Apps\USBGuardianConsole /E /XF appsettings.local.json
+# create \\APP_SERVER_IP\C$\Apps\USBGuardianConsole\appsettings.local.json (see .example)
+sc.exe \\APP_SERVER_IP create USBGuardianConsole binPath= "C:\Apps\USBGuardianConsole\USBGuardian.Admin.exe" start= auto
+sc.exe \\APP_SERVER_IP start USBGuardianConsole
 ```
 
-> **Build/deploy artefacts:** published locally to `D:\deploy`; the API is staged on .213 at
-> `C:\Apps\USBGuardianApiPublish` and installed from there onto SQL-04 at `C:\USBGuardian.Api` (service "USB Guardian API").
+> **Build/deploy artefacts:** published locally to `D:\deploy`; the API is staged on APP_SERVER at
+> `C:\Apps\USBGuardianApiPublish` and installed from there onto SQL_SERVER at `C:\USBGuardian.Api` (service "USB Guardian API").
 
-SQL grant (least-privilege) for the console account on SQL-04:
+SQL grant (least-privilege) for the console account on SQL_SERVER:
 
 ```sql
-CREATE LOGIN [DOMENA\B-S-W-MIKOS$] FROM WINDOWS;
+CREATE LOGIN [DOMENA\APP_SERVER$] FROM WINDOWS;
 USE USBGuardian;
-CREATE USER [DOMENA\B-S-W-MIKOS$] FOR LOGIN [DOMENA\B-S-W-MIKOS$];
-ALTER ROLE db_datareader ADD MEMBER [DOMENA\B-S-W-MIKOS$];
-GRANT INSERT, UPDATE, DELETE ON dbo.Computers TO [DOMENA\B-S-W-MIKOS$];
-GRANT INSERT, UPDATE, DELETE ON dbo.WhitelistDevices TO [DOMENA\B-S-W-MIKOS$];  -- DELETE = remove from catalog (✕)
-GRANT INSERT, UPDATE ON dbo.WhitelistVersions TO [DOMENA\B-S-W-MIKOS$];          -- no DELETE (versions = append-only audit)
+CREATE USER [DOMENA\APP_SERVER$] FOR LOGIN [DOMENA\APP_SERVER$];
+ALTER ROLE db_datareader ADD MEMBER [DOMENA\APP_SERVER$];
+GRANT INSERT, UPDATE, DELETE ON dbo.Computers TO [DOMENA\APP_SERVER$];
+GRANT INSERT, UPDATE, DELETE ON dbo.WhitelistDevices TO [DOMENA\APP_SERVER$];  -- DELETE = remove from catalog (✕)
+GRANT INSERT, UPDATE ON dbo.WhitelistVersions TO [DOMENA\APP_SERVER$];          -- no DELETE (versions = append-only audit)
 ```
 
 ## Security
@@ -341,7 +356,7 @@ usb-guardian/
 ├── server/
 │   ├── USBGuardian.Api/      # ASP.NET Core API (incident ingestion, whitelist)
 │   │   └── Retention/        # RetentionService (cleanup of old incidents)
-│   └── USBGuardian.Admin/    # Blazor Server admin console (.213)
+│   └── USBGuardian.Admin/    # Blazor Server admin console (APP_SERVER)
 │       ├── Components/        # Pages (Home, Computers, Whitelist, Settings, Database, Docs), Layout
 │       ├── AdSync/            # AdSyncRunner + AdSyncService
 │       ├── Deploy/            # AgentDeployService (auto-enrollment orchestrator)

@@ -17,26 +17,26 @@ The server console aggregates data, keeps a station inventory from AD and shows 
 
 | | |
 |---|---|
-| **Domain** | `axinetwork.loc` |
-| **DB** | SQL Server `B-S-W-SQL-04` (= `10.8.2.225`), database `USBGuardian`, scripts `database/01–07` applied, **`08_deploy_ignored.sql`**, **`09_activity_log.sql` = activity log (2026-09-04)**; **+ `GRANT DELETE ON dbo.WhitelistDevices` to the console account** (catalog deletion – applied manually) **+ `ActivityLog` grants**: `SELECT,INSERT` for `B-S-W-MIKOS$` and `gmsa-SQL$`, `EXECUTE ON sp_PurgeActivityLog` for `gmsa-SQL$` |
-| **API** | `B-S-W-SQL-04`, Windows service "USB Guardian API", install `C:\USBGuardian.Api`, gMSA `AXINETWORK\gmsa-SQL$`; **HTTPS `:5443`** (self-signed, **PIN `E6F6B4FCE0BB627F564E85D6509DE7C4B82CF2F0`**) + HTTP `:5050`. **Live version via `GET /api/version`** |
+| **Domain** | `domena.loc` |
+| **DB** | SQL Server `SQL_SERVER` (= `SQL_SERVER_IP`), database `USBGuardian`, scripts `database/01–07` applied, **`08_deploy_ignored.sql`**, **`09_activity_log.sql` = activity log (2026-09-04)**; **+ `GRANT DELETE ON dbo.WhitelistDevices` to the console account** (catalog deletion – applied manually) **+ `ActivityLog` grants**: `SELECT,INSERT` for `APP_SERVER$` and `gmsa-api$`, `EXECUTE ON sp_PurgeActivityLog` for `gmsa-api$` |
+| **API** | `SQL_SERVER`, Windows service "USB Guardian API", install `C:\USBGuardian.Api`, gMSA `DOMENA\gmsa-api$`; **HTTPS `:5443`** (self-signed, **PIN `API_CERT_THUMBPRINT`**) + HTTP `:5050`. **Live version via `GET /api/version`** |
 | **Version/commit (check)** | console footer + `:4200/api/version`; API `:5050/api/version`; agent reports commit → console "Agent version". All stamped by `git rev-parse` (MSBuild) |
-| **Admin console** | **live** `http://10.8.2.213:4200/` (`B-S-W-MIKOS`), service `USBGuardianConsole`, `C:\Apps\USBGuardianConsole`, self-contained |
-| **Console account** | **LocalSystem** = `AXINETWORK\B-S-W-MIKOS$` (SQL grant: read all + write Computers/WhitelistDevices/WhitelistVersions/AppSettings) |
-| **Console authorization** | AD `AXINETWORK\SQL Admins2` + whitelist `AXINETWORK\trnkam` (+ DB list from Settings) |
-| **Agent↔API encryption** | HTTPS + **thumbprint pinning** (no CA) — verified end-to-end (heartbeat OK from .181) |
+| **Admin console** | **live** `http://APP_SERVER_IP:4200/` (`APP_SERVER`), service `USBGuardianConsole`, `C:\Apps\USBGuardianConsole`, self-contained |
+| **Console account** | **LocalSystem** = `DOMENA\APP_SERVER$` (SQL grant: read all + write Computers/WhitelistDevices/WhitelistVersions/AppSettings) |
+| **Console authorization** | AD `DOMENA\IT-Admins` + whitelist `DOMENA\it-admin` (+ DB list from Settings) |
+| **Agent↔API encryption** | HTTPS + **thumbprint pinning** (no CA) — verified end-to-end (heartbeat OK from PC-01) |
 | **AD sync** | enabled 60 min + on-demand; **213 in AD, ~212 without agent** |
-| **Live commit** (2026-09-04 8:17) | **console `5431dce`** · **API `5431dce`** · **agent `b0e1a0d`** — all at repo HEAD. Activity log verified end-to-end: heartbeats from four stations (TRNKAMW11, TRNKAMW11N, CERNYSW11, BARTKOVAJW11) land in `ActivityLog` and show on the Activity page. Reliable stamp = footer = git HEAD |
+| **Live commit** (2026-09-04 8:17) | **console `5431dce`** · **API `5431dce`** · **agent `b0e1a0d`** — all at repo HEAD. Activity log verified end-to-end: heartbeats from four stations (PC-01, PC-02, PC-03, PC-04) land in `ActivityLog` and show on the Activity page. Reliable stamp = footer = git HEAD |
 | **Console – pages** | Overview (filter+aggregation+sort, capacity, **CSV export + manager report with charts**), Stations (AD inventory + "Agents gone silent" + "Request data" + **Deployment / bulk exclude-include**), Whitelist (**capacity + catalog filter + auto-published signed version**), Settings (enforcement/access/email/alerts/monitoring/auto-enrollment+default PC/retention/**Maintenance: reload settings**), **Database**, **Health checks**, Documentation (+HTML animation) |
-| **Enforcement (P1-3)** | **whitelist 1:1** (server-side auto-sign, internal RSA key on .213) → **enforcement** server→agent (`policy.enforce` in heartbeat) → **break-glass** (local console 5080, offline, logged, cleared on sync) + **auto-re-enable** + whitelist reconciliation. Local console: service restart, break-glass, whitelist list |
-| **Deploy account (auto-enroll)** | **gMSA `AXINETWORK\gmsa-USBGdep$`** – in `PC Admins` (admin on clients) **and local admin on SQL-04** (API deploy); installed on `.213`; deploy task `USBGuardian-AutoDeploy` (under gMSA, via CIM) |
-| **Agent (test) .181** | **PILOT SUCCESSFUL** – `.181` = **TRNKAMW11** (own workstation); service "USB Guardian" RUNNING, heartbeat + **incidents flowing into DB**. Agent live **`f2bb194`** – user attribution, client 100% (watchdog+toast), **enforcement P1-3 + auto-re-enable + reliable unblock + re-block of connected media**. Updating the agent needs elevation (UAC) → run by the user (build staged on .213) |
+| **Enforcement (P1-3)** | **whitelist 1:1** (server-side auto-sign, internal RSA key on APP_SERVER) → **enforcement** server→agent (`policy.enforce` in heartbeat) → **break-glass** (local console 5080, offline, logged, cleared on sync) + **auto-re-enable** + whitelist reconciliation. Local console: service restart, break-glass, whitelist list |
+| **Deploy account (auto-enroll)** | **gMSA `DOMENA\gmsa-deploy$`** – in `Workstation-Admins` (admin on clients) **and local admin on SQL_SERVER** (API deploy); installed on `APP_SERVER`; deploy task `USBGuardian-AutoDeploy` (under gMSA, via CIM) |
+| **Agent (test) PC-01** | **PILOT SUCCESSFUL** – `PC-01` (own workstation); service "USB Guardian" RUNNING, heartbeat + **incidents flowing into DB**. Agent live **`f2bb194`** – user attribution, client 100% (watchdog+toast), **enforcement P1-3 + auto-re-enable + reliable unblock + re-block of connected media**. Updating the agent needs elevation (UAC) → run by the user (build staged on APP_SERVER) |
 
 ## 3. Key decisions (why)
 
 - **Push, not pull** – 500+ clients behind NAT/firewall; the agent only needs an outbound connection.
-- **Two-tier** – operations (console, AD sync) on app server `.213`, DB is just storage on SQL-04.
-  (Note: the API still runs on SQL-04; moving it to .213 is planned hardening.)
+- **Two-tier** – operations (console, AD sync) on app server `APP_SERVER`, DB is just storage on SQL_SERVER.
+  (Note: the API still runs on SQL_SERVER; moving it to APP_SERVER is planned hardening.)
 - **Console = .NET/Blazor**, not Node – reuses EF models from the API (linked `DbModels`/`AppDbContext`),
   one language, ASP.NET Core is already on the server.
 - **Agent local console via `HttpListener`**, not Kestrel – the agent does not need the ASP.NET Core runtime.
@@ -51,15 +51,15 @@ The server console aggregates data, keeps a station inventory from AD and shows 
 > Fixed latent repo bugs: missing authorization policy `USBGuardianClients` (controllers returned 500);
 > `EphemeralKeySet → MachineKeySet` (otherwise Schannel won't do the server TLS handshake).
 
-## 4. Console deploy (manual, from TRNKAMW11)
+## 4. Console deploy (manual, from PC-01)
 
-trnkam has admin on `.213`; WinRM was closed → deploy via **SMB + remote `sc.exe`** (ports 135/445):
+it-admin has admin on `APP_SERVER`; WinRM was closed → deploy via **SMB + remote `sc.exe`** (ports 135/445):
 
 ```powershell
 dotnet publish server\USBGuardian.Admin -c Release -r win-x64 --self-contained -o D:\deploy\USBGuardianConsole
-sc.exe \\10.8.2.213 stop USBGuardianConsole
-robocopy D:\deploy\USBGuardianConsole \\10.8.2.213\C$\Apps\USBGuardianConsole /E /XF appsettings.local.json
-sc.exe \\10.8.2.213 start USBGuardianConsole
+sc.exe \\APP_SERVER_IP stop USBGuardianConsole
+robocopy D:\deploy\USBGuardianConsole \\APP_SERVER_IP\C$\Apps\USBGuardianConsole /E /XF appsettings.local.json
+sc.exe \\APP_SERVER_IP start USBGuardianConsole
 ```
 
 Firewall `:4200` was created via DCOM/CIM. Configuration on the server:
@@ -68,7 +68,7 @@ Firewall `:4200` was created via DCOM/CIM. Configuration on the server:
 ## 5. Status and next steps
 
 ### 5.1 Done and live
-- **DB / incidents = 100 %** — agent → API → DB → console, the whole path runs (Overview shows incidents from .181).
+- **DB / incidents = 100 %** — agent → API → DB → console, the whole path runs (Overview shows incidents from PC-01).
   **Key fix:** the API had an unfinished queue refactor — `IncidentsController` required `IncidentQueue`, but
   `Program.cs` **did not register it in DI** → **500 on every `/api/incidents`** (heartbeat ran without that dependency).
   After `AddSingleton<IncidentQueue>` + `AddHostedService<IncidentQueueWorker>` the controller returns 202 + the worker writes.
@@ -93,30 +93,30 @@ Firewall `:4200` was created via DCOM/CIM. Configuration on the server:
 - **User attribution (DONE + LIVE)** — the agent runs as SYSTEM and previously reported the machine account (`HOST$`). The new
   `SessionUser` (WTS API: `WTSGetActiveConsoleSessionId` + active-session enumeration, `WTSQuerySessionInformation`)
   resolves the real logged-in user → `DOMAIN\user` in the incident, the log and the Toast. Fail-safe: with nobody
-  logged in it falls back to the machine account (the incident is always recorded). **Verified live on .181:** agent
-  commit `428a262` deployed, new incidents record `AXINETWORK\trnkam` (previously `TRNKAMW11$`).
+  logged in it falls back to the machine account (the incident is always recorded). **Verified live on PC-01:** agent
+  commit `428a262` deployed, new incidents record `DOMENA\it-admin` (previously `PC-01$`).
 
 ### 5.2 Deployed components
-- **API on SQL-04 (live `19e4018`):** `ReportNow` in the heartbeat, queue DI fix, `/api/version`. Deploy via
-  **gMSA** (build staged on `.213` `C:\Apps\USBGuardianApiPublish` → gMSA has local admin on SQL-04). Caution on
+- **API on SQL_SERVER (live `19e4018`):** `ReportNow` in the heartbeat, queue DI fix, `/api/version`. Deploy via
+  **gMSA** (build staged on `APP_SERVER` `C:\Apps\USBGuardianApiPublish` → gMSA has local admin on SQL_SERVER). Caution on
   redeploy: **wait for `STOPPED`** (otherwise `USBGuardian.Api.exe` is locked → robocopy `FAILED` → the old version keeps running).
-- **Agent on .181 (auto-installed):** whitelist poll 2 min, startup scan, `ReportNow`, serial trim,
+- **Agent on PC-01 (auto-installed):** whitelist poll 2 min, startup scan, `ReportNow`, serial trim,
   real version. Fixes: `onExpiredWhitelist`, publicKeyPath relative to exe, GUID, removed Sqlite.
 
-### 5.3 Agent auto-enrollment — PILOT SUCCESSFUL (.181), expand to fleet
+### 5.3 Agent auto-enrollment — PILOT SUCCESSFUL (PC-01), expand to fleet
 Goal: the console, running 24/7 after AD sync, deploys the agent itself onto stations without an agent. **Least-privilege:** the console writes the target list
-(`deploy.targetsFile`), the installation is done by a **scheduled task on .213 under gMSA** (only that account has admin on the clients).
-- **Works end-to-end:** gMSA `gmsa-USBGdep$` (in `PC Admins` = admin on clients, no password), task `USBGuardian-AutoDeploy`,
-  `Deploy-AgentFleet.ps1` (runspace pool PS5.1, `sc.exe \\HOST create` via cmd). **.181 installed without any creds**,
+(`deploy.targetsFile`), the installation is done by a **scheduled task on APP_SERVER under gMSA** (only that account has admin on the clients).
+- **Works end-to-end:** gMSA `gmsa-deploy$` (in `Workstation-Admins` = admin on clients, no password), task `USBGuardian-AutoDeploy`,
+  `Deploy-AgentFleet.ps1` (runspace pool PS5.1, `sc.exe \\HOST create` via cmd). **PC-01 installed without any creds**,
   the service runs, heartbeat + incidents flow. Scripts: `New-DeployGmsa.ps1`, `Install-Agent.ps1`/`Uninstall-Agent.ps1`,
   Detail: [docs/auto-deploy-setup.md](docs/auto-deploy-setup.md).
 - **Complete client (DONE):** the package now also carries **ToastHelper** (user notifications) + scheduled tasks.
   Build: `scripts\Build-AgentPackage.ps1` → agent (root) + `ToastHelper\` (self-contained) + `tasks\`.
   `Deploy-AgentFleet.ps1` registers two **PS-free** tasks on the client: **watchdog** (`schtasks … sc start`, every 3 min)
   and **ToastHelper** (`schtasks /XML`, logon+unlock trigger, runs in the user session, least-privilege).
-  **Applied and verified on .181** (ToastHelper.exe in `…\ToastHelper\`, both tasks Ready). Without ToastHelper the
+  **Applied and verified on PC-01** (ToastHelper.exe in `…\ToastHelper\`, both tasks Ready). Without ToastHelper the
   incidents are still recorded, but the user would not see the warning.
-- **Expand to fleet:** GPO publisher trust on clients (5.4), enable in Settings (dry-run → live), `.181 → .180 → fleet`.
+- **Expand to fleet:** GPO publisher trust on clients (5.4), enable in Settings (dry-run → live), `PC-01 → .180 → fleet`.
 
 ### 5.3b Whitelist signing/publishing workflow — DONE, AUTOMATIC (client = a 1:1 copy of the server)
 Unlocks catalog delivery to agents (previously console changes never reached agents – version wasn't bumped +
@@ -127,27 +127,27 @@ internal RSA key on the server** (`Whitelist:PrivateKeyPath`) → stores `Json`+
 `GET /api/whitelist` returns the blob **verbatim** + `GET /api/whitelist/signature` → the agent downloads (≤2 min),
 verifies (fail-secure), stores as a JSON file. **Byte-exact** (same blob signed/served/verified, UTF-8 without BOM,
 SHA-256/Pkcs1). Agent matches via **Dictionary O(1)** (scales to 10k). Signing uses the **internal** USB Guardian key
-(public = `whitelist_public.pem` on agents), not a CA/AXIMA cert. **Trade-off (chosen):** the private key sits on `.213`
+(public = `whitelist_public.pem` on agents), not a CA/AXIMA cert. **Trade-off (chosen):** the private key sits on `APP_SERVER`
 (protect via ACL) in exchange for automation. DB: `database/07_whitelist_publish.sql` (`Json`+`Signature`→`NVARCHAR(MAX)`).
-**Deployed:** console + API + DB migration. **Setup (user):** place the private key on `.213` and set
+**Deployed:** console + API + DB migration. **Setup (user):** place the private key on `APP_SERVER` and set
 `Whitelist:PrivateKeyPath` in `appsettings.local.json`. Server = DB (blob), client = JSON file.
 
 ### 5.4 Environment for PS scripts (IMPORTANT – AXIMA gotchas)
-- **AllSigned (GPO):** every PS script that runs there **must be signed** with the prod cert `CN=powershell.axinetwork.loc`
-  (`-ExecutionPolicy Bypass` does NOT bypass this). Signing via the `.213:4100` service / share `\\herkules\ITC\UTIL\04-manualy-instalace\PS-scripty`.
-  Applies to `Deploy-AgentFleet.ps1` (on .213) and `Watch-USBGuardian.ps1` (on clients).
+- **AllSigned (GPO):** every PS script that runs there **must be signed** with the prod cert `CN=powershell.domena.loc`
+  (`-ExecutionPolicy Bypass` does NOT bypass this). Signing via the `APP_SERVER:4100` service / share `\\herkules\ITC\UTIL\04-manualy-instalace\PS-scripty`.
+  Applies to `Deploy-AgentFleet.ps1` (on APP_SERVER) and `Watch-USBGuardian.ps1` (on clients).
 - **Before signing CRLF + UTF-8 BOM** (the repo has LF → otherwise `HashMismatch`).
 - **Trusted Publisher:** for non-interactive runs (gMSA/SYSTEM) the signing cert must be in `LocalMachine\TrustedPublisher`
-  on .213 and clients (added on .181+.213; **fleet via GPO** – cert export `_AXIMA-CodeSign-publisher.cer` on the share).
+  on APP_SERVER and clients (added on PC-01+APP_SERVER; **fleet via GPO** – cert export `_AXIMA-CodeSign-publisher.cer` on the share).
 
 ### 5.3c Enforcement server→agent + break-glass — DONE (Phase 2+3)
-**Phase 2:** heartbeat returns `Enforce` (from `AppSettings policy.enforce`, .213 = truth); the agent (`WhitelistSync`)
+**Phase 2:** heartbeat returns `Enforce` (from `AppSettings policy.enforce`, APP_SERVER = truth); the agent (`WhitelistSync`)
 passes it to `PolicyState`, `PolicyEnforcer` uses the effective mode (enforce → block, else warn; local default before
 the first heartbeat). **Phase 3 (break-glass):** a local admin in the local console (`127.0.0.1:5080`,
 `POST /api/override?hours=N`, cap 72 h) temporarily disables blocking for **offline** work. Persisted (`override.json`,
-survives restart), **logged** as an incident (`Action=OverrideDisabled`, who/duration) → reported to .213. **On the next
+survives restart), **logged** as an incident (`Action=OverrideDisabled`, who/duration) → reported to APP_SERVER. **On the next
 connection to the server the override is CLEARED** (`PolicyState.OnServerHeartbeat`). **Requires API redeploy
-(.213→SQL-04) + agent redeploy.**
+(APP_SERVER→SQL_SERVER) + agent redeploy.**
 
 **Disable blocking = return EVERYTHING immediately (reliability fix, agent redeploy):** the local "Disable blocking"
 (break-glass) calls `UnblockAll()` **synchronously → media are returned at once** (no waiting for the 2-min cycle;
@@ -170,8 +170,8 @@ re-block the device meanwhile). Fix: `WhitelistSync` calls `WhitelistChecker.Rel
 applies immediately, unblock in the same reconcile cycle.
 
 ### 5.6 Health checks + scheduled service restart — DONE (2026-08-28)
-**What it fixed:** on 2026-08-28 the "USB Guardian API" service on SQL-04 turned out to have been **stopped since
-mid-July** (`sc query` → STOPPED, exit code 0 = left down after a deploy/server restart). The agent on `.181` kept
+**What it fixed:** on 2026-08-28 the "USB Guardian API" service on SQL_SERVER turned out to have been **stopped since
+mid-July** (`sc query` → STOPPED, exit code 0 = left down after a deploy/server restart). The agent on `PC-01` kept
 running and queued incidents locally (7 files, oldest 2026-07-02), but **nothing reached the server for six weeks**.
 The console never said so out loud — the "Agents gone silent" tile showed `1` and nobody looked. After starting the
 service manually the queue drained on its own.
@@ -192,10 +192,10 @@ is started** — that is the safety net for the outage above. Settings: `svc.res
 button does the same immediately = a check that permissions and service names are right. A missed window is caught up
 for **at most 2 hours**, then it waits for the next day.
 
-> **Permissions:** the restart runs under the **console service account** (`LocalSystem` = the `.213` machine account).
+> **Permissions:** the restart runs under the **console service account** (`LocalSystem` = the `APP_SERVER` machine account).
 > On a remote server it needs the right to control that service, otherwise the run returns `CHYBA – přístup odepřen`
-> (visible in the health checks). For the API on SQL-04, grant the console account control of that single service
-> (`sc sdset`), or wait for the API move to `.213` (5.5).
+> (visible in the health checks). For the API on SQL_SERVER, grant the console account control of that single service
+> (`sc sdset`), or wait for the API move to `APP_SERVER` (5.5).
 
 **Same safety net on the client (`agent/USBGuardian/SelfRestart.cs`):** the agent restarts its own service once a day
 (`sc stop` → pause → `sc start` from a detached `cmd.exe`, since a service cannot restart itself from the inside).
@@ -231,20 +231,20 @@ The console no longer carries its own hand-written palette; the look comes from 
 > depend on the skeleton, not only on the style.
 
 ### 5.8 Separated deploy accounts and API deployment (2026-09-03)
-Until 2026-09-03 a **single** account (`gmsa-USBGdep$`) was admin both on the client fleet and on SQL-04 — one
+Until 2026-09-03 a **single** account (`gmsa-deploy$`) was admin both on the client fleet and on SQL_SERVER — one
 compromised deploy identity would have reached both. Split into three roles, none holding the other's rights:
 
 | Role | Account | Admin where |
 |---|---|---|
-| Clients (auto-enrollment) | `gmsa-USBGdep$` | `PC Admins` → workstations only |
-| Servers (API deploy) | `gmsa-USBGsrv$` | local admin on SQL-04 only |
-| Console (the running app) | `B-S-W-MIKOS$` (LocalSystem) | **nowhere** |
+| Clients (auto-enrollment) | `gmsa-deploy$` | `Workstation-Admins` → workstations only |
+| Servers (API deploy) | `gmsa-srvdeploy$` | local admin on SQL_SERVER only |
+| Console (the running app) | `APP_SERVER$` (LocalSystem) | **nowhere** |
 
-`gmsa-USBGsrv$` is deliberately **not** in `Server Admins` — that would grant admin on every server. Membership is
+`gmsa-srvdeploy$` is deliberately **not** in `Server Admins` — that would grant admin on every server. Membership is
 local, on that one machine.
 
-**API deployment** used to be manual PS blocks relying on the client account being admin on SQL-04. It is now
-`scripts/Deploy-Api.cmd` plus the `USBGuardian-ApiDeploy` scheduled task on `.213` under the server gMSA: stop the
+**API deployment** used to be manual PS blocks relying on the client account being admin on SQL_SERVER. It is now
+`scripts/Deploy-Api.cmd` plus the `USBGuardian-ApiDeploy` scheduled task on `APP_SERVER` under the server gMSA: stop the
 service, **wait for `STOPPED`** (otherwise `USBGuardian.Api.exe` stays locked, robocopy fails and the old version
 keeps running while the deploy "succeeded"), copy without `appsettings.local.json`, start, verify `RUNNING`.
 Log in `C:\ProgramData\USBGuardian\deploy\api-deploy.log`; the exit code shows as the task's Last Result.
@@ -252,7 +252,7 @@ Log in `C:\ProgramData\USBGuardian\deploy\api-deploy.log`; the exit code shows a
 **A batch file, not PowerShell:** `.cmd` is not subject to the `AllSigned` GPO, so the deployment step needs no
 re-signing on every change.
 
-> **Consequence for the scheduled service restart:** the console (LocalSystem) is not admin on SQL-04 and must not
+> **Consequence for the scheduled service restart:** the console (LocalSystem) is not admin on SQL_SERVER and must not
 > be. Restarting `USB Guardian API` from there will fail — either grant it control of **that single service** via
 > `sc sdset` (one ACE, not an account holding the keys to the server), or let the server gMSA do the restart the
 > same way it does the deploy.
@@ -263,8 +263,8 @@ re-signing on every change.
 (`tep OK (whitelist 2026-06-19-v7, agent b0e1a0d)`). Communication rows come from the API, operator actions
 (deploy, update, excluding a station) from the console — both into the same table.
 
-**The `USBGuardian-ApiDeploy` task on `.213` was missing** and was created only on 2026-09-04 (UTF-16 XML,
-`LogonType=Password`, principal `gmsa-USBGsrv$` given as a SID). First run: Last Result `0`, robocopy rc 3, service
+**The `USBGuardian-ApiDeploy` task on `APP_SERVER` was missing** and was created only on 2026-09-04 (UTF-16 XML,
+`LogonType=Password`, principal `gmsa-srvdeploy$` given as a SID). First run: Last Result `0`, robocopy rc 3, service
 came up, `/api/version` reports `5431dce`. The API deploy channel therefore exists only as of now — the earlier
 text in 5.8 described the intent, not the state.
 
@@ -273,7 +273,7 @@ the code — Settings only carries `retention.incidentDays`. With 213 stations a
 roughly **150k rows per day**; until retention is wired up the table grows unbounded.
 
 **Local console inconsistency on the fleet.** Commit `3c8ba3f` states the package and archive have
-`localConsole.enabled=false`, but on `.213` the **deploy source and all three archived versions
+`localConsole.enabled=false`, but on `APP_SERVER` the **deploy source and all three archived versions
 (`f2bb194`, `560722b`, `b0e1a0d`) say `true`** — the last package build put it back. The next `AutoDeploy` /
 `UpdateAgent` run will therefore re-enable the local console on workstations. The comment in
 `Build-AgentPackage.ps1` says the opposite of the commit (the console **should** be on — it is the break-glass for
@@ -285,20 +285,20 @@ is weaker: a rejected login now explains what the person is looking at instead o
 only ever reported "package has no config". After the fix the check passes on a real package.
 
 ### 5.5 Roadmap (pending)
-- **Monitoring of signing cert expiry** – `CN=powershell.axinetwork.loc` valid until 2028-06-17; alert via e-mail from the console.
-- **"Everything on the server .213":** move the API runtime from SQL-04 to .213 (console+API on .213, DB on SQL-04, agent repoint to
-  `https://10.8.2.213:5443`) → .181 really not needed. **Build/deploy artifacts are on D:\deploy (locally), not on .181.**
-- **Close HTTP 5050** on SQL-04 (HTTPS only) – NIS2.
+- **Monitoring of signing cert expiry** – `CN=powershell.domena.loc` valid until 2028-06-17; alert via e-mail from the console.
+- **"Everything on the server APP_SERVER":** move the API runtime from SQL_SERVER to APP_SERVER (console+API on APP_SERVER, DB on SQL_SERVER, agent repoint to
+  `https://APP_SERVER_IP:5443`) → PC-01 really not needed. **Build/deploy artifacts are on D:\deploy (locally), not on PC-01.**
+- **Close HTTP 5050** on SQL_SERVER (HTTPS only) – NIS2.
 - **Activity log retention** – nothing calls `sp_PurgeActivityLog`; add `activity.retentionDays` to Settings and the call to the API.
 - **`Microsoft.AspNetCore.Authentication.Negotiate` 8.0.0** – the build reports NU1903 (known high-severity advisory); bump to current 8.0.x.
 - **Per-serial blocklist** + **blocking already-connected media** (the startup scan is half the way there).
-- **Hardening:** dedicated `USB-Guardian-Admins` instead of `SQL Admins2`, HTTPS console.
+- **Hardening:** dedicated `USB-Guardian-Admins` instead of `IT-Admins`, HTTPS console.
 - **Cleanup:** stray (untracked) `server/USBGuardianAPI/` (to be deleted).
 
 > **Note on automation (NOT bypassable by me):** the security classifier auto-denies me actions on prod
-> SQL-04 as well as **changes to my own permissions** (update-config) → prod deploys and permission rules must be run/allowed by the
-> user (bypass mode or a manual rule). That's why the API deploy on SQL-04 is done by the user with ready-made PS blocks (I prepare
-> the build on `.213`).
+> SQL_SERVER as well as **changes to my own permissions** (update-config) → prod deploys and permission rules must be run/allowed by the
+> user (bypass mode or a manual rule). That's why the API deploy on SQL_SERVER is done by the user with ready-made PS blocks (I prepare
+> the build on `APP_SERVER`).
 
 ## 6. Documentation map
 

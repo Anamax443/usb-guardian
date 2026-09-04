@@ -6,13 +6,13 @@
   // ============================================================
 
   "ConnectionStrings": {
-    "DefaultConnection": "Server=B-S-W-SQL-04;Database=USBGuardian;Integrated Security=true;TrustServerCertificate=true;"
+    "DefaultConnection": "Server=SQL_SERVER;Database=USBGuardian;Integrated Security=true;TrustServerCertificate=true;"
   },
 
   "Authorization": {
     "AllowedGroups": [
-      "AXINETWORK\\USB-Guardian-Clients",
-      "AXINETWORK\\SQL Admins2"
+      "DOMENA\\USB-Guardian-Clients",
+      "DOMENA\\IT-Admins"
     ]
   }
 }

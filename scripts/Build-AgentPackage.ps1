@@ -10,7 +10,7 @@
 #   <Output>\scripts\Watch-USBGuardian.ps1 (legacy PS watchdog – jen non-AllSigned)
 #
 # Tento skript běží na BUILD stroji (dev), NE na klientovi → nemusí být podepsaný.
-# Balíček se pak stage-uje na .213 a rozváží přes Deploy-AgentFleet.ps1 (gMSA).
+# Balíček se pak stage-uje na APP_SERVER a rozváží přes Deploy-AgentFleet.ps1 (gMSA).
 #
 # Použití:
 #   .\Build-AgentPackage.ps1 -Output D:\deploy\USBGuardianAgent
@@ -89,4 +89,4 @@ Write-Host ""
 $exe   = Join-Path $Output "USBGuardian.exe"
 $toast = Join-Path $Output "ToastHelper\ToastHelper.exe"
 Write-Host ("Hotovo. agent: {0}  toast: {1}" -f (Test-Path $exe), (Test-Path $toast)) -ForegroundColor Green
-Write-Host "  Dalsi krok: stage na .213 (robocopy -> C:\Apps\USBGuardianAgentPublish) + Deploy-AgentFleet.ps1"
+Write-Host "  Dalsi krok: stage na APP_SERVER (robocopy -> C:\Apps\USBGuardianAgentPublish) + Deploy-AgentFleet.ps1"

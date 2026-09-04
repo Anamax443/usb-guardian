@@ -23,10 +23,10 @@ public class ToastMessage
     /// <summary>Kapacita zařízení, např. "28,9 GB".</summary>
     public string DeviceSize { get; set; } = string.Empty;
 
-    /// <summary>Přihlášený uživatel v době detekce, např. "trnkam".</summary>
+    /// <summary>Přihlášený uživatel v době detekce, např. "it-admin".</summary>
     public string UserName { get; set; } = string.Empty;
 
-    /// <summary>Název počítače, např. "TRNKAMW11".</summary>
+    /// <summary>Název počítače, např. "PC-01".</summary>
     public string MachineName { get; set; } = string.Empty;
 
     /// <summary>Výsledná akce: "Warned" nebo "Blocked".</summary>

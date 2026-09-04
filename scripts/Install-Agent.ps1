@@ -116,7 +116,7 @@ if (-not (Test-Path $localCfg)) {
     Write-Host ""
     Write-Host "UPOZORNENI: chybi $localCfg" -ForegroundColor Yellow
     Write-Host "  Agent pobezi, ale BEZ sync nastaveni. Vytvor soubor se syncUrl + tls.pinnedThumbprint:"
-    Write-Host '  { "whitelist": { "syncUrl": "https://B-S-W-SQL-04:5443" }, "tls": { "pinnedThumbprint": "E6F6..." } }'
+    Write-Host '  { "whitelist": { "syncUrl": "https://SQL_SERVER:5443" }, "tls": { "pinnedThumbprint": "API_CERT_THUMBPRINT" } }'
 }
 
 Write-Host ""

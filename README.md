@@ -16,7 +16,7 @@ technické opatření pro **NIS2 / zákon 181/2014 Sb. / ISO 27001**.
 |------|-------|------|
 | 1–7 | Agent (WMI/warn/block), API+SQL+gMSA+Kerberos, RSA-4096 podpis whitelistu, incident queue, log tagging | ✅ |
 | 8 | **Lokální admin konzole agenta** (HttpListener, loopback, read-only) | ✅ |
-| 9 | **Serverová admin konzole** (Blazor na .213) dle **AXIMA UI standardu** (dark/light, patička, /api/version) | ✅ |
+| 9 | **Serverová admin konzole** (Blazor na APP_SERVER) dle **AXIMA UI standardu** (dark/light, patička, /api/version) | ✅ |
 | 10 | **AD sync** – inventář stanic z AD + reconciliation (kdo nemá agenta) + cesta v AD; ikona komunikace | ✅ |
 | 11 | **Přehled** – dlaždicový souhrn napříč listy, filtr (období/akce/hledání), kumulace, sloupec „Schváleno" | ✅ |
 | 12 | **Whitelist** – zadání jen sériovým číslem + autofill z incidentů + import + editace polí + aktivní checkbox | ✅ |
@@ -24,25 +24,25 @@ technické opatření pro **NIS2 / zákon 181/2014 Sb. / ISO 27001**.
 | 14 | **Šifrovaná komunikace agent↔API** – self-signed cert (bez CA, MachineKeySet) + pinning otisku | ✅ |
 | 15 | **Dohled komunikace** – dlaždice „Zmlklo agentů" + konfigurovatelný práh; **„Vyžádat data" na klik**; řaditelná tabulka Detailně | ✅ |
 | 16 | **Startovní sken** už-připojených médií; whitelist poll 2 min; centrální `onExpired`/`enforce` | ✅ |
-| 17 | **Auto-enrollment agenta** – konzole sama nasadí agenta na stanice bez něj (gMSA + scheduled task, dry-run/opt-in); **PILOT ÚSPĚŠNÝ na .181 (bez creds, přes gMSA)** | ✅ pilot OK |
+| 17 | **Auto-enrollment agenta** – konzole sama nasadí agenta na stanice bez něj (gMSA + scheduled task, dry-run/opt-in); **PILOT ÚSPĚŠNÝ na PC-01 (bez creds, přes gMSA)** | ✅ pilot OK |
 | 18 | **DB/incidenty tečou** (agent→API→DB→konzole) | ✅ |
 | 19 | **Verze/commit na všech komponentách** (`/api/version`, agent hlásí commit; **spolehlivý stamp** = footer/`/api/version` = git HEAD) | ✅ |
 | 20 | **Atribuce uživatele** – reálný přihlášený uživatel přes **WTS API** (agent=SYSTEM → ne strojový účet); ověřeno živě | ✅ |
-| 21 | **Kompletní klient** – ToastHelper (notifikace, logon+unlock) + **PS-free watchdog**, vše ve `Build-AgentPackage`; ověřeno na .181 | ✅ |
+| 21 | **Kompletní klient** – ToastHelper (notifikace, logon+unlock) + **PS-free watchdog**, vše ve `Build-AgentPackage`; ověřeno na PC-01 | ✅ |
 | 22 | **Kapacita média** v Přehledu i Whitelistu; **export CSV** + **manažerský report** s grafy (inline SVG, 1–2 A4) | ✅ |
 | 23 | **Retence dat** – Nastavení (konzole) + `RetentionService` v API (maže staré incidenty); **stránka Databáze** (přehled obsahu DB) | ✅ |
 | 24 | **Deploy targeting** – default pro nové PC (Nastavení) + per-stanice a hromadné zařazení/vyřazení v Stanicích | ✅ |
 | 25 | **Lokální konzole agenta** ukazuje i seznam schválených zařízení (whitelist) + verzi agenta | ✅ |
 | 26 | **HTML animace** fungování systému (`/how-it-works.html`, 13 kroků: datový tok + vynucování) | ✅ |
-| 27 | **Publikační/podpisový workflow whitelistu (automatický)** – změna katalogu → konzole sama vydá a **interně podepíše** (server-side RSA, klíč na .213) → API servíruje podepsaný blob verbatim → **klient = 1:1 kopie serveru** do ~2 min; agent O(1) match (scale 10k) | ✅ |
-| 28 | **Vynucování server→agent (Fáze 2)** – heartbeat nese `policy.enforce` (.213 = pravda) → agent reálně **blokuje/varuje** dle serveru | ✅ |
+| 27 | **Publikační/podpisový workflow whitelistu (automatický)** – změna katalogu → konzole sama vydá a **interně podepíše** (server-side RSA, klíč na APP_SERVER) → API servíruje podepsaný blob verbatim → **klient = 1:1 kopie serveru** do ~2 min; agent O(1) match (scale 10k) | ✅ |
+| 28 | **Vynucování server→agent (Fáze 2)** – heartbeat nese `policy.enforce` (APP_SERVER = pravda) → agent reálně **blokuje/varuje** dle serveru | ✅ |
 | 29 | **Lokální break-glass (Fáze 3)** – admin stanice dočasně vypne blokování offline (lokální konzole), perzistované, **logované** → server; při spojení se serverem se zruší | ✅ |
 | 30 | **Auto-re-enable + reconciliace** – při vypnutí blokování / break-glass agent vrátí dříve zablokovaná média; mezitím schválené médium vrátí i při zapnutém blokování | ✅ |
 | 31 | **Restart klientské služby** (lokální konzole, agent self-restart) + **reload nastavení** (serverová konzole, AccessCache) | ✅ |
 | 32 | **Spolehlivé vynucování (symetrie)** – vypnout blokování = vrátit **vše hned** (přesný `Enable-PnpDevice`, ošetření odpojeného média); zapnout zpět = znovu zablokovat **už připojená** neschválená média; nově schválené médium platí **ihned po stažení** (invalidace whitelist cache); ✕ mazání z katalogu (DELETE grant); rozbalená chybová hláška konzole | ✅ |
 | 33 | **Kontroly stavu** – odškrtávaný seznam kontrol (server i klient) s průběžnými výsledky a **exportem CSV / HTML / PDF / TXT**; **plánovaný restart** služeb (server i agent) | ✅ |
 | 34 | **Vzhled z banky UI** – přepínatelný v Nastavení, dark/light bez FOUC, přežije překliknutí mezi stránkami | ✅ |
-| 35 | **Oddělené deploy účty** – `gmsa-USBGdep$` (jen stanice) × `gmsa-USBGsrv$` (jen server API) × konzole (admin nikde); jedna identita už nedrží fleet i server současně | ✅ |
+| 35 | **Oddělené deploy účty** – `gmsa-deploy$` (jen stanice) × `gmsa-srvdeploy$` (jen server API) × konzole (admin nikde); jedna identita už nedrží fleet i server současně | ✅ |
 | 36 | **Aktualizace nasazeného agenta** – `Update-Agent.cmd` (stop → čekat `STOPPED` → kopie → ověřit `RUNNING`), **offline instalátor** v balíčku, **kanály stable/beta**, **archiv verzí** + návrat k předchozí | ✅ |
 | 37 | **Deník provozu (Aktivita)** – `ActivityLog`: heartbeaty a odpovědi serveru, příjem dávek, publikace whitelistu, ruční zásahy operátora; API i konzole píšou do téže tabulky, stránka s filtry, živým režimem a exportem CSV | ✅ |
 | 38 | **Lokální konzole: přihlášení lokálního admina** – loopback token je síťový a u lokálního účtu z něj Windows odebere Administrators (`LocalAccountTokenFilterPolicy`); kontrola nově uznává i filtrovaný token a odmítnutí ukáže, **jako kdo** byl člověk viděn | ✅ |
@@ -56,7 +56,7 @@ technické opatření pro **NIS2 / zákon 181/2014 Sb. / ISO 27001**.
 Tři komponenty, push model (agent → API), dvouvrstvý server (operativa na app serveru, DB = úložiště):
 
 ```
-[Klientská stanice]                  [App server .213]            [DB server SQL-04]
+[Klientská stanice]                  [App server APP_SERVER]            [DB server SQL_SERVER]
 ┌────────────────────┐               ┌─────────────────────┐      ┌───────────────────┐
 │ Agent (.NET8 svc)  │               │ Admin konzole       │      │ SQL Server        │
 │  WMI detekce       │  push  HTTPS  │ (Blazor :4200)      │ read/│ DB USBGuardian    │
@@ -86,14 +86,14 @@ Vizuálně: [animace toku dat](docs/how-it-works.html) · [myšlenková mapa](do
 | Komponenta | Technologie | Kde běží |
 |-----------|-------------|----------|
 | **Agent** | C# .NET 8, Windows Service | každá stanice (SYSTEM) |
-| **API** | ASP.NET Core, :5050 / :5443 | `B-S-W-SQL-04`, instalace `C:\USBGuardian.Api`, Windows služba „USB Guardian API" |
-| **Admin konzole** | Blazor Server, :4200 | `10.8.2.213` (`B-S-W-MIKOS`, Windows služba `USBGuardianConsole`) |
-| **Databáze** | SQL Server | `B-S-W-SQL-04`, DB `USBGuardian` |
+| **API** | ASP.NET Core, :5050 / :5443 | `SQL_SERVER`, instalace `C:\USBGuardian.Api`, Windows služba „USB Guardian API" |
+| **Admin konzole** | Blazor Server, :4200 | `APP_SERVER_IP` (`APP_SERVER`, Windows služba `USBGuardianConsole`) |
+| **Databáze** | SQL Server | `SQL_SERVER`, DB `USBGuardian` |
 | **Autentizace** | Windows Auth (Kerberos / Negotiate) | API: AD skupina; konzole: AD skupina + whitelist účtů |
 
 ## Serverová admin konzole (Blazor)
 
-Běží na app serveru (`10.8.2.213`), čte/píše SQL-04, **AXIMA UI standard** (archetyp A – IT-ops:
+Běží na app serveru (`APP_SERVER_IP`), čte/píše SQL_SERVER, **AXIMA UI standard** (archetyp A – IT-ops:
 dark/light přepínač `axima.theme` bez FOUC, tisk = light, semafor stavů). Stránky:
 
 - **Přehled** – dlaždicový souhrn napříč listy (Stanic v AD / Chybí agent / Schválených médií /
@@ -193,7 +193,7 @@ Stanice bez agenta jsou vidět na **Stanicích** (dlaždice „Chybí agent"). N
   + **ToastHelper** logon/unlock přes `schtasks /XML`); přeskočí offline/už-nainstalované; audit CSV. (PS 5.1 i 7.)
 - **Auto-enrollment (konzole nasazuje sama):** `AgentDeployService` po AD syncu najde stanice bez agenta,
   uplatní **výchozí `deploy.defaultEnroll` + výjimky** (`includeHosts`/`excludeHosts` spravované v Stanicích) a
-  (v ostrém režimu) zapíše cíle do `deploy.targetsFile`; instalaci provede **scheduled task na .213 pod dedikovaným
+  (v ostrém režimu) zapíše cíle do `deploy.targetsFile`; instalaci provede **scheduled task na APP_SERVER pod dedikovaným
   gMSA** (least-privilege). **Default VYPNUTO + dry-run.** Nastavení: [docs/auto-deploy-setup.md](docs/auto-deploy-setup.md).
 - **Aktualizace už nasazeného agenta:** `scripts\Update-Agent.cmd <ZDROJ> <HOST|SOUBOR> [SLUŽBA]` – zastaví službu,
   **počká na `STOPPED`**, zkopíruje a **ověří `RUNNING`**. Bez toho je běžící `.exe` zamčený, přepíše se jen část
@@ -211,13 +211,13 @@ Stanice bez agenta jsou vidět na **Stanicích** (dlaždice „Chybí agent"). N
 
 | Role | Účet | Kde je admin |
 |---|---|---|
-| Klienti (auto-enrollment, update) | `gmsa-USBGdep$` | jen stanice |
-| Server (nasazení API) | `gmsa-USBGsrv$` | jen server API |
+| Klienti (auto-enrollment, update) | `gmsa-deploy$` | jen stanice |
+| Server (nasazení API) | `gmsa-srvdeploy$` | jen server API |
 | Konzole (běžící aplikace) | strojový účet app serveru | **nikde** |
 
 > **Prostředí AXIMA:** PS skripty co běží na strojích **musí být podepsané** (execution policy AllSigned přes GPO)
-> prod certem `CN=powershell.axinetwork.loc` a publisher musí být v `LocalMachine\TrustedPublisher`
-> (na .213 i klientech, fleet přes GPO). Před podpisem **CRLF + UTF-8 BOM** (jinak HashMismatch).
+> prod certem `CN=powershell.domena.loc` a publisher musí být v `LocalMachine\TrustedPublisher`
+> (na APP_SERVER i klientech, fleet přes GPO). Před podpisem **CRLF + UTF-8 BOM** (jinak HashMismatch).
 
 ## Konfigurace
 
@@ -230,6 +230,21 @@ placeholdery jsou v repu.
 | Agent | `agent/USBGuardian/Config/agent.config.json` | `agent.config.local.json` |
 | API | `server/USBGuardian.Api/appsettings.json` | `appsettings.local.json` |
 | Konzole | `server/USBGuardian.Admin/appsettings.local.json.example` | `appsettings.local.json` |
+
+### Placeholdery v dokumentaci
+
+Dokumentace popisuje reálné pilotní nasazení, ale jména serverů, stanic a účtů jsou nahrazena
+placeholdery — dosaď si vlastní hodnoty:
+
+| Placeholder | Význam |
+|---|---|
+| `APP_SERVER` / `APP_SERVER_IP` | aplikační server — běží na něm admin konzole a deploy úlohy |
+| `SQL_SERVER` / `SQL_SERVER_IP` | SQL Server s databází `USBGuardian` a službou API |
+| `DOMENA`, `domena.loc` | doména Active Directory |
+| `PC-01` … `PC-04` | stanice s agentem |
+| `gmsa-api`, `gmsa-deploy`, `gmsa-srvdeploy` | gMSA účty (API, nasazování na stanice, nasazování API) |
+| `IT-Admins`, `Workstation-Admins` | AD skupiny (přístup do konzole, lokální admin na stanicích) |
+| `API_CERT_THUMBPRINT` | otisk self-signed certifikátu API (pinning) |
 
 ### Konzole – `appsettings.local.json`
 
@@ -281,32 +296,32 @@ cd server\USBGuardian.Admin
 dotnet run
 ```
 
-## Nasazení konzole na app server (.213)
+## Nasazení konzole na app server (APP_SERVER)
 
 ```powershell
 # Build (self-contained – cílový server nepotřebuje .NET)
 dotnet publish server\USBGuardian.Admin -c Release -r win-x64 --self-contained -o D:\deploy\USBGuardianConsole
 
 # Kopie přes SMB + služba přes remote sc.exe (WinRM netřeba)
-robocopy D:\deploy\USBGuardianConsole \\10.8.2.213\C$\Apps\USBGuardianConsole /E /XF appsettings.local.json
-# vytvořit \\10.8.2.213\C$\Apps\USBGuardianConsole\appsettings.local.json (viz .example)
-sc.exe \\10.8.2.213 create USBGuardianConsole binPath= "C:\Apps\USBGuardianConsole\USBGuardian.Admin.exe" start= auto
-sc.exe \\10.8.2.213 start USBGuardianConsole
+robocopy D:\deploy\USBGuardianConsole \\APP_SERVER_IP\C$\Apps\USBGuardianConsole /E /XF appsettings.local.json
+# vytvořit \\APP_SERVER_IP\C$\Apps\USBGuardianConsole\appsettings.local.json (viz .example)
+sc.exe \\APP_SERVER_IP create USBGuardianConsole binPath= "C:\Apps\USBGuardianConsole\USBGuardian.Admin.exe" start= auto
+sc.exe \\APP_SERVER_IP start USBGuardianConsole
 ```
 
-> **Build/deploy artefakty:** publikuje se lokálně do `D:\deploy`; API se stageuje na .213 do
-> `C:\Apps\USBGuardianApiPublish` a odtud se instaluje na SQL-04 do `C:\USBGuardian.Api` (služba „USB Guardian API").
+> **Build/deploy artefakty:** publikuje se lokálně do `D:\deploy`; API se stageuje na APP_SERVER do
+> `C:\Apps\USBGuardianApiPublish` a odtud se instaluje na SQL_SERVER do `C:\USBGuardian.Api` (služba „USB Guardian API").
 
-SQL grant (least-privilege) pro účet konzole na SQL-04:
+SQL grant (least-privilege) pro účet konzole na SQL_SERVER:
 
 ```sql
-CREATE LOGIN [DOMENA\B-S-W-MIKOS$] FROM WINDOWS;
+CREATE LOGIN [DOMENA\APP_SERVER$] FROM WINDOWS;
 USE USBGuardian;
-CREATE USER [DOMENA\B-S-W-MIKOS$] FOR LOGIN [DOMENA\B-S-W-MIKOS$];
-ALTER ROLE db_datareader ADD MEMBER [DOMENA\B-S-W-MIKOS$];
-GRANT INSERT, UPDATE, DELETE ON dbo.Computers TO [DOMENA\B-S-W-MIKOS$];
-GRANT INSERT, UPDATE, DELETE ON dbo.WhitelistDevices TO [DOMENA\B-S-W-MIKOS$];  -- DELETE = mazání z katalogu (✕)
-GRANT INSERT, UPDATE ON dbo.WhitelistVersions TO [DOMENA\B-S-W-MIKOS$];          -- bez DELETE (verze = append-only audit)
+CREATE USER [DOMENA\APP_SERVER$] FOR LOGIN [DOMENA\APP_SERVER$];
+ALTER ROLE db_datareader ADD MEMBER [DOMENA\APP_SERVER$];
+GRANT INSERT, UPDATE, DELETE ON dbo.Computers TO [DOMENA\APP_SERVER$];
+GRANT INSERT, UPDATE, DELETE ON dbo.WhitelistDevices TO [DOMENA\APP_SERVER$];  -- DELETE = mazání z katalogu (✕)
+GRANT INSERT, UPDATE ON dbo.WhitelistVersions TO [DOMENA\APP_SERVER$];          -- bez DELETE (verze = append-only audit)
 ```
 
 ## Bezpečnost
@@ -334,7 +349,7 @@ usb-guardian/
 ├── server/
 │   ├── USBGuardian.Api/      # ASP.NET Core API (příjem incidentů, whitelist)
 │   │   └── Retention/        # RetentionService (úklid starých incidentů)
-│   └── USBGuardian.Admin/    # Blazor Server admin konzole (.213)
+│   └── USBGuardian.Admin/    # Blazor Server admin konzole (APP_SERVER)
 │       ├── Components/        # Pages (Home, Computers, Whitelist, Settings, Database, Docs), Layout
 │       ├── AdSync/            # AdSyncRunner + AdSyncService
 │       ├── Deploy/            # AgentDeployService (auto-enrollment orchestrátor)

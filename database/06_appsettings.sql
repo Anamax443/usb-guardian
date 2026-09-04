@@ -49,4 +49,4 @@ IF NOT EXISTS (SELECT 1 FROM dbo.AppSettings WHERE [Key] = 'policy.enforce')
 GO
 
 -- Grant pro účet konzole (uprav účet dle nasazení):
--- GRANT SELECT, INSERT, UPDATE ON dbo.AppSettings TO [DOMENA\B-S-W-MIKOS$];
+-- GRANT SELECT, INSERT, UPDATE ON dbo.AppSettings TO [DOMENA\APP_SERVER$];

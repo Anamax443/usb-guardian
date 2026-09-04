@@ -21,7 +21,7 @@ public class Computer
     public bool IsActive { get; set; } = true;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
-    // ── AD sync (doplňuje serverová konzole na .213) ──
+    // ── AD sync (doplňuje serverová konzole na APP_SERVER) ──
     /// <summary>OS z Active Directory.</summary>
     public string? OperatingSystem { get; set; }
     /// <summary>Nalezen v posledním AD syncu (false = už v AD není).</summary>

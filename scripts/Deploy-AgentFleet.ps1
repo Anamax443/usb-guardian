@@ -3,7 +3,7 @@
 # Hromadné vzdálené nasazení USB Guardian agenta na stanice.
 # Kompatibilní s Windows PowerShell 5.1 i PowerShell 7 (runspace pool).
 #
-# Mechanismus (stejný jako deploy konzole na .213 – síťový token
+# Mechanismus (stejný jako deploy konzole na APP_SERVER – síťový token
 # účtu, bez UAC na klientech):
 #   1. robocopy self-contained publish -> \\HOST\C$\Program Files\USBGuardian
 #   2. vytvoreni sluzby "USB Guardian" pres sc.exe \\HOST create (SCM/named-pipes)
@@ -112,7 +112,7 @@ $perHost = {
         $toastXml = Join-Path $SourcePath 'tasks\USBGuardian-ToastHelper.xml'
         if (Test-Path $toastXml) {
             $tmpXml = Join-Path ([System.IO.Path]::GetTempPath()) ("usbg-toast-{0}.xml" -f $h)
-            # Docasny soubor se maze ve finally nize - jinak se v %TEMP% na .213
+            # Docasny soubor se maze ve finally nize - jinak se v %TEMP% na APP_SERVER
             # hromadi usbg-toast-<HOST>.xml po kazdem nasazeni (jeden na stanici).
             (Get-Content $toastXml -Raw) | Set-Content $tmpXml -Encoding Unicode
             $toOut = (& schtasks /Create /S $h /XML $tmpXml /TN "USBGuardian\USBGuardian-ToastHelper" /F 2>&1 | Out-String)

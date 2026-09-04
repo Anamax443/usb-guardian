@@ -3,7 +3,7 @@ setlocal enabledelayedexpansion
 rem ============================================================
 rem Install-Agent.cmd — lokalni instalace agenta na jedne stanici.
 rem
-rem KDY TOHLE A NE DEPLOY Z .213:
+rem KDY TOHLE A NE DEPLOY Z APP_SERVER:
 rem   Kdyz se na stanici nedostane deploy kanal (jina lokalita, notebook
 rem   na VPN, PC mimo domenu). Balicek se prekopiruje a spusti se tohle.
 rem

@@ -157,7 +157,7 @@ public class PolicyEnforcer
         }
 
         // Efektivní režim řídí PolicyState: lokální break-glass override → warn; jinak server enforce
-        // (.213 = zdroj pravdy); před prvním heartbeatem fallback na lokální _mode.
+        // (APP_SERVER = zdroj pravdy); před prvním heartbeatem fallback na lokální _mode.
         var effective = _policyState.EffectiveMode(_mode);
         return effective switch
         {

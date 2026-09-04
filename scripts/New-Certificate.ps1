@@ -4,7 +4,7 @@
 # Vygeneruje self-signed TLS certifikát pro USB Guardian API
 # a nainstaluje ho do Windows Certificate Store.
 #
-# Spouštět na API serveru (B-S-W-SQL-04) jako Administrator.
+# Spouštět na API serveru (SQL_SERVER) jako Administrator.
 # Certifikát je platný 3 roky a exportuje se jako .cer
 # pro distribuci na klientské stanice (agent trust).
 #

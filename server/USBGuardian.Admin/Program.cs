@@ -1,8 +1,8 @@
 // ============================================================
 // Program.cs  –  USB Guardian Admin Console (Blazor Server)
 //
-// Serverová admin konzole. Běží na app serveru (.213),
-// čte SQL Server (B-S-W-SQL-04) READ-ONLY přes reusnutý
+// Serverová admin konzole. Běží na app serveru (APP_SERVER),
+// čte SQL Server (SQL_SERVER) READ-ONLY přes reusnutý
 // AppDbContext z USBGuardian.Api (žádná duplikace modelů).
 //
 // Bezpečnost (NIS2):

@@ -148,7 +148,7 @@ public class AdSyncRunner
         return list;
     }
 
-    // "CN=PC,OU=Computers,OU=AXIMA,DC=axinetwork,DC=loc" → "AXIMA / Computers"
+    // "CN=PC,OU=Computers,OU=AXIMA,DC=domena,DC=loc" → "AXIMA / Computers"
     private static string FriendlyOu(string dn)
     {
         if (string.IsNullOrEmpty(dn)) return string.Empty;

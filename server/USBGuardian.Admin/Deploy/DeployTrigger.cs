@@ -3,14 +3,14 @@
 // Ruční "nasadit teď" / "aktualizovat teď" na jednu stanici.
 //
 // PROČ TO EXISTUJE:
-//   Auto-enrollment je vypnutý a úloha na .213 nemá časový spouštěč, takže
+//   Auto-enrollment je vypnutý a úloha na APP_SERVER nemá časový spouštěč, takže
 //   se sama nespustí nikdy. Pilulka "nasadí se" ve Stanicích říká jen "byla
 //   by mezi cíli", ne "stane se". Bez tlačítka musel člověk zapisovat
 //   hostname do souboru na serveru a spouštět úlohu ručně — což znamená,
 //   že to nikdo neudělá.
 //
 // DĚLBA PRÁCE ZŮSTÁVÁ:
-//   Konzole (LocalSystem na .213) jen ZAPÍŠE cíl a ŠŤOUCHNE do úlohy.
+//   Konzole (LocalSystem na APP_SERVER) jen ZAPÍŠE cíl a ŠŤOUCHNE do úlohy.
 //   Vlastní instalaci dělá úloha pod deploy účtem, který jediný má admina
 //   na stanicích. Konzole nikam nekopíruje a nikde nespouští službu — kdyby
 //   uměla obojí, byla by z webové aplikace cesta na 200 počítačů.

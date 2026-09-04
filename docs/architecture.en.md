@@ -30,7 +30,7 @@
                               ┌───────────┘
                               ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│  Server (B-S-W-SQL-04 or a dedicated Windows Server)                │
+│  Server (SQL_SERVER or a dedicated Windows Server)                │
 │                                                                     │
 │  ┌──────────────────────────────────┐   ┌────────────────────────┐ │
 │  │  USB Guardian API                │   │  SQL Server            │ │
@@ -41,7 +41,7 @@
 │  │  /api/heartbeat  (GET)           │   │  Computers             │ │
 │  │  ActivityLogger (activity log)   │   │  AppSettings           │ │
 │  │  Windows Auth (Kerberos)         │   │  ActivityLog  ◄──────┐ │ │
-│  │  AD groups: USB-Guardian-Clients │   │  gMSA: gmsa-SQL$     │ │ │
+│  │  AD groups: USB-Guardian-Clients │   │  gMSA: gmsa-api$     │ │ │
 │  └──────────────────────────────────┘   └──────────────────────┼─┘ │
 │                                                                │   │
 │  ┌──────────────────────────────────┐                          │   │
@@ -90,9 +90,9 @@
 
 ## Server admin console (USBGuardian.Admin)
 
-A separate **Blazor Server** application on the app server (`10.8.2.213`), Windows service
+A separate **Blazor Server** application on the app server (`APP_SERVER_IP`), Windows service
 `USBGuardianConsole`, port `:4200`. Kept apart from the ingestion API (resilience – intake from 500+ agents
-must not affect admin use). Reads/writes SQL-04, models reused from the API (linked `DbModels.cs` +
+must not affect admin use). Reads/writes SQL_SERVER, models reused from the API (linked `DbModels.cs` +
 `AppDbContext.cs` – no duplication).
 
 | Component | Description |
@@ -144,7 +144,7 @@ local admin. That made break-glass unavailable in exactly the situation it exist
 station that cannot reach the server).
 
 > **Who gets into the console:** **only a local administrator of that station** — the console is not for the
-> end user. In an environment where admin rights live on separate accounts (`pcadmin.*` in the `PC Admins`
+> end user. In an environment where admin rights live on separate accounts (`pcadmin.*` in the `Workstation-Admins`
 > group), break-glass is in effect a tool for IT, not for the user; an ordinary account gets the explanatory
 > refusal. This is intentional: switching blocking off is an intervention into the enforced policy, even if
 > a temporary and logged one.
@@ -188,7 +188,7 @@ A whitelist entry contains: `vendorId`, `productId`, `serialNumber`, `descriptio
 | Authentication | Windows Auth – Kerberos Negotiate |
 | Authorization | AD groups – `USB-Guardian-Clients` (API), admin group + account whitelist (console) |
 | Data integrity | RSA signature of the whitelist, fail-secure (what the agent cannot verify, it does not use) |
-| Service account | gMSA `AXINETWORK\gmsa-SQL$` – no password in configuration |
+| Service account | gMSA `DOMENA\gmsa-api$` – no password in configuration |
 | Tier separation | three deploy identities: fleet × server × the running console (which is an admin nowhere) |
 | Audit trail | incidents + the **activity log** (who talked to whom, who changed what) |
 | Configuration | `appsettings.local.json` gitignored – sensitive values outside the repo |
@@ -330,7 +330,7 @@ dotnet run                 (server)
   (`tasks\USBGuardian-ToastHelper.xml`).
 - **Watchdog:** scheduled task `\USBGuardian\USBGuardian-Watchdog` (every 3 min, PS-free `sc start`).
 - Fleet rollout of both: `Deploy-AgentFleet.ps1` (robocopy the package + sc.exe create + both tasks), under a
-  gMSA from `.213`.
+  gMSA from `APP_SERVER`.
 - Server: Windows Service, running under a gMSA
 - HTTPS certificate: `scripts\New-Certificate.ps1` on the production server
 - AD groups: `USB-Guardian-Clients` – machines with the agent deployed
@@ -341,11 +341,11 @@ Installation and update are **two different jobs**. The fleet script could only 
 going "straight to robocopy" would overwrite part of the DLLs on a running agent, the copy of the locked `.exe`
 would fail, and the station would be left with a **mix of versions** while the deploy reports success.
 
-| Step | Script | Task on `.213` | Account |
+| Step | Script | Task on `APP_SERVER` | Account |
 |------|--------|----------------|---------|
-| Clean install on stations without an agent | `Deploy-AgentFleet.ps1` | `USBGuardian-AutoDeploy` | `gmsa-USBGdep$` |
-| Update of a deployed agent | `Update-Agent.cmd` | `USBGuardian-UpdateAgent` (+ `-UpdateAgentBeta`) | `gmsa-USBGdep$` |
-| Deployment of the API to its server | `Deploy-Api.cmd` | `USBGuardian-ApiDeploy` | `gmsa-USBGsrv$` |
+| Clean install on stations without an agent | `Deploy-AgentFleet.ps1` | `USBGuardian-AutoDeploy` | `gmsa-deploy$` |
+| Update of a deployed agent | `Update-Agent.cmd` | `USBGuardian-UpdateAgent` (+ `-UpdateAgentBeta`) | `gmsa-deploy$` |
+| Deployment of the API to its server | `Deploy-Api.cmd` | `USBGuardian-ApiDeploy` | `gmsa-srvdeploy$` |
 
 Both `.cmd` files follow the same pattern: **stop the service → wait for `STOPPED` → copy (without
 `*.local.json`) → start → verify `RUNNING`**; the return code is the number of failed stations, the log lives
@@ -372,11 +372,11 @@ reach both.
 
 | Role | Account | Where it is an admin |
 |---|---|---|
-| Clients (auto-enrollment, update) | `gmsa-USBGdep$` | group `PC Admins` → stations only |
-| Server (API deployment) | `gmsa-USBGsrv$` | local admin on the API server only |
+| Clients (auto-enrollment, update) | `gmsa-deploy$` | group `Workstation-Admins` → stations only |
+| Server (API deployment) | `gmsa-srvdeploy$` | local admin on the API server only |
 | Console (the running app) | app server machine account | **nowhere** |
 
-`gmsa-USBGsrv$` is deliberately **outside** the server-admins group; the membership is local, on that one
+`gmsa-srvdeploy$` is deliberately **outside** the server-admins group; the membership is local, on that one
 machine only. When a deploy task starts reporting `ERROR_LOGON_FAILURE (0x8007052E)`, it is not about rights —
 it is a stale local copy of the gMSA password (`Install-ADServiceAccount`).
 
@@ -430,14 +430,14 @@ AgentDeployService (24/7, default OFF + dry-run)
    ↓ live mode
 deploy.targetsFile (the list of stations without an agent)   [console = machine account, write only]
    ↓ read by
-Scheduled task on .213 under gMSA gmsa-USBGdep$              [least-privilege: admin on clients only]
+Scheduled task on APP_SERVER under gMSA gmsa-deploy$              [least-privilege: admin on clients only]
    ↓ Deploy-AgentFleet.ps1
 \\HOST\C$ robocopy + sc.exe \\HOST create + watchdog + start  → agent on the client (LocalSystem)
 ```
 
 Least-privilege: the console **does not change identity** (SQL grants unchanged), the installation is performed
 by a separate task under the deploy account. **Environment (AXIMA): PS scripts must be signed** (AllSigned GPO)
-with the prod cert `CN=powershell.axinetwork.loc` + the publisher in `LocalMachine\TrustedPublisher`; before
+with the prod cert `CN=powershell.domena.loc` + the publisher in `LocalMachine\TrustedPublisher`; before
 signing, CRLF + UTF-8 BOM. Setup: [auto-deploy-setup.en.md](auto-deploy-setup.en.md).
 
 ## Console – what the pages do

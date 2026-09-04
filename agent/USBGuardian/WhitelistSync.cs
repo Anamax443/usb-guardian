@@ -130,7 +130,7 @@ public class WhitelistSync : BackgroundService
 
             if (heartbeat == null) return;
 
-            // Fáze 2+3: spojení se serverem (.213 = zdroj pravdy) → aplikovat enforce A zrušit lokální
+            // Fáze 2+3: spojení se serverem (APP_SERVER = zdroj pravdy) → aplikovat enforce A zrušit lokální
             // break-glass override (ten platí jen offline). Vrátí true, když override právě zrušil.
             var overrideCleared = _policyState?.OnServerHeartbeat(heartbeat.Enforce) ?? false;
             if (overrideCleared)

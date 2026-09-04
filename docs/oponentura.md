@@ -12,7 +12,7 @@
 | **Verze dokumentu** | 1.1 — kapitoly 1–33 ve znění 1.0, kapitola 34 = doplněk k 4. 9. 2026 |
 | **Datum** | 2026-06-19, doplněno 2026-09-04 |
 | **Klasifikace** | Interní — podklad pro oponenturu |
-| **Doménové prostředí** | `axinetwork.loc` (AXIMA) |
+| **Doménové prostředí** | `domena.loc` (AXIMA) |
 | **Jazyk** | 🇨🇿 Čeština · [🇬🇧 English](oponentura.en.md) |
 | **Související dokumenty** | [README.md](../README.md), [HANDOFF.md](../HANDOFF.md), [architecture.md](architecture.md), [auto-deploy-setup.md](auto-deploy-setup.md), [oponentura-komercni.md](oponentura-komercni.md) · grafické výstupy: [how-it-works.html](how-it-works.html), [mind-map.html](mind-map.html), [flowchart.html](flowchart.html), [management-summary.html](management-summary.html) |
 
@@ -133,9 +133,9 @@ slouží repozitář), ani konkrétní firemně citlivé hodnoty (ty jsou mimo r
 ### 1.4 Konvence
 
 - Názvy komponent, tříd a souborů jsou psány `kódovým písmem`.
-- IP adresy a hostnames odpovídají reálnému pilotnímu nasazení v doméně `axinetwork.loc`.
-- Označení „**.213**" = aplikační server `B-S-W-MIKOS` (`10.8.2.213`), „**SQL-04**" = databázový
-  server `B-S-W-SQL-04` (`10.8.2.225`), „**.181**" = pilotní stanice `TRNKAMW11`.
+- IP adresy a hostnames odpovídají reálnému pilotnímu nasazení v doméně `domena.loc`.
+- Označení „**APP_SERVER**" = aplikační server `APP_SERVER` (`APP_SERVER_IP`), „**SQL_SERVER**" = databázový
+  server `SQL_SERVER` (`SQL_SERVER_IP`), „**PC-01**" = pilotní stanice `PC-01`.
 
 ---
 
@@ -277,9 +277,9 @@ incidenty). Dokument tento nárok nikde nepřekračuje.
 Návrh musel respektovat reálná omezení produkčního prostředí, která zásadně ovlivnila rozhodnutí:
 
 - **AllSigned GPO** — všechny PowerShell skripty spouštěné na strojích musí být podepsané prod certem
-  `CN=powershell.axinetwork.loc`; `-ExecutionPolicy Bypass` to neobejde. Důsledek: provozní skripty
+  `CN=powershell.domena.loc`; `-ExecutionPolicy Bypass` to neobejde. Důsledek: provozní skripty
   (deploy, watchdog) musí být buď podepsané, nebo **PS-free** (scheduled tasky přes `schtasks`).
-- **Bezpečnostní klasifikátor** — automaticky blokuje některé operace na produkčním SQL-04 a změny
+- **Bezpečnostní klasifikátor** — automaticky blokuje některé operace na produkčním SQL_SERVER a změny
   vlastních oprávnění. Důsledek: prod-deploy API a SQL granty spouští **lidský operátor**, build se
   jen připraví.
 - **NAT / firewall** — stanice za NATem, dynamické IP. Důsledek: **push model** a **klíčování na
@@ -311,7 +311,7 @@ Systém tvoří čtyři logické komponenty:
 ```
 ┌──────────────────────────┐     push (HTTPS :5443)    ┌───────────────────────────┐
 │  AGENT (klientská stanice)│ ─────────────────────────►│  API (ingest)             │
-│  .NET 8 Windows Service   │   heartbeat / incidenty   │  ASP.NET Core, SQL-04     │
+│  .NET 8 Windows Service   │   heartbeat / incidenty   │  ASP.NET Core, SQL_SERVER     │
 │  běží jako SYSTEM         │ ◄───────────────────────── │  :5443 (HTTPS) / :5050    │
 │  - DeviceMonitor (WMI)    │   whitelist + policy       │  - příjem incidentů (202) │
 │  - WhitelistChecker (RSA) │                            │  - distribuce whitelistu  │
@@ -321,8 +321,8 @@ Systém tvoří čtyři logické komponenty:
 └──────────────────────────┘                                         ▼
                                                           ┌───────────────────────────┐
 ┌──────────────────────────┐     read/write (SQL)        │  DATABÁZE (SQL Server)    │
-│  KONZOLE (administrace)   │ ───────────────────────────►│  SQL-04, DB USBGuardian   │
-│  Blazor Server, .213 :4200│                             │  Incidents / Computers /  │
+│  KONZOLE (administrace)   │ ───────────────────────────►│  SQL_SERVER, DB USBGuardian   │
+│  Blazor Server, APP_SERVER :4200│                             │  Incidents / Computers /  │
 │  - Přehled / Stanice      │ ◄── AD sync ── Active Dir.  │  WhitelistDevices /       │
 │  - Whitelist (podpis)     │                             │  WhitelistVersions /      │
 │  - Nastavení / Databáze   │                             │  AppSettings              │
@@ -333,9 +333,9 @@ Systém tvoří čtyři logické komponenty:
 | Komponenta | Technologie | Umístění | Identita |
 |-----------|-------------|----------|----------|
 | Agent | C# .NET 8, Windows Service | každá stanice | LocalSystem (SYSTEM) |
-| API | ASP.NET Core (Kestrel) | SQL-04, `C:\USBGuardian.Api` | gMSA `gmsa-SQL$` |
-| Konzole | Blazor Server | .213, `C:\Apps\USBGuardianConsole` | LocalSystem (= `B-S-W-MIKOS$`) |
-| Databáze | SQL Server | SQL-04, DB `USBGuardian` | — |
+| API | ASP.NET Core (Kestrel) | SQL_SERVER, `C:\USBGuardian.Api` | gMSA `gmsa-api$` |
+| Konzole | Blazor Server | APP_SERVER, `C:\Apps\USBGuardianConsole` | LocalSystem (= `APP_SERVER$`) |
+| Databáze | SQL Server | SQL_SERVER, DB `USBGuardian` | — |
 
 ### 5.2 Dvě klíčové architektonické osy
 
@@ -345,8 +345,8 @@ whitelistu a případné příkazy) a *incident sync* (odesílá frontu událost
 k agentovi — vše „od serveru" se doručuje **přibalením do odpovědi na heartbeat**.
 
 **(b) Dvouvrstvý server.** Operativa (konzole, AD sync, publikace whitelistu) běží na aplikačním
-serveru **.213**; databáze je čisté úložiště na **SQL-04**. Ingestní API zatím běží na SQL-04
-(plánovaný přesun na .213 — viz roadmapa). Příjem incidentů (API) je **oddělen** od administrace
+serveru **APP_SERVER**; databáze je čisté úložiště na **SQL_SERVER**. Ingestní API zatím běží na SQL_SERVER
+(plánovaný přesun na APP_SERVER — viz roadmapa). Příjem incidentů (API) je **oddělen** od administrace
 (konzole), aby nápor 500+ agentů neovlivnil použitelnost administrace.
 
 ### 5.3 Zásadní vlastnosti návrhu
@@ -433,8 +433,8 @@ Tato kapitola je jádrem dokumentu pro oponenturu. Každé rozhodnutí je uveden
   privátní klíč na serveru, konzole podepisuje automaticky po každé změně katalogu.
 - **Zvoleno:** **Server-side auto-podpis** (`WhitelistPublisher`). Po každé změně katalogu (i ručním
   „Publikovat nyní") konzole vydá novou verzi, podepíše interním RSA klíčem (`Whitelist:PrivateKeyPath`
-  na .213), uloží `Json`+`Signature` do DB a aktivuje.
-- **Trade-off (vědomě zvolený a klíčový pro oponenturu):** Privátní klíč **je** na serveru .213
+  na APP_SERVER), uloží `Json`+`Signature` do DB a aktivuje.
+- **Trade-off (vědomě zvolený a klíčový pro oponenturu):** Privátní klíč **je** na serveru APP_SERVER
   (chráněn ACL/DPAPI) výměnou za **plnou automatizaci**. Původní princip „privátní klíč nikdy na
   serveru" byl **vědomě opuštěn**, protože ruční offline krok po každé změně katalogu byl provozně
   neúnosný a vedl by k tomu, že se whitelist nebude udržovat aktuální (větší reálné riziko než
@@ -486,8 +486,8 @@ Tato kapitola je jádrem dokumentu pro oponenturu. Každé rozhodnutí je uveden
 ### 6.12 Least-privilege deploy přes gMSA scheduled task
 
 - **Kontext:** Auto-nasazení agenta vyžaduje admin práva na klientech; konzole je nesmí mít.
-- **Zvoleno:** Konzole (identita `B-S-W-MIKOS$`) jen **zapíše seznam cílů**; instalaci provede
-  **oddělený scheduled task na .213 pod dedikovaným gMSA** (`gmsa-USBGdep$`), který má admin jen na
+- **Zvoleno:** Konzole (identita `APP_SERVER$`) jen **zapíše seznam cílů**; instalaci provede
+  **oddělený scheduled task na APP_SERVER pod dedikovaným gMSA** (`gmsa-deploy$`), který má admin jen na
   klientech. Konzole tak nemění svou identitu ani SQL granty.
 - **Trade-off:** Více pohyblivých částí (task, gMSA, soubor cílů), ale striktní oddělení rolí —
   kompromitace konzole nedává admin na klientech.
@@ -535,7 +535,7 @@ katalogu a smazání řádku v katalogu nerozbije historické verze (a neselže 
 ```
 Admin změní katalog (konzole) → WhitelistPublisher:
    snapshot aktivních zařízení → kanonický whitelist.json blob (verze yyyy-MM-dd-vN)
-   → podpis interním RSA klíčem (.213) → uložit Json+Signature, aktivovat
+   → podpis interním RSA klíčem (APP_SERVER) → uložit Json+Signature, aktivovat
 API: GET /api/whitelist (blob verbatim) · GET /api/whitelist/signature (base64)
 Agent (heartbeat ≤2 min hlásí WhitelistUpdateAvailable):
    stáhne blob+podpis → SignatureVerifier ověří (fail-secure) → uloží whitelist.json (+.sig)
@@ -545,7 +545,7 @@ Agent (heartbeat ≤2 min hlásí WhitelistUpdateAvailable):
 ### 7.4 Datový tok — vynucování a reconciliace
 
 ```
-Heartbeat → HeartbeatController vrací Enforce (z AppSettings policy.enforce, .213 = pravda)
+Heartbeat → HeartbeatController vrací Enforce (z AppSettings policy.enforce, APP_SERVER = pravda)
 Agent: PolicyState.OnServerHeartbeat(enforce) (+ zruší lokální break-glass override)
 WhitelistSync.ReconcileBlocked (každý cyklus):
    - blokování ON  → ReEnforceConnectedDevices() (znovu zablokovat připojená neschválená)
@@ -562,7 +562,7 @@ AdSyncRunner (60 min + on-demand): AD (objectCategory=computer, ne disabled)
    → reconciliation: InActiveDirectory && LastSeen==null && AgentVersion=="" = chybí agent
 AgentDeployService (po syncu, default OFF + dry-run):
    aplikuje defaultEnroll + include/exclude → zapíše deploy.targetsFile
-   → scheduled task na .213 (gMSA) → Deploy-AgentFleet.ps1 → instalace na klienty
+   → scheduled task na APP_SERVER (gMSA) → Deploy-AgentFleet.ps1 → instalace na klienty
 ```
 
 ---
@@ -682,8 +682,8 @@ služby). Loopback + Windows auth + admin-only + převážně read-only ⇒ hesl
 
 ## 9. Serverové API (ingest)
 
-ASP.NET Core aplikace na SQL-04, Kestrel bind **HTTPS :5443** (+ HTTP :5050, plánováno k uzavření).
-Běží pod gMSA `gmsa-SQL$`. Autentizace agentů Windows Auth (Kerberos/Negotiate), autorizace přes
+ASP.NET Core aplikace na SQL_SERVER, Kestrel bind **HTTPS :5443** (+ HTTP :5050, plánováno k uzavření).
+Běží pod gMSA `gmsa-api$`. Autentizace agentů Windows Auth (Kerberos/Negotiate), autorizace přes
 policy `USBGuardianClients` (členství v `Authorization:AllowedGroups`).
 
 ### 9.1 Controllery
@@ -726,8 +726,8 @@ Konzole má na `Incidents` jen čtení/zápis bez delete — proto je enforcemen
 
 ## 10. Administrátorská konzole
 
-Blazor Server na .213 (:4200), AXIMA UI standard (dark/light, patička se servisním řádkem). Čte/píše
-SQL-04 přes EF Core (modely slinkované z API). Autorizace: Windows Auth, dovnitř jen členové
+Blazor Server na APP_SERVER (:4200), AXIMA UI standard (dark/light, patička se servisním řádkem). Čte/píše
+SQL_SERVER přes EF Core (modely slinkované z API). Autorizace: Windows Auth, dovnitř jen členové
 `Authorization:AdminGroups` / účty `AllowedUsers` (appsettings = lockout-safe bootstrap) **nebo** DB
 seznam z Nastavení.
 
@@ -760,7 +760,7 @@ uložení `Json`+`Signature`, aktivace. Viz §6.7, §11.
 24/7 orchestrátor (default OFF + dry-run). Po AD syncu najde stanice bez agenta
 (`InActiveDirectory && LastSeen==null && AgentVersion==""`), uplatní `defaultEnroll` + include/exclude
 výjimky a (v ostrém režimu) zapíše cíle do `deploy.targetsFile`. Instalaci provede scheduled task na
-.213 pod gMSA (viz §6.12, §15).
+APP_SERVER pod gMSA (viz §6.12, §15).
 
 ### 10.5 `IncidentAlertService` + `EmailSender`
 
@@ -782,7 +782,7 @@ permission denied on WhitelistDevices") v UI nezobrazila.
 
 Whitelist je podepsán **RSA-4096** (SHA-256, PKCS#1). Agent ověřuje podpis před každým použitím
 (`SignatureVerifier`), **fail-secure** (neplatný/chybějící podpis → whitelist se nepoužije). Veřejný
-klíč je na agentech (`whitelist_public.pem`), privátní na serveru .213 (`Whitelist:PrivateKeyPath`,
+klíč je na agentech (`whitelist_public.pem`), privátní na serveru APP_SERVER (`Whitelist:PrivateKeyPath`,
 gitignored, chráněn ACL).
 
 ### 11.2 Bajtová přesnost (kanonizace)
@@ -796,14 +796,14 @@ vylučují rozdíly v pořadí klíčů, escapování či kódování, které by
 Podpisový klíč whitelistu je **interní klíč USB Guardianu**, **ne** firemní code-signing cert ani CA.
 Jeho účel je výhradně integrita whitelistu. To je odlišné od:
 - **TLS** (self-signed cert API + pinning — §6.5),
-- **podpisu PowerShell skriptů** (firemní cert `CN=powershell.axinetwork.loc`, AllSigned GPO — §15).
+- **podpisu PowerShell skriptů** (firemní cert `CN=powershell.domena.loc`, AllSigned GPO — §15).
 
 Tři nezávislé „kryptografické světy" jsou záměrně odděleny, aby kompromitace jednoho neohrozila ostatní.
 
 ### 11.4 Životní cyklus a rizika klíče
 
 - **Generování:** offline `WhitelistSigner` (`tools/WhitelistSigner`).
-- **Uložení privátního klíče:** server .213, gitignored, ACL/DPAPI.
+- **Uložení privátního klíče:** server APP_SERVER, gitignored, ACL/DPAPI.
 - **Riziko:** kompromitace privátního klíče by umožnila podvrhnout whitelist → mitigace ACL + omezený
   dopad (jen integrita whitelistu). Diskuse trade-offu „klíč na serveru" viz §6.7 a §19.
 
@@ -817,7 +817,7 @@ Tři nezávislé „kryptografické světy" jsou záměrně odděleny, aby kompr
 
 - **Aktiva:** integrita whitelistu (pravidla), auditní stopa (incidenty), dostupnost vynucování,
   důvěrnost firemních dat (nepřímo — prevence exfiltrace).
-- **Důvěryhodné hranice:** server .213 (= zdroj pravdy, drží privátní klíč), API/DB (gMSA), agent
+- **Důvěryhodné hranice:** server APP_SERVER (= zdroj pravdy, drží privátní klíč), API/DB (gMSA), agent
   (běží jako SYSTEM, drží jen veřejný klíč a podepsanou kopii).
 
 ### 12.2 Hrozby a protiopatření (STRIDE)
@@ -857,7 +857,7 @@ Model **předpokládá**, že:
 - útočník **nemá** trvalý lokální admin/SYSTEM na stanici (jinak může agenta vyřadit — to platí pro
   jakýkoli host-based agent a je mimo dosažitelnou garanci);
 - doménová infrastruktura (AD, Kerberos, gMSA) je důvěryhodná;
-- server .213 a jeho ACL na privátní klíč jsou chráněné.
+- server APP_SERVER a jeho ACL na privátní klíč jsou chráněné.
 
 Tyto předpoklady jsou explicitně uvedeny, protože oponent na ně oprávněně cílí. Mitigace (watchdog,
 audit, server = pravda) **zvyšují náklady útoku**, ale negarantují odolnost proti lokálnímu adminovi —
@@ -871,7 +871,7 @@ což je principiální omezení host-based přístupu (viz §19).
 
 - **Fáze 1 — distribuce whitelistu (1:1).** Automatický server-side podpis, agent = bajtová kopie
   (§6.7, §6.8, §7.3).
-- **Fáze 2 — distribuce politiky.** Heartbeat nese `enforce` (`AppSettings policy.enforce`, .213 =
+- **Fáze 2 — distribuce politiky.** Heartbeat nese `enforce` (`AppSettings policy.enforce`, APP_SERVER =
   pravda); agent použije efektivní režim (enforce → block, jinak warn).
 - **Fáze 3 — lokální break-glass.** Lokální admin může dočasně (strop 72 h) vypnout blokování pro
   práci offline; perzistováno, logováno jako incident, **zrušeno při příštím heartbeatu** (server = pravda).
@@ -952,18 +952,18 @@ Detailní mapování NIS2 / ISO 27001 → konkrétní funkce viz **Příloha E**
 WinRM je zavřený, proto deploy probíhá přes **SMB + remote `sc.exe`** (porty 135/445), tj. síťový token
 účtu bez UAC na cíli:
 
-- **Konzole (.213):** `robocopy` → `\\.213\C$\Apps\USBGuardianConsole` (s `/XF appsettings.local.json`)
-  + `sc.exe \\.213 stop/start`. Pozor: počkat na `STOPPED` (jinak je exe zamčený).
-- **API (SQL-04):** build staged na .213, instalace na SQL-04; spouští **operátor** (klasifikátor
-  blokuje prod SQL-04 ops asistentovi). Počkat na `STOPPED` před `robocopy`.
+- **Konzole (APP_SERVER):** `robocopy` → `\\APP_SERVER\C$\Apps\USBGuardianConsole` (s `/XF appsettings.local.json`)
+  + `sc.exe \\APP_SERVER stop/start`. Pozor: počkat na `STOPPED` (jinak je exe zamčený).
+- **API (SQL_SERVER):** build staged na APP_SERVER, instalace na SQL_SERVER; spouští **operátor** (klasifikátor
+  blokuje prod SQL_SERVER ops asistentovi). Počkat na `STOPPED` před `robocopy`.
 - **Agent (fleet):** `Deploy-AgentFleet.ps1` (runspace pool, PS 5.1 i 7) — `robocopy` balíčku +
   `sc.exe \\HOST create` + recovery + **PS-free** watchdog a ToastHelper tasky (`schtasks`).
 
 ### 15.3 Auto-enrollment
 
-Konzole (po opt-in) sama nasadí agenta na stanice bez něj: zapíše cíle, gMSA scheduled task na .213
+Konzole (po opt-in) sama nasadí agenta na stanice bez něj: zapíše cíle, gMSA scheduled task na APP_SERVER
 spustí `Deploy-AgentFleet.ps1`. Least-privilege (§6.12). Default OFF + dry-run; doporučený postup
-`.181 → pilotní skupina → flotila`. Detail: [auto-deploy-setup.md](auto-deploy-setup.md).
+`PC-01 → pilotní skupina → flotila`. Detail: [auto-deploy-setup.md](auto-deploy-setup.md).
 
 ### 15.4 Aktualizace klientů (návrh)
 
@@ -980,13 +980,13 @@ roadmapy. Navržený postup (reuse stávající pipeline):
    úspěchu (konzole ukáže, kdo je aktuální).
 
 **Alternativa „self-update" agentem** (stažení a přepsání vlastní exe) byla zvážena a **zamítnuta** jako
-rizikovější (služba přepisující vlastní binárku, nutnost hostovaného a podepsaného buildu); push z .213
+rizikovější (služba přepisující vlastní binárku, nutnost hostovaného a podepsaného buildu); push z APP_SERVER
 je jednodušší a z velké části hotový.
 
 ### 15.5 Prostředí AXIMA — podpis PowerShell
 
-Skripty běžící na strojích (Deploy-AgentFleet na .213) musí být **podepsané** prod certem
-`CN=powershell.axinetwork.loc` (AllSigned GPO), publisher v `LocalMachine\TrustedPublisher`; před
+Skripty běžící na strojích (Deploy-AgentFleet na APP_SERVER) musí být **podepsané** prod certem
+`CN=powershell.domena.loc` (AllSigned GPO), publisher v `LocalMachine\TrustedPublisher`; před
 podpisem CRLF + UTF-8 BOM. Watchdog a ToastHelper jsou **PS-free** (`schtasks`), takže na klientech
 nevyžadují podpis.
 
@@ -1036,7 +1036,7 @@ deploye/updatu.
 
 ### 18.1 Metodika
 
-Ověření probíhalo **end-to-end na pilotní stanici .181 (TRNKAMW11)** v reálné doméně, s důrazem na
+Ověření probíhalo **end-to-end na pilotní stanici PC-01 (PC-01)** v reálné doméně, s důrazem na
 **runtime evidenci** z Windows Event Logu (ne pouze statickou analýzu kódu). To se ukázalo jako
 zásadní: některé chyby (falešný úspěch `Enable-PnpDevice` při ne-terminující chybě) nebyly viditelné
 ze statického pohledu a projevily se až v běhu.
@@ -1051,8 +1051,8 @@ ze statického pohledu a projevily se až v běhu.
 | Odebrat médium z whitelistu (server) | Zablokovat | Po stažení v7 + restartu: `znovu zablokováno 1` (Kingston 3.0) ✅ |
 | Přidat médium na whitelist (server) | Povolit / vrátit | Reconcile `IsAllowedKey` → vráceno ✅ |
 | Vypnout vynucování na serveru | Vrátit zablokovaná média | Po heartbeatu: Kingston `Status=OK`, `blocked.json` prázdný ✅ |
-| Atribuce uživatele | `DOMÉNA\uživatel`, ne `HOST$` | Incidenty `AXINETWORK\trnkam` ✅ |
-| Doručení incidentů | agent→API→DB→konzole | Přehled ukazuje incidenty z .181 ✅ |
+| Atribuce uživatele | `DOMÉNA\uživatel`, ne `HOST$` | Incidenty `DOMENA\it-admin` ✅ |
+| Doručení incidentů | agent→API→DB→konzole | Přehled ukazuje incidenty z PC-01 ✅ |
 | Commit stamp | footer = nasazený git | Patička `agent f2bb194` po redeployi ✅ |
 
 ### 18.3 Nalezené a opravené chyby (regrese/latentní)
@@ -1104,7 +1104,7 @@ Tato kapitola je pro oponenturu klíčová — uvádí **vědomá** omezení, ni
 
 ### 19.3 Privátní podpisový klíč na serveru
 
-- Vědomý trade-off (§6.7): klíč je na .213 (ACL) výměnou za automatizaci. Riziko kompromitace klíče =
+- Vědomý trade-off (§6.7): klíč je na APP_SERVER (ACL) výměnou za automatizaci. Riziko kompromitace klíče =
   podvržení whitelistu; dopad omezen jen na integritu whitelistu (ne CA, ne code-signing). Mitigace:
   ACL/DPAPI, monitoring, případně budoucí HSM/odebrání práv.
 
@@ -1115,7 +1115,7 @@ Tato kapitola je pro oponenturu klíčová — uvádí **vědomá** omezení, ni
 
 ### 19.5 Single points / topologie
 
-- API zatím běží na SQL-04 (plánovaný přesun na .213). DB je single instance (zálohování/HA mimo rozsah
+- API zatím běží na SQL_SERVER (plánovaný přesun na APP_SERVER). DB je single instance (zálohování/HA mimo rozsah
   tohoto nástroje, řeší se infrastrukturně). Konzole a API jsou jednoinstanční (pro daný rozsah dostačující).
 
 ### 19.6 Aktualizace klientů
@@ -1165,7 +1165,7 @@ Tato kapitola je pro oponenturu klíčová — uvádí **vědomá** omezení, ni
 | Vysoká | Aktualizace klientů (update-safe fleet + verzové cílení) | návrh hotov |
 | Vysoká | Garantované pre-mount blokování (GPO Device Installation Restrictions / kernel driver) | 🔜 |
 | Střední | Uzavřít HTTP :5050 (jen HTTPS) | 🔜 |
-| Střední | Přesun API na .213 („vše na serveru") | 🔜 |
+| Střední | Přesun API na APP_SERVER („vše na serveru") | 🔜 |
 | Střední | Monitoring expirace podpisového certu | 🔜 |
 | Střední | Zátěžový test na plné flotile | 🔜 |
 | Nízká | Hardening: dedikovaná `USB-Guardian-Admins`, HTTPS konzole | 🔜 |
@@ -1329,7 +1329,7 @@ Viz §23. Stručně: kontrola nad chováním, žádné licenční náklady na 50
 prostředí (AD, gMSA, doména), žádná závislost na cloudu/dodavateli, a přizpůsobení specifikům AXIMA
 (AllSigned, klasifikátor). Komerční produkty jsou validní alternativa; volba byla vědomá.
 
-**Q22: Co když konzole (.213) nebo API (SQL-04) vypadne?**
+**Q22: Co když konzole (APP_SERVER) nebo API (SQL_SERVER) vypadne?**
 Agenti fungují **offline** — drží lokální podepsaný whitelist a poslední politiku, blokují/varují dál.
 Heartbeat jen reportuje a přebírá změny; jeho výpadek znamená pouze, že se nové změny nedistribuují a
 nesbírají incidenty (fronta na agentovi je perzistentní, dožene se po obnovení). Žádný výpadek serveru
@@ -1490,7 +1490,7 @@ Závěr: pro AXIMA převážily kontrola, náklady a integrace; pre-mount mezera
 
 ## 24. Detailní testovací katalog
 
-Strukturovaný přehled testovacích případů. Stav „✅ ověřeno živě" = potvrzeno na .181 z Event Logu;
+Strukturovaný přehled testovacích případů. Stav „✅ ověřeno živě" = potvrzeno na PC-01 z Event Logu;
 „⏳" = navržené/doporučené, dosud neprovedené systematicky.
 
 ### 24.1 Detekce a identifikace
@@ -1544,11 +1544,11 @@ Strukturovaný přehled testovacích případů. Stav „✅ ověřeno živě" =
 
 | TC | Scénář | Očekávaný výsledek | Stav |
 |----|--------|--------------------|------|
-| TC-40 | Fresh install (fleet) | Služba běží, heartbeat+incidenty | ✅ (.181) |
+| TC-40 | Fresh install (fleet) | Služba běží, heartbeat+incidenty | ✅ (PC-01) |
 | TC-41 | Reinstall/update běžícího agenta | Update-safe (stop→copy→start) | ⏳ (mezera §19.6) |
 | TC-42 | Commit stamp | Footer = git HEAD | ✅ |
 | TC-43 | Watchdog nahodí zastavenou službu | Služba restartována | ⏳ |
-| TC-44 | Auto-enrollment (dry-run → ostrý) | Cíle zapsány, instalace přes gMSA | ✅ (.181) |
+| TC-44 | Auto-enrollment (dry-run → ostrý) | Cíle zapsány, instalace přes gMSA | ✅ (PC-01) |
 
 ### 24.6 Konzole a DB
 
@@ -1618,20 +1618,20 @@ latenci API, hloubku fronty a zápisový throughput workeru (§19.9).
 
 ## 26. Provozní runbooky
 
-### 26.1 Nasazení nové verze konzole (.213)
+### 26.1 Nasazení nové verze konzole (APP_SERVER)
 
 1. `git commit` (deploy = poslední krok po commitu).
 2. `dotnet publish ... -o D:\deploy\USBGuardianConsole`.
-3. `sc.exe \\10.8.2.213 stop USBGuardianConsole`; počkat na `STOPPED`.
-4. `robocopy ... \\10.8.2.213\C$\Apps\USBGuardianConsole /E /XF appsettings.local.json`.
-5. `sc.exe \\10.8.2.213 start USBGuardianConsole`.
+3. `sc.exe \\APP_SERVER_IP stop USBGuardianConsole`; počkat na `STOPPED`.
+4. `robocopy ... \\APP_SERVER_IP\C$\Apps\USBGuardianConsole /E /XF appsettings.local.json`.
+5. `sc.exe \\APP_SERVER_IP start USBGuardianConsole`.
 6. Ověřit footer = živý commit.
 
-### 26.2 Nasazení nové verze API (SQL-04) — spouští operátor
+### 26.2 Nasazení nové verze API (SQL_SERVER) — spouští operátor
 
-1. Build staged na .213 (`C:\Apps\USBGuardianApiPublish`).
+1. Build staged na APP_SERVER (`C:\Apps\USBGuardianApiPublish`).
 2. `sc stop "USB Guardian API"`; **počkat na STOPPED** (jinak je exe zamčený → robocopy FAILED).
-3. `robocopy` na SQL-04 `C:\USBGuardian.Api` (s `/XF appsettings.local.json`).
+3. `robocopy` na SQL_SERVER `C:\USBGuardian.Api` (s `/XF appsettings.local.json`).
 4. `sc start`; ověřit `:5050/api/version`.
 
 ### 26.3 Redeploy agenta na stanici (ruční, UAC)
@@ -1672,7 +1672,7 @@ Ověřit patičku lokální konzole (`agent <commit>`) a Event Log.
 
 1. Vygenerovat nový pár (`tools/WhitelistSigner`).
 2. Distribuovat nový `whitelist_public.pem` na agenty (součást balíčku/configu).
-3. Nastavit `Whitelist:PrivateKeyPath` na .213, re-publikovat whitelist (podepíše novým klíčem).
+3. Nastavit `Whitelist:PrivateKeyPath` na APP_SERVER, re-publikovat whitelist (podepíše novým klíčem).
 4. Ověřit, že agenti přijmou novou podepsanou verzi.
 
 ---
@@ -1731,12 +1731,12 @@ Admin    Konzole(WhitelistPublisher)   DB         API        Agent(WhitelistSync
 ### 27.4 Komponentový diagram nasazení
 
 ```
-        Active Directory  ◄── LDAP ── Konzole(.213, Blazor :4200) ── SQL ──►  SQL-04
-                                          │  (B-S-W-MIKOS$)                    DB USBGuardian
+        Active Directory  ◄── LDAP ── Konzole(APP_SERVER, Blazor :4200) ── SQL ──►  SQL_SERVER
+                                          │  (APP_SERVER$)                    DB USBGuardian
                                           │  WhitelistPublisher (priv. klíč)        ▲
-                                          │  AgentDeployService                     │ SQL (gMSA gmsa-SQL$)
+                                          │  AgentDeployService                     │ SQL (gMSA gmsa-api$)
                                           ▼                                          │
-                          gMSA task (gmsa-USBGdep$) ── SMB+sc ──► Klienti     API(.SQL-04 :5443) ── do DB
+                          gMSA task (gmsa-deploy$) ── SMB+sc ──► Klienti     API(.SQL_SERVER :5443) ── do DB
                                                                      │  ▲
                                                   push HTTPS :5443   │  │ heartbeat/whitelist/enforce
                                                                      ▼  │
@@ -2053,13 +2053,13 @@ MITM agent↔API
 ### 31.4 Cíl útočníka: kompromitace serveru / klíče
 
 ```
-Kompromitace serveru .213
+Kompromitace serveru APP_SERVER
 ├── Získat privátní klíč whitelistu → podvrhnout whitelist
-│   ├── Mitigace: ACL/DPAPI na klíči, omezený přístup na .213                    [MITIGACE]
+│   ├── Mitigace: ACL/DPAPI na klíči, omezený přístup na APP_SERVER                    [MITIGACE]
 │   └── Dopad ohraničen: jen integrita whitelistu (ne CA, ne code-signing)       [OMEZENÝ DOPAD]
 ├── Změnit politiku (enforce=false) → agenti přestanou blokovat
 │   └── Detekovatelné (audit změn nastavení); vyžaduje přístup do konzole        [DETEKCE/AUTORIZACE]
-└── Doporučení: monitoring přístupu k .213, budoucí HSM, rotace klíče (§26.7)
+└── Doporučení: monitoring přístupu k APP_SERVER, budoucí HSM, rotace klíče (§26.7)
 ```
 
 ### 31.5 Shrnutí pokrytí
@@ -2088,7 +2088,7 @@ Kompromitace serveru .213
     "overridePath": "C:\\ProgramData\\USBGuardian\\override.json"
   },
   "whitelist": {
-    "syncUrl": "https://10.8.2.225:5443",   // API (HTTPS)
+    "syncUrl": "https://SQL_SERVER_IP:5443",   // API (HTTPS)
     "localPath": "C:\\ProgramData\\USBGuardian\\whitelist\\whitelist.json",
     "allowWildcards": false          // true = povolit záznamy bez sériáku (bezpečnostní varování)
   },
@@ -2098,7 +2098,7 @@ Kompromitace serveru .213
   },
   "tls": {
     "validateServerCertificate": true,
-    "pinnedThumbprint": "E6F6B4FCE0BB627F564E85D6509DE7C4B82CF2F0"   // otisk certu API
+    "pinnedThumbprint": "API_CERT_THUMBPRINT"   // otisk certu API
   },
   "signing": {
     "enabled": true,                 // prod: VŽDY true (ověřovat podpis whitelistu)
@@ -2114,9 +2114,9 @@ Kompromitace serveru .213
 ```json
 {
   "ConnectionStrings": {
-    "DefaultConnection": "Server=tcp:10.8.2.225,1433;Database=USBGuardian;Integrated Security=true;TrustServerCertificate=true;"
+    "DefaultConnection": "Server=tcp:SQL_SERVER_IP,1433;Database=USBGuardian;Integrated Security=true;TrustServerCertificate=true;"
   },
-  "Authorization": { "AllowedGroups": [ "AXINETWORK\\USBGuardianClients" ] },
+  "Authorization": { "AllowedGroups": [ "DOMENA\\USBGuardianClients" ] },
   "Kestrel": { "Endpoints": {
     "Https": { "Url": "https://0.0.0.0:5443" },
     "Http":  { "Url": "http://0.0.0.0:5050" }     // roadmapa: uzavřít (jen HTTPS)
@@ -2129,11 +2129,11 @@ Kompromitace serveru .213
 ```json
 {
   "ConnectionStrings": {
-    "DefaultConnection": "Server=tcp:10.8.2.225,1433;Database=USBGuardian;Integrated Security=true;TrustServerCertificate=true;"
+    "DefaultConnection": "Server=tcp:SQL_SERVER_IP,1433;Database=USBGuardian;Integrated Security=true;TrustServerCertificate=true;"
   },
   "Authorization": {
-    "AdminGroups": [ "AXINETWORK\\USB-Guardian-Admins" ],
-    "AllowedUsers": [ "AXINETWORK\\trnkam" ],     // lockout-safe bootstrap
+    "AdminGroups": [ "DOMENA\\USB-Guardian-Admins" ],
+    "AllowedUsers": [ "DOMENA\\it-admin" ],     // lockout-safe bootstrap
     "DevAllowAll": false
   },
   "Whitelist": { "PrivateKeyPath": "C:\\Apps\\USBGuardianConsole\\whitelist_private.pem" },
@@ -2162,7 +2162,7 @@ nedefinované stavy.
 
 | Situace | Chování systému | Návrhový princip |
 |---------|------------------|------------------|
-| Server (.213/API) nedostupný | Agent jede offline: lokální whitelist + poslední politika; fronta incidentů se hromadí (perzistentní) | Klient = samostatný; výpadek neotevře ochranu |
+| Server (APP_SERVER/API) nedostupný | Agent jede offline: lokální whitelist + poslední politika; fronta incidentů se hromadí (perzistentní) | Klient = samostatný; výpadek neotevře ochranu |
 | Whitelist soubor chybí | `WhitelistChecker` vrátí `null` → médium se neověří → dle `onExpired`/politiky (fail-secure) | Fail-secure |
 | Podpis `.sig` chybí/nesedí | Whitelist odmítnut, jede poslední platná verze; nová se neuloží | Fail-secure, atomický zápis |
 | Stažení whitelistu přeruší uprostřed | Atomický zápis (temp → rename, nejdřív .sig pak .json); nekonzistentní kombinace se odmítne | Atomicita |
@@ -2239,8 +2239,8 @@ běžícím agentovi přepsal část DLL, kopie zamčeného `.exe` by selhala a 
 **zastav → počkej na `STOPPED` → zkopíruj → ověř `RUNNING`**.
 
 **(b) Jedna identita držela obě vrstvy.** Klientský deploy účet byl zároveň admin na databázovém serveru,
-takže jeho kompromitace by sáhla na fleet i na server současně. Rozděleno na tři role: `gmsa-USBGdep$`
-(jen stanice), `gmsa-USBGsrv$` (jen server API, záměrně mimo skupinu serverových adminů) a účet běžící
+takže jeho kompromitace by sáhla na fleet i na server současně. Rozděleno na tři role: `gmsa-deploy$`
+(jen stanice), `gmsa-srvdeploy$` (jen server API, záměrně mimo skupinu serverových adminů) a účet běžící
 konzole, který **není admin nikde**.
 
 **Nález při ověřování (4. 9. 2026):** úloha `USBGuardian-ApiDeploy`, kterou dokumentace popisovala jako
@@ -2276,7 +2276,7 @@ nepatří. Šablona v repu zůstává `false` (bezpečný default pro jiné pros
 fleet se staví s `true` a build na opačný stav upozorní.
 
 **Důsledek pro čtení dokumentu:** v prostředí, kde jsou admin práva na oddělených účtech (`pcadmin.*` ve
-skupině `PC Admins`), není break-glass nástroj *uživatele v terénu*, ale **technika u stanice, která
+skupině `Workstation-Admins`), není break-glass nástroj *uživatele v terénu*, ale **technika u stanice, která
 nedosáhne na server**. Běžný účet dostane vysvětlující odmítnutí — ověřeno v provozu 4. 9. 2026, kdy se do
 konzole zkusil dostat kolega pod svým denním účtem. Chování bylo správné; formulace na několika místech
 dokumentace, které to popisovaly jako funkci pro uživatele, byly opraveny.
@@ -2367,7 +2367,7 @@ napsat.
 
 | Klíč | Význam |
 |------|--------|
-| `policy.enforce` | Globální vynucování (.213 = pravda) → heartbeat. |
+| `policy.enforce` | Globální vynucování (APP_SERVER = pravda) → heartbeat. |
 | `comm.silentAfterMinutes` | Práh „zmlklého agenta". |
 | `deploy.*` | Auto-enrollment (`enabled`/`dryRun`/`defaultEnroll`/`intervalMinutes`/`maxPerRun`/`allowHosts`/`includeHosts`/`excludeHosts`/`targetsFile`/`lastRun`). |
 | `access.users` / `access.groups` | Whitelist přístupu do konzole. |
@@ -2383,7 +2383,7 @@ napsat.
 | `ConnectionStrings.DefaultConnection` | Připojení k SQL (Integrated Security). |
 | `Authorization.AdminGroups` / `AllowedUsers` | Přístup do konzole (lockout-safe bootstrap). |
 | `Authorization.AllowedGroups` (API) | AD skupina agentů (`USBGuardianClients`). |
-| `Whitelist.PrivateKeyPath` | Privátní RSA klíč pro podpis whitelistu (.213, gitignored). |
+| `Whitelist.PrivateKeyPath` | Privátní RSA klíč pro podpis whitelistu (APP_SERVER, gitignored). |
 | `Kestrel.Endpoints` | Bind adresy/porty. |
 | `AdSync.*` | AD sync (interval, SearchBase, IncludeDisabled). |
 
@@ -2404,13 +2404,13 @@ napsat.
 ### C.2 SQL granty (least-privilege, účet konzole)
 
 ```sql
-CREATE LOGIN [DOMENA\B-S-W-MIKOS$] FROM WINDOWS;
+CREATE LOGIN [DOMENA\APP_SERVER$] FROM WINDOWS;
 USE USBGuardian;
-CREATE USER  [DOMENA\B-S-W-MIKOS$] FOR LOGIN [DOMENA\B-S-W-MIKOS$];
-ALTER ROLE db_datareader ADD MEMBER [DOMENA\B-S-W-MIKOS$];           -- čte vše
-GRANT INSERT, UPDATE, DELETE ON dbo.Computers          TO [DOMENA\B-S-W-MIKOS$];
-GRANT INSERT, UPDATE, DELETE ON dbo.WhitelistDevices   TO [DOMENA\B-S-W-MIKOS$];  -- DELETE = mazání z katalogu
-GRANT INSERT, UPDATE         ON dbo.WhitelistVersions  TO [DOMENA\B-S-W-MIKOS$];  -- bez DELETE (append-only audit)
+CREATE USER  [DOMENA\APP_SERVER$] FOR LOGIN [DOMENA\APP_SERVER$];
+ALTER ROLE db_datareader ADD MEMBER [DOMENA\APP_SERVER$];           -- čte vše
+GRANT INSERT, UPDATE, DELETE ON dbo.Computers          TO [DOMENA\APP_SERVER$];
+GRANT INSERT, UPDATE, DELETE ON dbo.WhitelistDevices   TO [DOMENA\APP_SERVER$];  -- DELETE = mazání z katalogu
+GRANT INSERT, UPDATE         ON dbo.WhitelistVersions  TO [DOMENA\APP_SERVER$];  -- bez DELETE (append-only audit)
 -- AppSettings grant viz 06_appsettings.sql
 -- Pozn.: DELETE na Incidents NEMÁ konzole (retenci dělá API pod gMSA).
 ```

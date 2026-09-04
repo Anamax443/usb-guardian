@@ -1,7 +1,7 @@
 // ============================================================
 // PolicyState.cs
 // Sdílený běhový stav vynucování (singleton):
-//   - SERVER enforce: doručeno přes heartbeat (.213 = zdroj pravdy). Agent dle něj blokuje/varuje.
+//   - SERVER enforce: doručeno přes heartbeat (APP_SERVER = zdroj pravdy). Agent dle něj blokuje/varuje.
 //   - LOKÁLNÍ break-glass override: admin stanice dočasně vypne blokování (práce mimo síť),
 //     vyprší po timeoutu; perzistované do souboru (přežije restart služby).
 //
