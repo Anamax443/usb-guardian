@@ -393,16 +393,26 @@ on faith. Fixed today, each item its own commit (for isolation if something brea
   public unchanged). No existing endpoint had a gap today – this is a safety net for the future.
   **Deployed and verified 2026-09-04 15:43** – protected endpoints (`/api/incidents`) still return
   `401`, public ones (`/api/incidents/queue/status`) still respond unchanged.
-- **`be0fc83`** – the first CI (`.github/workflows/build-and-test.yml`), the last item from the
-  audit list. Until now, builds and tests only ran manually on a single machine. `windows-latest`
-  is required, not optional – the agent/API/console use Windows-only APIs (`WindowsIdentity`/
-  `WindowsPrincipal` for Negotiate auth, `AddWindowsService`, the `EventLog` provider), so this
-  wouldn't even restore on Linux. Builds all three main components separately (no shared `.sln`
-  covers them) plus runs both test projects. **Verified live** – run `33880356779` went green
-  (agent/API/console build + 8 agent tests + 10 API tests, 1m45s).
+- **`be0fc83`** – the first CI (`.github/workflows/build-and-test.yml`). Until now, builds and
+  tests only ran manually on a single machine. `windows-latest` is required, not optional – the
+  agent/API/console use Windows-only APIs (`WindowsIdentity`/`WindowsPrincipal` for Negotiate
+  auth, `AddWindowsService`, the `EventLog` provider), so this wouldn't even restore on Linux.
+  Builds all three main components separately (no shared `.sln` covers them) plus runs both test
+  projects. **Verified live** – run `33880356779` went green (agent/API/console build + 8 agent
+  tests + 10 API tests, 1m45s).
+- **`58f43f3`** – the last item from the audit list: the hostname in request bodies
+  (`IncidentsController.SubmitBatch`, `HeartbeatController.Heartbeat`) is pure CLAIM today – any
+  station in the `USB-Guardian-Clients` group can write any hostname. The agent runs as SYSTEM,
+  i.e. it authenticates with the machine account (`DOMAIN\HOSTNAME$`), so the server can compare
+  the claimed hostname against what the caller actually proved (`Security/CallerIdentity.cs`, a
+  pure parsing function, 6 tests). **Deliberately WARN-ONLY (logs to the Event Log and Activity,
+  doesn't reject the request)** – the real production format of the Windows identity couldn't be
+  verified live (unlike everything else today), and a hard rejection on a wrong assumption would
+  silence the whole fleet at once. **Git-only so far, not deployed to the fleet** – after the API
+  redeploy, wait a few days for zero false positives in Activity, only then tighten to `403`.
 
-**Still open from the audit** (priority for next time): ACL on the TLS PFX and the RSA signing key,
-verifying the payload's hostname against the authenticated Windows identity, more tests.
+**Still open from the audit:** ACL on the TLS PFX and the RSA signing key (server-side, not code),
+more tests.
 
 **Side finding (2026-09-04, not a bug):** the "Station coverage" check reports 201 stations without
 an agent, while "Agent auto-enrollment" in live mode reports "no stations to deploy." The code

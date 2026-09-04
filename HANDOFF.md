@@ -405,16 +405,24 @@ bez kontroly. Opraveno dnes, každá věc samostatný commit (kvůli izolovateln
   dnes díru neměl – jde o pojistku pro budoucnost. **Nasazeno a ověřeno 04.09.2026 15:43** –
   chráněné endpointy (`/api/incidents`) dál vrací `401`, veřejné (`/api/incidents/queue/status`)
   dál odpovídají beze změny.
-- **`be0fc83`** – první CI (`.github/workflows/build-and-test.yml`), poslední položka z auditu.
+- **`be0fc83`** – první CI (`.github/workflows/build-and-test.yml`).
   Do teď se build a testy spouštěly jen ručně na jednom stroji. `windows-latest` je nutný, ne
   volitelný – agent/API/konzole používají Windows-only API (`WindowsIdentity`/`WindowsPrincipal`
   pro Negotiate auth, `AddWindowsService`, `EventLog` provider), na Linuxu by se to vůbec
   nezrestorovalo. Builduje všechny tři hlavní komponenty zvlášť (žádná společná `.sln` je
   nepokrývá) + spouští oba testovací projekty. **Ověřeno naživo** – běh `33880356779` prošel
   zeleně (build agent/API/konzole + 8 testů agenta + 10 testů API, 1m45s).
+- **`58f43f3`** – poslední položka z auditu: hostname v datech (`IncidentsController.SubmitBatch`,
+  `HeartbeatController.Heartbeat`) je dnes čisté TVRZENÍ – libovolná stanice ze skupiny
+  `USB-Guardian-Clients` může napsat cizí hostname. Agent běží jako SYSTEM = autentizuje se
+  strojovým účtem (`DOMENA\HOSTNAME$`), server proto může porovnat tvrzený hostname s tím, čím
+  se volající doopravdy prokázal (`Security/CallerIdentity.cs`, čistá parsovací funkce, 6 testů).
+  **Záměrně jen WARN-ONLY (loguje do Event Logu i Aktivity, request neodmítá)** – formát Windows
+  identity v produkci nešlo ověřit naživo (na rozdíl od všeho ostatního dnes), tvrdé odmítnutí při
+  špatném předpokladu by umlčelo celý fleet naráz. **Zatím jen v gitu, na fleet nenasazeno** –
+  po redeployi API počkat pár dní bez falešných poplachů v Aktivitě, pak teprve zpřísnit na `403`.
 
-**Zatím neřešeno z auditu** (priorita pro příště): ACL na TLS PFX a RSA signing klíč,
-ověření hostname z payloadu proti autentizované Windows identitě, víc testů.
+**Zatím neřešeno z auditu:** ACL na TLS PFX a RSA signing klíč (server-side, ne kód), víc testů.
 
 **Vedlejší zjištění (04.09.2026, ne bug):** Kontrola „Pokrytí stanic" hlásí 201 stanic bez agenta,
 zatímco „Auto-enrollment agenta" v ostrém režimu hlásí „žádné stanice k nasazení". Z kódu
