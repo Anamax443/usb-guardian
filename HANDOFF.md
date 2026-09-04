@@ -405,10 +405,23 @@ bez kontroly. Opraveno dnes, každá věc samostatný commit (kvůli izolovateln
   dnes díru neměl – jde o pojistku pro budoucnost. **Nasazeno a ověřeno 04.09.2026 15:43** –
   chráněné endpointy (`/api/incidents`) dál vrací `401`, veřejné (`/api/incidents/queue/status`)
   dál odpovídají beze změny.
+- **`be0fc83`** – první CI (`.github/workflows/build-and-test.yml`), poslední položka z auditu.
+  Do teď se build a testy spouštěly jen ručně na jednom stroji. `windows-latest` je nutný, ne
+  volitelný – agent/API/konzole používají Windows-only API (`WindowsIdentity`/`WindowsPrincipal`
+  pro Negotiate auth, `AddWindowsService`, `EventLog` provider), na Linuxu by se to vůbec
+  nezrestorovalo. Builduje všechny tři hlavní komponenty zvlášť (žádná společná `.sln` je
+  nepokrývá) + spouští oba testovací projekty. **Ověřeno naživo** – běh `33880356779` prošel
+  zeleně (build agent/API/konzole + 8 testů agenta + 10 testů API, 1m45s).
 
 **Zatím neřešeno z auditu** (priorita pro příště): ACL na TLS PFX a RSA signing klíč,
-ověření hostname z payloadu proti autentizované Windows identitě, víc testů,
-CI (`.github/workflows` v repu chybí úplně).
+ověření hostname z payloadu proti autentizované Windows identitě, víc testů.
+
+**Vedlejší zjištění (04.09.2026, ne bug):** Kontrola „Pokrytí stanic" hlásí 201 stanic bez agenta,
+zatímco „Auto-enrollment agenta" v ostrém režimu hlásí „žádné stanice k nasazení". Z kódu
+(`AgentDeployService.cs`) jde odvodit, že `deploy.defaultEnroll` musí být v Nastavení explicitně
+`false` (jinak by běh s 201 kandidáty vrátil aspoň `deploy.maxPerRun` cílů, ne nulu) – jde tedy o
+záměrný opt-in gate (postup „PC-01 → .180 → fleet" z 5.3), ne o chybu. Rozjezd na víc stanic:
+`Nastavení → Auto-enrollment → deploy.includeHosts`, až doběhne GPO důvěra podpisového certu (5.4).
 
 ### 5.5 Roadmapa (pending)
 - **Monitoring expirace podpisového certu** – `CN=powershell.domena.loc` platí do 2028-06-17; alert e-mailem z konzole.

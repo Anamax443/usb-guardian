@@ -393,10 +393,24 @@ on faith. Fixed today, each item its own commit (for isolation if something brea
   public unchanged). No existing endpoint had a gap today – this is a safety net for the future.
   **Deployed and verified 2026-09-04 15:43** – protected endpoints (`/api/incidents`) still return
   `401`, public ones (`/api/incidents/queue/status`) still respond unchanged.
+- **`be0fc83`** – the first CI (`.github/workflows/build-and-test.yml`), the last item from the
+  audit list. Until now, builds and tests only ran manually on a single machine. `windows-latest`
+  is required, not optional – the agent/API/console use Windows-only APIs (`WindowsIdentity`/
+  `WindowsPrincipal` for Negotiate auth, `AddWindowsService`, the `EventLog` provider), so this
+  wouldn't even restore on Linux. Builds all three main components separately (no shared `.sln`
+  covers them) plus runs both test projects. **Verified live** – run `33880356779` went green
+  (agent/API/console build + 8 agent tests + 10 API tests, 1m45s).
 
 **Still open from the audit** (priority for next time): ACL on the TLS PFX and the RSA signing key,
-verifying the payload's hostname against the authenticated Windows identity, more tests, CI
-(`.github/workflows` is entirely absent from the repo).
+verifying the payload's hostname against the authenticated Windows identity, more tests.
+
+**Side finding (2026-09-04, not a bug):** the "Station coverage" check reports 201 stations without
+an agent, while "Agent auto-enrollment" in live mode reports "no stations to deploy." The code
+(`AgentDeployService.cs`) implies `deploy.defaultEnroll` must be explicitly `false` in Settings
+(otherwise a run against 201 candidates would return at least `deploy.maxPerRun` targets, not zero)
+– so this is a deliberate opt-in gate (the "PC-01 → .180 → fleet" rollout from 5.3), not a bug.
+To widen the rollout: `Settings → Auto-enrollment → deploy.includeHosts`, once the signing-cert
+GPO trust has rolled out (5.4).
 
 ### 5.5 Roadmap (pending)
 - **Monitoring of signing cert expiry** – `CN=powershell.domena.loc` valid until 2028-06-17; alert via e-mail from the console.
