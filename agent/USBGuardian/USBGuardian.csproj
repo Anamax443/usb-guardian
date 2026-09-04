@@ -17,6 +17,9 @@
     <!-- WMI pro detekci USB zařízení -->
     <PackageReference Include="System.Management" Version="8.0.0" />
 
+    <!-- Přímý dotaz na členství v místní skupině Administrators (viz IsLocalAdmin) -->
+    <PackageReference Include="System.DirectoryServices.AccountManagement" Version="8.0.0" />
+
     <!-- JSON konfigurace -->
     <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="8.0.0" />
 

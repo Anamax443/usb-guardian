@@ -20,6 +20,7 @@
 //   GET /api/status  → JSON se živým stavem agenta
 // ============================================================
 
+using System.DirectoryServices.AccountManagement;
 using System.Net;
 using System.Security.Principal;
 using System.Text;
@@ -402,6 +403,30 @@ public class LocalConsoleService : BackgroundService
                 return true;
         }
         catch { /* když token skupiny nenese, platí odpověď z bodu 1 */ }
+
+        // 3) TOKEN SKUPINU VŮBEC NENESE (ani deny-only). Reálně potkáno u doménového
+        //    účtu přes síťové NTLM přihlášení na loopback: identity.Groups na
+        //    Administrators neobsahovala vůbec nic, přestože účet byl přímým
+        //    (ne vnořeným) členem lokální skupiny a jeho INTERAKTIVNÍ token ji
+        //    správně nesl jako Enabled. Token tedy není spolehlivý zdroj pravdy –
+        //    zeptat se rovnou lokálního SAM, ne hádat z toho, co si zrovna tenhle
+        //    konkrétní typ přihlášení nese.
+        try
+        {
+            using var stroj = new PrincipalContext(ContextType.Machine);
+            using var admini = GroupPrincipal.FindByIdentity(stroj, "Administrators");
+            if (admini is not null && identity.User is { } sid)
+            {
+                foreach (var clen in admini.GetMembers(recursive: true))
+                {
+                    using (clen)
+                    {
+                        if (clen.Sid == sid) return true;
+                    }
+                }
+            }
+        }
+        catch { /* SAM nedostupný nebo dotaz selhal – platí odpověď z bodů 1–2 */ }
 
         return false;
     }
