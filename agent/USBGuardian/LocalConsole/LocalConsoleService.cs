@@ -245,9 +245,13 @@ public class LocalConsoleService : BackgroundService
         }
 
         // Adminské endpointy a jakýkoli zápis: odmítnout a zalogovat — tohle už je pokus jít dál.
-        _logger.LogWarning("Lokální konzole: odmítnut přístup na {Method} {Path} ({User})", method, path, kdo);
+        // Skupiny v diagnostice: bez nich se "je to lokální admin, a přesto ho to nepustí"
+        // nedalo vyšetřit - IsLocalAdmin řekne jen ANO/NE, ne PROČ.
+        var skupiny = DiagnostikaSkupin(ctx.User);
+        _logger.LogWarning("Lokální konzole: odmítnut přístup na {Method} {Path} ({User}) – skupiny v tokenu: {Skupiny}",
+            method, path, kdo, skupiny);
         WriteBytes(ctx, 403, "text/html; charset=utf-8",
-            Encoding.UTF8.GetBytes(OdmitnutoHtml(kdo)));
+            Encoding.UTF8.GetBytes(OdmitnutoHtml(kdo, skupiny)));
     }
 
     // --------------------------------------------------------
@@ -410,6 +414,40 @@ public class LocalConsoleService : BackgroundService
         return identity.Name ?? "bez jména";
     }
 
+    /// <summary>
+    /// Syrový seznam skupin z tokenu – kdyz IsLocalAdmin řekne NE, tohle ukáže PROČ:
+    /// jestli Administrators v tokenu vůbec je (třeba jen deny-only), nebo jestli čtení
+    /// skupin rovnou spadlo (IsLocalAdmin takovou chybu dnes tiše polyká).
+    /// Bez tohohle se rozpor "člověk JE lokální admin, konzole ho přesto odmítá" nedal vyšetřit.
+    /// </summary>
+    private static string DiagnostikaSkupin(IPrincipal? user)
+    {
+        if (user?.Identity is not WindowsIdentity identity) return "(žádná Windows identita)";
+        if (!identity.IsAuthenticated) return "(neautentizováno)";
+
+        try
+        {
+            var skupiny = identity.Groups;
+            if (skupiny is null) return "(token nenese žádné skupiny – Groups je null)";
+            if (skupiny.Count == 0) return "(token nenese žádné skupiny – prázdný seznam)";
+
+            var admins = new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null);
+            var radky = new List<string>();
+            foreach (var g in skupiny)
+            {
+                string popis;
+                try { popis = g.Translate(typeof(NTAccount)).Value; }
+                catch { popis = g.Value; }
+                radky.Add(g.Equals(admins) ? popis + " ← ADMINISTRATORS" : popis);
+            }
+            return string.Join("; ", radky);
+        }
+        catch (Exception ex)
+        {
+            return $"(čtení skupin selhalo: {ex.GetType().Name}: {ex.Message})";
+        }
+    }
+
     // --------------------------------------------------------
     // Sestaví živý stav agenta (anonymní objekt → JSON)
     // --------------------------------------------------------
@@ -511,7 +549,7 @@ public class LocalConsoleService : BackgroundService
     // "403 – pristup pouze pro lokalni administratory" nechal člověka
     // v terénu bez informace, co má dělat dál.
     // --------------------------------------------------------
-    private static string OdmitnutoHtml(string kdo) => $$"""
+    private static string OdmitnutoHtml(string kdo, string skupiny) => $$"""
         <!DOCTYPE html>
         <html lang="cs">
         <head>
@@ -537,6 +575,7 @@ public class LocalConsoleService : BackgroundService
             <dl>
               <dt>Přihlášen jako</dt><dd class="mono">{{kdo}}</dd>
               <dt>Potřeba</dt><dd>členství ve skupině <span class="mono">Administrators</span> na tomto počítači</dd>
+              <dt>Skupiny v tokenu</dt><dd class="mono" style="word-break:break-all">{{skupiny}}</dd>
             </dl>
             <ul>
               <li>Přihlas se účtem, který je na tomhle počítači správcem.</li>
