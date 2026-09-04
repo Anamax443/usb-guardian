@@ -1,0 +1,41 @@
+name: build-and-test
+
+# Chyběla vůbec nějaká CI (audit 04.09.2026) - do teď se build a testy spouštěly
+# jen ručně na jednom stroji. windows-latest je nutný, ne volitelný: agent,
+# API i konzole používají Windows-only API (WindowsIdentity/WindowsPrincipal
+# pro Negotiate auth, AddWindowsService, EventLog provider) - na Linuxu
+# by to vůbec nezrestorovalo.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-and-test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      # Build každé ze tří hlavních komponent zvlášť (žádná společná .sln
+      # nepokrývá všechny tři) - odhalí, že se něco nedá zkompilovat, i když
+      # na to zrovna neukazuje žádný test.
+      - name: Build agent
+        run: dotnet build agent/USBGuardian/USBGuardian.csproj -c Release
+
+      - name: Build API
+        run: dotnet build server/USBGuardian.Api/USBGuardian.Api.csproj -c Release
+
+      - name: Build Admin console
+        run: dotnet build server/USBGuardian.Admin/USBGuardian.Admin.csproj -c Release
+
+      - name: Test agent
+        run: dotnet test tests/USBGuardian.Agent.Tests/USBGuardian.Agent.Tests.csproj -c Release
+
+      - name: Test API
+        run: dotnet test tests/USBGuardian.Api.Tests/USBGuardian.Api.Tests.csproj -c Release
