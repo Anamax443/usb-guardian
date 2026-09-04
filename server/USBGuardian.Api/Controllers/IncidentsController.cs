@@ -15,6 +15,7 @@ using Microsoft.EntityFrameworkCore;
 using USBGuardian.Api.Data;
 using USBGuardian.Api.Models;
 using USBGuardian.Api.Queue;
+using USBGuardian.Api.Security;
 
 namespace USBGuardian.Api.Controllers;
 
@@ -53,6 +54,25 @@ public class IncidentsController : ControllerBase
     {
         if (request.Incidents.Count == 0)
             return Ok(new { queued = 0 });
+
+        // Audit 04.09.2026: Hostname v datech je dnes jen TVRZENÍ - libovolná stanice
+        // ze skupiny USB-Guardian-Clients může napsat cizí hostname. ZATÍM JEN LOGUJI
+        // (neodmítám request) - hostname z autentizované identity strojového účtu ještě
+        // nebyl ověřen proti reálnému provozu, tvrdé odmítnutí s chybou ve formátu by
+        // umlčelo celý fleet naráz. Až pár dní bez falešných varování, zpřísnit na 403
+        // (viz HANDOFF 5.12).
+        var authHostname = CallerIdentity.MachineHostnameOrNull(HttpContext.User.Identity);
+        if (authHostname is not null
+            && !string.Equals(authHostname, request.Hostname, StringComparison.OrdinalIgnoreCase))
+        {
+            _logger.LogWarning(
+                "Batch tvrdí Hostname={Claimed}, ale autentizovaná identita je stroj {Actual} - " +
+                "zatím jen loguji, incident se přesto zapíše",
+                request.Hostname, authHostname);
+            _dennik.Log("bezpecnost",
+                $"batch se hlásí jako {request.Hostname}, ale autentizovaná identita je {authHostname}",
+                ActivityLevel.Warn, request.Hostname);
+        }
 
         var sourceIp   = HttpContext.Connection.RemoteIpAddress?.ToString();
         var receivedAt = DateTime.UtcNow;

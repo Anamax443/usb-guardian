@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using USBGuardian.Api.Data;
 using USBGuardian.Api.Models;
+using USBGuardian.Api.Security;
 
 namespace USBGuardian.Api.Controllers;
 
@@ -31,6 +32,18 @@ public class HeartbeatController : ControllerBase
         [FromQuery] string? whitelistVersion,
         [FromQuery] string? agentVersion)
     {
+        // Audit 04.09.2026: hostname v query je dnes jen TVRZENÍ - libovolná stanice ze skupiny
+        // USB-Guardian-Clients může poslat cizí hostname. ZATÍM JEN LOGUJI (neodmítám heartbeat) -
+        // stejná opatrnost jako u IncidentsController.SubmitBatch, viz komentář tam i HANDOFF 5.12.
+        var authHostname = CallerIdentity.MachineHostnameOrNull(HttpContext.User.Identity);
+        if (authHostname is not null
+            && !string.Equals(authHostname, hostname, StringComparison.OrdinalIgnoreCase))
+        {
+            _dennik.Log("bezpecnost",
+                $"heartbeat se hlásí jako {hostname}, ale autentizovaná identita je {authHostname}",
+                ActivityLevel.Warn, hostname);
+        }
+
         // Aktualizujeme LastSeen
         var computer = await _db.Computers
             .FirstOrDefaultAsync(c => c.Hostname == hostname);
