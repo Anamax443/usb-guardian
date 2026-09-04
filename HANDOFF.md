@@ -26,7 +26,7 @@ Serverová konzole agreguje data, drží inventář stanic z AD a ukazuje, kam c
 | **Autorizace konzole** | AD `DOMENA\IT-Admins` + whitelist `DOMENA\it-admin` (+ DB seznam z Nastavení) |
 | **Šifrování agent↔API** | HTTPS + **pinning otisku** (bez CA) — ověřeno end-to-end (heartbeat OK z PC-01) |
 | **AD sync** | zapnutý 60 min + on-demand; **213 v AD, ~212 bez agenta** |
-| **Live commit** (04.09.2026 13:08) | **konzole `06b67e9`** · **API `5431dce`** (nezměněno) · **agent beta `924b9b8`** (BARTKOVAJW11, CERNYSW11, TRNKAMW11N) · **agent stable `cb8ef1d`** (PC-01/TRNKAMW11, zbytek fleetu). Lokální konzole ověřena end-to-end na CERNYSW11 (admin i běžný uživatel) — viz 5.11. Archiv drží i `3473a69`, `625329c`, `b0e1a0d`, `560722b`, `f2bb194` pro návrat |
+| **Live commit** (04.09.2026 14:16) | **konzole `06b67e9`** (nezměněno) · **API `297ac7a`** (redeploy 2×: HTTP 5050 fix + fail-closed AllowedGroups) · **agent beta `924b9b8`** (BARTKOVAJW11, CERNYSW11, TRNKAMW11N) · **agent stable `cb8ef1d`** (PC-01/TRNKAMW11, zbytek fleetu — `56b4235`/expirace whitelistu je zatím jen v gitu, na fleet nenasazeno). Lokální konzole ověřena end-to-end na CERNYSW11 — viz 5.11. Bezpečnostní audit + náprava — viz 5.12 |
 | **Rozvoz agenta – osvědčený postup** | balíček → archiv `…\USBGuardianAgentVersions\<commit>` → **beta na jednu stanici** (dočasně přepsaný `update-beta.txt`) → ověřit → beta na zbytek → teprve pak **stable**. Log `…\deploy\update-agent.log`; „Agent verze" v konzoli se projeví až dalším heartbeatem (≤2 min), takže hned po rozvozu tam ještě chvíli svítí stará verze |
 | **Konzole – stránky** | Přehled (filtr+kumulace+řazení, kapacita, **export CSV + manažerský report s grafy**), Stanice (AD inventář + „Zmlklo agentů" + „Vyžádat data" + **Nasazení / hromadné vyřadit-zařadit**), Whitelist (**kapacita + filtr katalogu + auto-publish podepsané verze**), Nastavení (vynucování/přístup/email/alerty/dohled/auto-enrollment+default PC/retence/**Údržba: reload nastavení**), **Databáze**, **Kontroly** (health checks), Dokumentace (+HTML animace) |
 | **Enforcement (F1-3)** | **whitelist 1:1** (auto-podpis serverem, interní RSA klíč na APP_SERVER) → **vynucování** server→agent (`policy.enforce` v heartbeatu) → **break-glass** (lokální konzole 5080, offline, logováno, zruší se při sync) + **auto-re-enable** + reconciliace s whitelistem. Lokální konzole: restart služby, break-glass, seznam whitelistu |
@@ -338,6 +338,44 @@ točící se kolečko). Vyšetření odhalilo řetěz nezávislých problémů, 
 **Ověřeno živě:** CERNYSW11 na `924b9b8` ukazuje cernysovi plnou admin konzoli (WHITELIST, WMI MONITORING,
 VYNUCOVÁNÍ, SLUŽBA, PLÁNOVANÝ RESTART) — dřív viděl jen věčné načítání, pak (po dřívější opravě `cb8ef1d`)
 alespoň zjednodušenou uživatelskou stránku, teď správně plný přístup podle skutečného členství ve skupině.
+
+### 5.12 Externí bezpečnostní audit + náprava (04.09.2026)
+Nezávislý statický audit veřejného repa (architektura 9,0/10, security implementation 7,3/10,
+testování 4,5/10, celkem 7,9/10) našel několik konkrétních chyb – ověřeny přímo v kódu, ne převzaty
+bez kontroly. Opraveno dnes, každá věc samostatný commit (kvůli izolovatelnosti při rozbití):
+
+- **`56b4235`** – vypršelý whitelist tiše autorizoval zařízení: `WhitelistChecker.IsAllowed()`
+  jen zalogoval warning a pokračoval v lookupu; `PolicyEnforcer.HandleDevice()` se vrátil na
+  `if (isAllowed) return` dřív, než se `DetermineAction()` podíval na `whitelistStatus` – `onExpired`
+  tedy nikdy neplatilo pro zařízení, které v (starém) seznamu zůstalo. Stejná díra byla i v
+  `DeviceMonitor.ReEnforceConnectedDevices()` pro už připojená média. **Zatím jen v gitu, na fleet
+  nenasazeno** (dohodnuto s uživatelem – code review místo živého testu, protože ověření vyžaduje
+  buď skutečně expirovaný produkční whitelist, nebo izolovaný testovací).
+- **`033af8a`** – `WhitelistController` měl jednu authorization policy (`USBGuardianClients`) na
+  celém controlleru včetně `POST /api/whitelist/devices` – účet stanice tak teoreticky mohl zapisovat
+  whitelist, ne jen ho číst. Autorizace přesunuta na jednotlivé akce, nová policy `USBGuardianAdmins`
+  (fail-closed) pro zápis. **Nasazeno, vyžaduje `Authorization:AdminGroups` v `appsettings.local.json`
+  na `SQL_SERVER`.**
+- **`57a0e15` + `a4f28bd`** – API poslouchalo bezpodmínečně na HTTP 5050 i HTTPS 5443. Port teď jen
+  v `Development`. **Reálný `appsettings.local.json` na `SQL_SERVER` měl vlastní
+  `Kestrel:Endpoints:Http:Url`** – Kestrel čte tuhle sekci nezávisle na kódu a oba zdroje se sčítají,
+  ne nahrazují. Pokus vynulovat hodnotu v `IConfiguration` za běhu **nefungoval** (ověřeno izolovaným
+  testem mimo repo) – Kestrel pořád najde endpoint „Http" a spadne na chybějící `Url`, což by v
+  produkci znamenalo, že se API vůbec nerozjede. Řešení: fail-fast s jasnou hláškou, pokud produkce
+  vůbec uvidí tuhle sekci existovat + ruční odstranění sekce z reálného configu na `SQL_SERVER`.
+  **Nasazeno a ověřeno** (`/api/version` přes HTTPS OK, HTTP 5050 timeoutuje).
+- **`297ac7a`** – `AllowedGroups.Length == 0 → true` (fail-open, komentář to přiznával). Teď fail-fast
+  při startu, pokud je prázdné. **Ověřeno před nasazením**, že produkční `AllowedGroups` je vyplněné
+  (`AXINETWORK\USB-Guardian-Clients`, `AXINETWORK\SQL Admins2`) – fail-closed tedy nic nerozbil.
+  **Nasazeno a ověřeno** (`/api/version` po redeployi OK).
+- **`ac73571`** – první C# testovací projekt (`tests/USBGuardian.Agent.Tests`, xUnit), 8 testů,
+  regrese na opravu expirace whitelistu. Do té doby repo mělo jen jeden JS test (UI).
+
+**Zatím neřešeno z auditu** (priorita pro příště): ACL na TLS PFX a RSA signing klíč, `EventId` GUID
+pro spolehlivou deduplikaci incidentů (dnešní klíč `timestamp-na-sekundu|serial|vendor` chybí
+`ProductId`/`PnpDeviceId`), durabilní fronta incidentů (`202 Accepted` se vrací PŘED zápisem do DB –
+při pádu procesu mezi přijetím a zápisem se batch ztratí), ověření hostname z payloadu proti
+autentizované Windows identitě, víc testů, CI (`.github/workflows` v repu chybí úplně).
 
 ### 5.5 Roadmapa (pending)
 - **Monitoring expirace podpisového certu** – `CN=powershell.domena.loc` platí do 2028-06-17; alert e-mailem z konzole.

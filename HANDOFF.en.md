@@ -26,7 +26,7 @@ The server console aggregates data, keeps a station inventory from AD and shows 
 | **Console authorization** | AD `DOMENA\IT-Admins` + whitelist `DOMENA\it-admin` (+ DB list from Settings) |
 | **Agent↔API encryption** | HTTPS + **thumbprint pinning** (no CA) — verified end-to-end (heartbeat OK from PC-01) |
 | **AD sync** | enabled 60 min + on-demand; **213 in AD, ~212 without agent** |
-| **Live commit** (2026-09-04 13:08) | **console `06b67e9`** · **API `5431dce`** (unchanged) · **agent beta `924b9b8`** (BARTKOVAJW11, CERNYSW11, TRNKAMW11N) · **agent stable `cb8ef1d`** (PC-01/TRNKAMW11, rest of the fleet). Local console verified end-to-end on CERNYSW11 (admin and regular user) — see 5.11. Archive also keeps `3473a69`, `625329c`, `b0e1a0d`, `560722b`, `f2bb194` for a rollback |
+| **Live commit** (2026-09-04 14:16) | **console `06b67e9`** (unchanged) · **API `297ac7a`** (redeployed twice: HTTP 5050 fix + fail-closed AllowedGroups) · **agent beta `924b9b8`** (BARTKOVAJW11, CERNYSW11, TRNKAMW11N) · **agent stable `cb8ef1d`** (PC-01/TRNKAMW11, rest of the fleet — `56b4235`/the whitelist-expiry fix is git-only so far, not rolled out to the fleet). Local console verified end-to-end on CERNYSW11 — see 5.11. External security audit + remediation — see 5.12 |
 | **Agent rollout – the routine that works** | package → archive `…\USBGuardianAgentVersions\<commit>` → **beta to a single station** (temporarily overwritten `update-beta.txt`) → verify → beta to the rest → only then **stable**. Log `…\deploy\update-agent.log`; the console's "Agent version" only catches up on the next heartbeat (≤2 min), so right after a rollout it still shows the old one |
 | **Console – pages** | Overview (filter+aggregation+sort, capacity, **CSV export + manager report with charts**), Stations (AD inventory + "Agents gone silent" + "Request data" + **Deployment / bulk exclude-include**), Whitelist (**capacity + catalog filter + auto-published signed version**), Settings (enforcement/access/email/alerts/monitoring/auto-enrollment+default PC/retention/**Maintenance: reload settings**), **Database**, **Health checks**, Documentation (+HTML animation) |
 | **Enforcement (P1-3)** | **whitelist 1:1** (server-side auto-sign, internal RSA key on APP_SERVER) → **enforcement** server→agent (`policy.enforce` in heartbeat) → **break-glass** (local console 5080, offline, logged, cleared on sync) + **auto-re-enable** + whitelist reconciliation. Local console: service restart, break-glass, whitelist list |
@@ -324,6 +324,46 @@ Investigation uncovered a chain of independent problems, fixed one by one:
 **Verified live:** CERNYSW11 on `924b9b8` now shows cernys the full admin console (WHITELIST, WMI MONITORING,
 ENFORCEMENT, SERVICE, PLANNED RESTART) — previously he saw only an endless load, then (after the earlier
 `cb8ef1d` fix) at best the simplified user page; now correct full access matching his real group membership.
+
+### 5.12 External security audit + remediation (2026-09-04)
+An independent static audit of the public repo (architecture 9.0/10, security implementation 7.3/10,
+testing 4.5/10, overall 7.9/10) found several concrete bugs – verified directly in the code, not taken
+on faith. Fixed today, each item its own commit (for isolation if something breaks):
+
+- **`56b4235`** – an expired whitelist silently authorized devices: `WhitelistChecker.IsAllowed()`
+  only logged a warning and kept going with the lookup; `PolicyEnforcer.HandleDevice()` returned on
+  `if (isAllowed) return` before `DetermineAction()` ever looked at `whitelistStatus` – `onExpired`
+  therefore never applied to a device that stayed in the (stale) list. The same gap existed in
+  `DeviceMonitor.ReEnforceConnectedDevices()` for already-connected media. **Git-only so far, not
+  rolled out to the fleet** (agreed with the user – code review instead of a live test, since verifying
+  it needs either a genuinely expired production whitelist or an isolated test one).
+- **`033af8a`** – `WhitelistController` had one authorization policy (`USBGuardianClients`) on the
+  whole controller, including `POST /api/whitelist/devices` – a station account could in theory write
+  to the whitelist, not just read it. Authorization moved to individual actions, a new fail-closed
+  policy `USBGuardianAdmins` added for the write path. **Deployed, needs `Authorization:AdminGroups`
+  in `appsettings.local.json` on `SQL_SERVER`.**
+- **`57a0e15` + `a4f28bd`** – the API unconditionally listened on both HTTP 5050 and HTTPS 5443. The
+  port now only opens in `Development`. **The real `appsettings.local.json` on `SQL_SERVER` had its own
+  `Kestrel:Endpoints:Http:Url`** – Kestrel reads that section independently of the code and the two
+  sources add up rather than one replacing the other. Trying to null the value out of `IConfiguration`
+  at runtime **didn't work** (verified with an isolated test outside the repo) – Kestrel still finds the
+  "Http" endpoint and crashes on the missing `Url`, which in production would mean the API never starts
+  at all. Fix: fail fast with a clear message if production ever sees that section exist, plus manually
+  removing the section from the real config on `SQL_SERVER`. **Deployed and verified**
+  (`/api/version` over HTTPS OK, HTTP 5050 times out).
+- **`297ac7a`** – `AllowedGroups.Length == 0 → true` (fail-open, the comment admitted as much). Now
+  fails fast at startup if empty. **Verified before deploying** that the production `AllowedGroups` is
+  populated (`AXINETWORK\USB-Guardian-Clients`, `AXINETWORK\SQL Admins2`) – so fail-closed broke nothing.
+  **Deployed and verified** (`/api/version` OK after the redeploy).
+- **`ac73571`** – the first C# test project (`tests/USBGuardian.Agent.Tests`, xUnit), 8 tests, a
+  regression test for the whitelist-expiry fix. Before this the repo had exactly one JS test (UI).
+
+**Still open from the audit** (priority for next time): ACL on the TLS PFX and the RSA signing key, an
+`EventId` GUID for reliable incident deduplication (today's key `timestamp-to-the-second|serial|vendor`
+is missing `ProductId`/`PnpDeviceId`), a durable incident queue (`202 Accepted` is returned BEFORE the
+DB write – a process crash between accept and write loses the batch), verifying the payload's hostname
+against the authenticated Windows identity, more tests, CI (`.github/workflows` is entirely absent from
+the repo).
 
 ### 5.5 Roadmap (pending)
 - **Monitoring of signing cert expiry** – `CN=powershell.domena.loc` valid until 2028-06-17; alert via e-mail from the console.
