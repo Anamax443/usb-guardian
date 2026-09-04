@@ -134,11 +134,11 @@ public class IncidentQueueWorker : BackgroundService
 
         var existingMap = await db.Incidents
             .Where(i => i.Hostname == request.Hostname && i.Timestamp >= since)
-            .Select(i => new { i.Id, i.Timestamp, i.SerialNumber, i.VendorId, i.DisconnectedAt })
+            .Select(i => new { i.Id, i.Timestamp, i.SerialNumber, i.VendorId, i.ProductId, i.PnpDeviceId, i.DisconnectedAt })
             .ToListAsync(ct);
 
         var existingLookup = existingMap
-            .GroupBy(i => MakeKey(i.Timestamp, i.SerialNumber, i.VendorId))
+            .GroupBy(i => MakeKey(i.Timestamp, i.SerialNumber, i.VendorId, i.ProductId, i.PnpDeviceId))
             .ToDictionary(g => g.Key, g => g.First());
 
         var newIncidents    = new List<Incident>();
@@ -147,7 +147,7 @@ public class IncidentQueueWorker : BackgroundService
 
         foreach (var dto in request.Incidents)
         {
-            var key = MakeKey(dto.Timestamp, dto.SerialNumber, dto.VendorId);
+            var key = MakeKey(dto.Timestamp, dto.SerialNumber, dto.VendorId, dto.ProductId, dto.PnpDeviceId);
 
             if (existingLookup.TryGetValue(key, out var existing))
             {
@@ -203,6 +203,12 @@ public class IncidentQueueWorker : BackgroundService
             request.Hostname, newIncidents.Count, updatedCount, duplicatesCount);
     }
 
-    private static string MakeKey(DateTime ts, string serial, string vendor) =>
-        $"{ts:yyyy-MM-ddTHH:mm:ss}|{serial}|{vendor}";
+    // Audit 04.09.2026: chyběly ProductId/PnpDeviceId - dvě různá zařízení stejného vendoru se
+    // stejným (často generickým, u levných USB kusů sdíleným) sériovým číslem, připojená ve
+    // stejné sekundě, by se dřív smíchala - druhý incident by dedup tiše zahodil jako duplikát
+    // prvního, místo aby ho zapsal. ProductId a PnpDeviceId nejsou u retry resendu (offset persist
+    // na agentovi, IncidentSync.cs) rizikové - jde o bajtově stejný záznam, takže se pořád spárují
+    // se svým dřívějším zápisem stejně jako dřív.
+    internal static string MakeKey(DateTime ts, string serial, string vendor, string productId, string pnpDeviceId) =>
+        $"{ts:yyyy-MM-ddTHH:mm:ss}|{serial}|{vendor}|{productId}|{pnpDeviceId}";
 }
