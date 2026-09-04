@@ -26,7 +26,7 @@ The server console aggregates data, keeps a station inventory from AD and shows 
 | **Console authorization** | AD `DOMENA\IT-Admins` + whitelist `DOMENA\it-admin` (+ DB list from Settings) |
 | **Agent↔API encryption** | HTTPS + **thumbprint pinning** (no CA) — verified end-to-end (heartbeat OK from PC-01) |
 | **AD sync** | enabled 60 min + on-demand; **213 in AD, ~212 without agent** |
-| **Live commit** (2026-09-04 15:08) | **console `06b67e9`** (not yet redeployed – the "Incident queue (spool)" check on `/kontroly` won't show up until it is, even though the API endpoint behind it is already live) · **API `a6bcfaf`** (redeployed: durable incident spool `8fbfa6d` + spool monitoring `2766344`, plus the earlier `297ac7a`) · **agent beta `924b9b8`** (BARTKOVAJW11, CERNYSW11, TRNKAMW11N) · **agent stable `cb8ef1d`** (PC-01/TRNKAMW11, rest of the fleet — `56b4235`/the whitelist-expiry fix is git-only so far, not rolled out to the fleet). Local console verified end-to-end on CERNYSW11 — see 5.11. External security audit + remediation — see 5.12 |
+| **Live commit** (2026-09-04 15:21) | **console `3a6a2b2`** (redeployed: the "Incident queue (spool)" check verified live via `/api/health` – 16 checks, the new one reports `ok`/`empty`) · **API `a6bcfaf`** (redeployed: durable incident spool `8fbfa6d` + spool monitoring `2766344`, plus the earlier `297ac7a`) · **agent beta `924b9b8`** (BARTKOVAJW11, CERNYSW11, TRNKAMW11N) · **agent stable `cb8ef1d`** (PC-01/TRNKAMW11, rest of the fleet — `56b4235`/the whitelist-expiry fix is git-only so far, not rolled out to the fleet). Local console verified end-to-end on CERNYSW11 — see 5.11. External security audit + remediation — see 5.12 |
 | **Agent rollout – the routine that works** | package → archive `…\USBGuardianAgentVersions\<commit>` → **beta to a single station** (temporarily overwritten `update-beta.txt`) → verify → beta to the rest → only then **stable**. Log `…\deploy\update-agent.log`; the console's "Agent version" only catches up on the next heartbeat (≤2 min), so right after a rollout it still shows the old one |
 | **Console – pages** | Overview (filter+aggregation+sort, capacity, **CSV export + manager report with charts**), Stations (AD inventory + "Agents gone silent" + "Request data" + **Deployment / bulk exclude-include**), Whitelist (**capacity + catalog filter + auto-published signed version**), Settings (enforcement/access/email/alerts/monitoring/auto-enrollment+default PC/retention/**Maintenance: reload settings**), **Database**, **Health checks**, Documentation (+HTML animation) |
 | **Enforcement (P1-3)** | **whitelist 1:1** (server-side auto-sign, internal RSA key on APP_SERVER) → **enforcement** server→agent (`policy.enforce` in heartbeat) → **break-glass** (local console 5080, offline, logged, cleared on sync) + **auto-re-enable** + whitelist reconciliation. Local console: service restart, break-glass, whitelist list |
@@ -177,7 +177,7 @@ running and queued incidents locally (7 files, oldest 2026-07-02), but **nothing
 The console never said so out loud — the "Agents gone silent" tile showed `1` and nobody looked. After starting the
 service manually the queue drained on its own.
 
-**Health checks (new page `/kontroly`, `Health/HealthService.cs`):** 15 read-only checks in three groups —
+**Health checks (new page `/kontroly`, `Health/HealthService.cs`):** 16 read-only checks in three groups —
 *Data collection* (database, **API reachability**, **incident queue (spool)**, **age of the newest incident**, silent agents, station coverage),
 *Whitelist and policy* (active version / signature / expiry, catalog vs. publication, signing key, enforcement),
 *Operations* (email, retention, AD sync, auto-enrollment, scheduled restart, console/API/agent version match).
@@ -372,10 +372,8 @@ on faith. Fixed today, each item its own commit (for isolation if something brea
   in the health checks. A new anonymous endpoint `GET /api/incidents/queue/status` (same pattern as the
   already-public `/api/version`) returns the pending count plus the age of the oldest one; a new check
   "Incident queue (spool)" in the *Data collection* group reads it the same way the other API checks do.
-  3 new tests for `IncidentSpool.GetStatus()`. **API endpoint deployed and verified 2026-09-04 15:08**
-  (`GET /api/incidents/queue/status` responds on `SQL_SERVER`). **Console on `APP_SERVER` still on
-  `06b67e9`** – the check itself won't appear on the `/kontroly` page until the console is redeployed
-  (see chapter 4).
+  3 new tests for `IncidentSpool.GetStatus()`. **Deployed and verified 2026-09-04 15:21** – both API
+  and console (`/api/health` on `APP_SERVER` returns 16 checks, the new one reports `ok`/`empty`).
 
 **Still open from the audit** (priority for next time): ACL on the TLS PFX and the RSA signing key, an
 `EventId` GUID for reliable incident deduplication (today's key `timestamp-to-the-second|serial|vendor`
