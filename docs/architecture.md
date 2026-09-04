@@ -136,7 +136,12 @@ server/admin na klientech netřeba).
 Požadavek na `127.0.0.1` je z pohledu Windows **síťové přihlášení**. U **lokálního** účtu z takového tokenu
 `LocalAccountTokenFilterPolicy` odebere skupinu `Administrators` (zůstane v něm jen jako *deny-only*), takže
 `WindowsPrincipal.IsInRole(Administrator)` vrátí **false**, i když člověk lokální admin **je**. Tím byl
-break-glass nedostupný přesně v situaci, na kterou je určený (člověk v terénu na vlastním PC).
+break-glass nedostupný přesně v situaci, na kterou je určený (technik u stanice, která nedosáhne na server).
+
+> **Kdo se do konzole dostane:** **jen lokální administrátor té stanice** — konzole není pro koncového
+> uživatele. V prostředí, kde jsou admin práva na oddělených účtech (`pcadmin.*` ve skupině `PC Admins`),
+> je break-glass fakticky nástroj IT, ne uživatele; běžný účet dostane vysvětlující odmítnutí. Je to
+> záměr: vypnutí blokování je zásah do vynucované politiky, i když dočasný a logovaný.
 
 Kontrola proto **uznává i filtrovaný token** (deny-only SID členství). Je to bezpečné, protože členství tu slouží
 jako **autorizace**, ne jako zdroj práv: samotnou akci provádí služba běžící pod SYSTEM, žádný elevovaný token
@@ -451,7 +456,7 @@ Konzole má na `AppSettings` jen write (ne delete na `Incidents`), proto je enfo
 | Per-serial blocklist | Zákaz konkrétního média, near-real-time k agentům (přednost před whitelistem) |
 | Hardening konzole | gMSA místo LocalSystem; dedikovaná `USB-Guardian-Admins`; HTTPS konzole; přesun API na .213 |
 | **Retence deníku** | `sp_PurgeActivityLog` existuje, ale **nikdo ji nevolá** – doplnit `activity.retentionDays` do Nastavení a volání do API (vzor: `RetentionService`) |
-| **Lokální konzole na fleetu** | Rozhodnout, jestli je v balíčku zapnutá (break-glass dostupný) nebo vypnutá (menší attack surface). Dnes je v šabloně `false`, v rozvezeném balíčku `true` — to se musí sjednotit |
+| ~~Lokální konzole na fleetu~~ | **Rozhodnuto 04.09.2026: na fleetu ZAPNUTÁ, výhradně pro lokálního admina stanice.** Šablona v repu zůstává `false` (bezpečný default pro jiné prostředí), balíček pro fleet se staví s `true`; build na opačný stav upozorní |
 | Toast Privilege Separation | Helper process v user session – jednosměrné Pipes SYSTEM → user |
 
 > Hotovo (dřív pending): Admin UI (Blazor konzole + AD sync), **šifrovaná komunikace agent↔API**

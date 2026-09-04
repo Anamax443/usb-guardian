@@ -140,8 +140,14 @@ on the clients is needed).
 A request to `127.0.0.1` is, as far as Windows is concerned, a **network logon**. For a **local** account,
 `LocalAccountTokenFilterPolicy` strips the `Administrators` group from such a token (it remains in it only as
 *deny-only*), so `WindowsPrincipal.IsInRole(Administrator)` returns **false** even though the person **is** a
-local admin. That made break-glass unavailable in exactly the situation it exists for (someone in the field on
-their own PC).
+local admin. That made break-glass unavailable in exactly the situation it exists for (a technician at a
+station that cannot reach the server).
+
+> **Who gets into the console:** **only a local administrator of that station** — the console is not for the
+> end user. In an environment where admin rights live on separate accounts (`pcadmin.*` in the `PC Admins`
+> group), break-glass is in effect a tool for IT, not for the user; an ordinary account gets the explanatory
+> refusal. This is intentional: switching blocking off is an intervention into the enforced policy, even if
+> a temporary and logged one.
 
 The check therefore **accepts a filtered token** (deny-only SID membership) as well. This is safe because
 membership serves as **authorization**, not as the source of rights: the action itself is carried out by the
@@ -484,7 +490,7 @@ The console only has write on `AppSettings` (no delete on `Incidents`), which is
 | Per-serial blocklist | Banning a specific medium, near-real-time to the agents (takes precedence over the whitelist) |
 | Console hardening | gMSA instead of LocalSystem; a dedicated `USB-Guardian-Admins`; HTTPS console; move the API to the app server |
 | **Activity-log retention** | `sp_PurgeActivityLog` exists but **nothing calls it** – add `activity.retentionDays` to Settings and the call to the API (pattern: `RetentionService`) |
-| **Local console on the fleet** | Decide whether it is on in the package (break-glass available) or off (smaller attack surface). Today the template says `false` while the rolled-out package says `true` — the two must be reconciled |
+| ~~Local console on the fleet~~ | **Decided 2026-09-04: ON across the fleet, exclusively for a local admin of the station.** The template in the repo stays `false` (a safe default for other environments), the fleet package is built with `true`; the build warns about the opposite state |
 | Toast privilege separation | A helper process in the user session – one-way pipes SYSTEM → user |
 
 ## Whitelist publishing/signing workflow (automatic, the client is a 1:1 copy of the server)

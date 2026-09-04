@@ -2269,10 +2269,17 @@ ne jako zdroj práv — samotnou akci provádí služba pod SYSTEM, žádný ele
 potřeba. Odmítnutí navíc vrací stránku, která ukáže, **jako kdo** byl požadavek viděn a co je potřeba;
 bez toho se to nedalo diagnostikovat na dálku.
 
-**Otevřený rozpor (k rozhodnutí, ne k opravě):** šablona konfigurace má `localConsole.enabled=false`
-(minimální attack surface), ale **rozvezený balíček i archivované verze mají `true`**. Buď platí, že
-break-glass má být na fleetu dostupný (a pak to má říkat i šablona), nebo že nemá (a pak se musí přebalit
-balíček). Dnes je v tom dokumentace i praxe nekonzistentní — což je přesně ten typ nálezu, který sem patří.
+**Rozpor v konfiguraci a jeho rozhodnutí:** šablona měla `localConsole.enabled=false` (minimální attack
+surface), ale **rozvezený balíček i archivované verze mají `true`**. Rozhodnuto 4. 9. 2026: konzole je na
+fleetu **zapnutá** a je **výhradně pro lokálního administrátora té stanice** — koncový uživatel do ní
+nepatří. Šablona v repu zůstává `false` (bezpečný default pro jiné prostředí, portabilita), balíček pro
+fleet se staví s `true` a build na opačný stav upozorní.
+
+**Důsledek pro čtení dokumentu:** v prostředí, kde jsou admin práva na oddělených účtech (`pcadmin.*` ve
+skupině `PC Admins`), není break-glass nástroj *uživatele v terénu*, ale **technika u stanice, která
+nedosáhne na server**. Běžný účet dostane vysvětlující odmítnutí — ověřeno v provozu 4. 9. 2026, kdy se do
+konzole zkusil dostat kolega pod svým denním účtem. Chování bylo správné; formulace na několika místech
+dokumentace, které to popisovaly jako funkci pro uživatele, byly opraveny.
 
 ### 34.4 Provozní funkce přidané po verzi 1.0
 

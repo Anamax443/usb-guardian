@@ -55,17 +55,19 @@ if (Test-Path $tasksSrc) {
 }
 
 # ── Kontrola konfigurace balicku ─────────────────────────────
-# Lokalni konzole MA byt na fleetu zapnuta: je to break-glass. Uzivatel
-# s NTB v terenu si pres ni (jako lokalni admin) docasne vypne blokovani
-# a muze pracovat, i kdyz na server nedosahne. Bez ni by mu blok zablokoval
-# praci a jedina cesta by byla volat IT.
+# Lokalni konzole MA byt na fleetu zapnuta: je to break-glass. Dostane se do
+# ni jen LOKALNI ADMIN te stanice (u nas ucty pcadmin.*, ne bezny ucet
+# uzivatele) a docasne pres ni vypne blokovani na stroji, ktery na server
+# nedosahne. Bezny uzivatel se dovnitr nedostane a ma to tak byt — vypnuti
+# blokovani je zasah do vynucovane politiky. Bez konzole nema ani technik
+# u te stanice zadnou cestu, jak blok docasne sundat.
 $cfgPath = Join-Path $Output "Config\agent.config.local.json"
 if (Test-Path $cfgPath) {
     $cfg = Get-Content $cfgPath -Raw
     if ($cfg -notmatch '"localConsole"') {
         Write-Host "VAROVANI: balicek nema localConsole - na stanici nepujde break-glass." -ForegroundColor Yellow
     } elseif ($cfg -match '"localConsole"\s*:\s*{[^}]*"enabled"\s*:\s*false') {
-        Write-Host "VAROVANI: lokalni konzole je VYPNUTA - uzivatel v terenu si nevypne blokovani." -ForegroundColor Yellow
+        Write-Host "VAROVANI: lokalni konzole je VYPNUTA - lokalni admin te stanice nevypne blokovani offline." -ForegroundColor Yellow
     }
     if ($cfg -match 'YOUR_API_SERVER') {
         Write-Host "VAROVANI: sablonovy syncUrl (YOUR_API_SERVER) - agent se nepripoji." -ForegroundColor Yellow

@@ -2358,11 +2358,19 @@ The check now **accepts a filtered token** as well. That is defensible: membersh
 SYSTEM, and no elevated caller token is needed. A refusal also returns a page showing **who** the request
 was seen as and what is required; without that it could not be diagnosed remotely.
 
-**An open inconsistency (a decision, not a fix):** the configuration template has
-`localConsole.enabled=false` (minimum attack surface), but **the rolled-out package and the archived
-versions all say `true`**. Either break-glass is meant to be available across the fleet (and then the
-template should say so), or it is not (and then the package must be rebuilt). Today the documentation and
-practice disagree — exactly the kind of finding that belongs here.
+**A configuration inconsistency and the decision on it:** the template had `localConsole.enabled=false`
+(minimum attack surface), but **the rolled-out package and the archived versions all say `true`**. Decided on
+4 Sep 2026: the console is **on** across the fleet and is **exclusively for a local administrator of that
+station** — the end user does not belong in it. The template in the repo stays `false` (a safe default for
+other environments, portability), the fleet package is built with `true`, and the build warns about the
+opposite state.
+
+**A consequence for reading this document:** in an environment where admin rights live on separate accounts
+(`pcadmin.*` in the `PC Admins` group), break-glass is not a tool for *the user in the field* but for **a
+technician at a station that cannot reach the server**. An ordinary account gets the explanatory refusal —
+verified in production on 4 Sep 2026, when a colleague tried to reach the console under his everyday
+account. The behaviour was correct; the wording in the few places that described it as a user-facing feature
+has been corrected.
 
 ### 34.4 Operational features added after version 1.0
 
