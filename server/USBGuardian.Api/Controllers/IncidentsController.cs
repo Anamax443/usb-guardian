@@ -148,9 +148,24 @@ public class IncidentsController : ControllerBase
 
     // --------------------------------------------------------
     // GET /api/incidents/queue/status
-    // Monitoring – počet čekajících batchů ve frontě
+    // Monitoring – počet čekajících batchů (paměťová fronta i disková spool
+    // vrstva). Anonymní záměrně (stejně jako /api/version) – nese jen počty
+    // a stáří, žádný obsah incidentů, a čte ho konzole běžící na JINÉM
+    // serveru pro Kontroly stavu (HealthService.cs) – ta se přihlásit
+    // Windows identitou API serveru neumí.
     // --------------------------------------------------------
     [HttpGet("queue/status")]
+    [Microsoft.AspNetCore.Authorization.AllowAnonymous]
     public IActionResult QueueStatus()
-        => Ok(new { pending = _queue.PendingCount });
+    {
+        var spool = _spool.GetStatus();
+        return Ok(new
+        {
+            pending               = _queue.PendingCount,
+            spoolPending          = spool.PendingCount,
+            spoolOldestAgeSeconds = spool.OldestReceivedAtUtc is { } oldest
+                ? (int)(DateTime.UtcNow - oldest).TotalSeconds
+                : (int?)null
+        });
+    }
 }

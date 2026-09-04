@@ -133,6 +133,12 @@ public sealed class HealthService
           + "Když API stojí, agent si data ukládá do fronty na disku a server je slepý.",
             false, CheckApiAsync),
 
+        new(GData, "Fronta incidentů (spool)",
+            "Batch mezi přijetím na API a zápisem do DB čeká na disku (IncidentSpool) – přežije pád "
+          + "procesu, ale jen dokud ho worker nezpracuje. Uvízlý soubor znamená, že worker neběží "
+          + "nebo je zaseklý na DB, i když samotné API ještě odpovídá na /api/version.",
+            false, CheckIncidentSpoolAsync),
+
         new(GData, "Přítok incidentů",
             "Stáří nejnovějšího incidentu v databázi. Když roste, agenti sice mohou běžet, "
           + "ale jejich hlášení nedotečou (výpadek API, sítě nebo služby agenta).",
@@ -334,6 +340,49 @@ public sealed class HealthService
             return new CheckOutcome(HealthState.Bad, $"NEDOSTUPNÉ – {url}: {Short(ex.Message, 120)}",
                 "Na serveru s API nastartuj službu API a ověř, že má START_TYPE = AUTO_START "
               + "(jinak po restartu serveru nenaběhne). Pojistkou je Nastavení → Plánovaný restart služeb.");
+        }
+    }
+
+    /// <summary>Uvízl batch mezi 202 Accepted a zápisem do DB? Viz IncidentSpool.cs.</summary>
+    private static async Task<CheckOutcome> CheckIncidentSpoolAsync(Ctx c, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(c.Cfg.ApiUrl))
+            return new CheckOutcome(HealthState.Off, "nenastaveno",
+                "Doplň adresu API v Nastavení → Kontroly stavu (stejná adresa jako pro API pro agenty).");
+
+        var url = c.Cfg.ApiUrl.TrimEnd('/') + "/api/incidents/queue/status";
+        try
+        {
+            using var http = NewHttpClient(c.Cfg);
+            var body = await http.GetStringAsync(url, ct);
+            using var doc = System.Text.Json.JsonDocument.Parse(body);
+            var root = doc.RootElement;
+
+            var spoolPending = root.TryGetProperty("spoolPending", out var sp) ? sp.GetInt32() : 0;
+            int? oldestAgeSec = root.TryGetProperty("spoolOldestAgeSeconds", out var oa)
+                                 && oa.ValueKind != System.Text.Json.JsonValueKind.Null
+                ? oa.GetInt32() : null;
+
+            if (spoolPending == 0)
+                return new CheckOutcome(HealthState.Ok, "prázdná");
+
+            var ageText = oldestAgeSec is { } sec ? Age(TimeSpan.FromSeconds(sec)) : "neznámé stáří";
+            // Za normálního provozu worker soubor smaže během chvilky – i krátce čekající
+            // batch je odchylka od klidového stavu (0), proto Warn hned, ne až Ok.
+            var state = oldestAgeSec is > 600 ? HealthState.Bad : HealthState.Warn;
+
+            return new CheckOutcome(state, $"{spoolPending} nedokončených, nejstarší {ageText}",
+                state == HealthState.Bad
+                    ? "Worker na API pravděpodobně neběží nebo je zaseklý na DB – zkontroluj Event Log "
+                    + "služby API na jejím serveru a dostupnost SQL Serveru."
+                    : "Krátkodobě normální (batch se právě zpracovává); pokud stáří roste přes pár "
+                    + "minut, jde o skutečný problém (viz Bad výše).");
+        }
+        catch (Exception ex)
+        {
+            return new CheckOutcome(HealthState.Bad, $"NEDOSTUPNÉ – {url}: {Short(ex.Message, 120)}",
+                "Endpoint /api/incidents/queue/status vyžaduje aktuální verzi API (viz kontrola "
+              + "Verze komponent) – zkontroluj, že je nasazená.");
         }
     }
 

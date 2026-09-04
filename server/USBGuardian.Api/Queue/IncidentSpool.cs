@@ -96,6 +96,27 @@ public class IncidentSpool
         return result;
     }
 
+    /// <summary>
+    /// Lehký souhrn pro monitoring (Kontroly stavu na konzoli) – jen počet a stáří
+    /// nejstaršího záznamu, bez deserializace obsahu (na rozdíl od LoadPending).
+    /// Stáří se čte z NÁZVU souboru (čas přijetí), ne z metadat souborového systému.
+    /// </summary>
+    public IncidentSpoolStatus GetStatus()
+    {
+        var files = Directory.GetFiles(_path, "*.json");
+        if (files.Length == 0) return new IncidentSpoolStatus(0, null);
+
+        var oldestFile = files.OrderBy(p => p).First();
+        var stamp = Path.GetFileNameWithoutExtension(oldestFile).Split('_', 2)[0];
+        var oldestReceivedAt = DateTime.TryParseExact(
+            stamp, "yyyyMMdd-HHmmss-fff", System.Globalization.CultureInfo.InvariantCulture,
+            System.Globalization.DateTimeStyles.None, out var parsed)
+            ? DateTime.SpecifyKind(parsed, DateTimeKind.Utc)
+            : (DateTime?)null;
+
+        return new IncidentSpoolStatus(files.Length, oldestReceivedAt);
+    }
+
     private static void TryQuarantine(string path)
     {
         try { File.Move(path, path + ".bad", overwrite: true); }
@@ -104,3 +125,6 @@ public class IncidentSpool
 
     private record SpoolRecord(IncidentBatchRequest Request, string? SourceIp, DateTime ReceivedAt);
 }
+
+/// <summary>Souhrn stavu spoolu pro monitoring – kolik batchů čeká a jak dlouho nejstarší z nich.</summary>
+public record IncidentSpoolStatus(int PendingCount, DateTime? OldestReceivedAtUtc);

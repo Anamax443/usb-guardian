@@ -102,4 +102,41 @@ public class IncidentSpoolTests : IDisposable
 
         Assert.Equal(new[] { older, newer }, pending.Select(p => p.SpoolFile));
     }
+
+    [Fact]
+    public void GetStatus_reports_zero_and_no_age_when_empty()
+    {
+        var spool = MakeSpool();
+
+        var status = spool.GetStatus();
+
+        Assert.Equal(0, status.PendingCount);
+        Assert.Null(status.OldestReceivedAtUtc);
+    }
+
+    [Fact]
+    public void GetStatus_reports_count_and_the_oldest_receivedAt_from_multiple_batches()
+    {
+        var spool = MakeSpool();
+        var oldest = new DateTime(2026, 1, 1, 8, 0, 0, DateTimeKind.Utc);
+        spool.Write(SampleRequest("NEWER"), null, oldest.AddMinutes(5));
+        spool.Write(SampleRequest("OLDEST"), null, oldest);
+
+        var status = spool.GetStatus();
+
+        Assert.Equal(2, status.PendingCount);
+        Assert.Equal(oldest, status.OldestReceivedAtUtc);
+    }
+
+    [Fact]
+    public void GetStatus_ignores_the_batch_that_was_already_deleted()
+    {
+        var spool = MakeSpool();
+        var path  = spool.Write(SampleRequest(), null, DateTime.UtcNow);
+        spool.Delete(path);
+
+        var status = spool.GetStatus();
+
+        Assert.Equal(0, status.PendingCount);
+    }
 }
