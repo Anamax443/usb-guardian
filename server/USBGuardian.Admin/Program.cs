@@ -122,6 +122,11 @@ builder.Services.AddSingleton<ActivityLogger>();
 
 builder.Services.AddSingleton<USBGuardian.Admin.Deploy.DeployTrigger>();
 
+// ── Auto-rozvoz bety na vzorek (běží, jen když beta.autoRollout.enabled=true) ──
+// Pojistka pro tlačítko "Rozvézt betu na vzorek" – když si na něj operátor po
+// Set-AgentVersion.cmd nevzpomene, udělá to kontrola sama.
+builder.Services.AddHostedService<USBGuardian.Admin.Deploy.BetaRolloutService>();
+
 // ── Kontroly stavu (stránka /kontroly + /api/health pro externí dohled) ──
 builder.Services.AddSingleton<USBGuardian.Admin.Health.HealthService>();
 

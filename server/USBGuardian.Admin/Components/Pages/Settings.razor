@@ -134,6 +134,26 @@
 </div>
 @if (_verzeMsg is not null) { <div class="banner @(_verzeBad ? "bad" : "ok")">@_verzeMsg</div> }
 
+<h3>Automatický rozvoz bety</h3>
+<p class="muted">Pojistka pro tlačítko výše: když se obsah beta kanálu na serveru změní
+    (<span class="mono">Set-AgentVersion.cmd</span>) a nikdo neklikne „Rozvézt betu na vzorek" ručně,
+    udělá to tahle kontrola sama – v uvedeném intervalu, a jen pokud jde skutečně o jiný commit než posledně.</p>
+<dl class="cfg">
+    <dt>Zapnuto</dt>
+    <dd>
+        @if (_betaAutoEnabled) { <span class="pill ok">ZAPNUTO</span> } else { <span class="pill off">vypnuto</span> }
+        &nbsp;<button class="btn" @onclick="ToggleBetaAuto" disabled="@_busy">@(_betaAutoEnabled ? "Vypnout" : "Zapnout")</button>
+    </dd>
+    <dt>Interval (min)</dt>
+    <dd><input class="inp" style="min-width:90px" @bind="_betaAutoInterval" /></dd>
+    <dt>Poslední (auto) běh</dt>
+    <dd class="mono">@(string.IsNullOrEmpty(_betaAutoLastRun) ? "—" : _betaAutoLastRun)</dd>
+</dl>
+<div class="toolbar">
+    <button class="btn" @onclick="SaveBetaAuto" disabled="@_busy">Uložit interval</button>
+</div>
+@if (_betaAutoMsg is not null) { <div class="banner @(_betaAutoBad ? "bad" : "ok")">@_betaAutoMsg</div> }
+
 <h2>Auto-enrollment agenta</h2>
 <p class="muted">Konzole sama nasadí agenta na stanice z AD <strong>bez agenta</strong> (24/7). Default <strong>VYPNUTO + dry-run</strong>.
     Ostrý běh vyžaduje, aby <strong>účet konzole měl lokální admin na klientech</strong> (dedikovaný deploy účet) — viz HANDOFF.</p>
@@ -353,6 +373,11 @@ denní souhrn) je další krok.</p>
     private string? _verzeMsg, _verzeChyba;
     private bool _verzeBad;
 
+    private bool _betaAutoEnabled;
+    private string _betaAutoInterval = "30", _betaAutoLastRun = "";
+    private string? _betaAutoMsg;
+    private bool _betaAutoBad;
+
     private bool _healthBad;
     private string _healthApiUrl = "", _healthMaxAge = "48", _healthStepDelay = "300";
     private string? _healthMsg;
@@ -411,6 +436,10 @@ denní souhrn) je další krok.</p>
             var vk = await Get(db, "agent.keepVersions"); _verzeKeep = string.IsNullOrEmpty(vk) ? "10" : vk;
             _betaHosts   = await Get(db, "agent.betaHosts");
             NactiVerze();
+
+            _betaAutoEnabled = string.Equals(await Get(db, "beta.autoRollout.enabled"), "true", StringComparison.OrdinalIgnoreCase);
+            var bam = await Get(db, "beta.autoRollout.intervalMinutes"); _betaAutoInterval = string.IsNullOrEmpty(bam) ? "30" : bam;
+            _betaAutoLastRun = await Get(db, "beta.autoRollout.lastRun");
 
             _uiStyle = UiCache.Style;
             _uiLayout = UiCache.Layout;
@@ -768,6 +797,37 @@ denní souhrn) je další krok.</p>
             _verzeMsg = zprava;
             _verzeBad = !ok;
         }
+        finally { _busy = false; }
+    }
+
+    private async Task ToggleBetaAuto()
+    {
+        _busy = true;
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            await Set(db, "beta.autoRollout.enabled", (!_betaAutoEnabled).ToString().ToLowerInvariant());
+            await Load();
+        }
+        catch (Exception ex) { _dbError = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task SaveBetaAuto()
+    {
+        _betaAutoMsg = null;
+        if (!int.TryParse(_betaAutoInterval?.Trim(), out var interval) || interval < 5 || interval > 1440)
+        { _betaAutoMsg = "Interval musí být 5 až 1440 minut."; _betaAutoBad = true; return; }
+
+        _busy = true;
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            await Set(db, "beta.autoRollout.intervalMinutes", interval.ToString());
+            _betaAutoMsg = $"Uloženo — kontrola po {interval} min.";
+            _betaAutoBad = false;
+        }
+        catch (Exception ex) { _betaAutoMsg = "Chyba: " + ex.Message; _betaAutoBad = true; }
         finally { _busy = false; }
     }
 
