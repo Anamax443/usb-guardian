@@ -129,6 +129,15 @@ builder.Services.AddAuthorization(options =>
         var principal = new WindowsPrincipal(wi);
         return adminGroups.Any(principal.IsInRole);
     }));
+
+    // Fail-closed i pro budoucnost: dosud se bezpečnost každého endpointu opírala jen na to,
+    // že si na něj někdo nezapomene napsat [Authorize] (přesně tenhle typ chyby řešil audit
+    // 033af8a - POST /api/whitelist/devices dřív jel na stejné policy jako GET). Bez
+    // FallbackPolicy je NOVÝ controller/akce bez jakéhokoliv atributu podle výchozího chování
+    // ASP.NET Core veřejný. Konzole (USBGuardian.Admin) má stejný vzor už dnes. Explicitně
+    // veřejné cesty (/api/version, /api/cert-info, IncidentsController.QueueStatus) mají
+    // vlastní [AllowAnonymous]/.AllowAnonymous() - to má vždy přednost před FallbackPolicy.
+    options.FallbackPolicy = options.GetPolicy("USBGuardianClients");
 });
 
 // appsettings.local.json na serveru může nést vlastní "Kestrel:Endpoints:*" - Kestrel tuhle
