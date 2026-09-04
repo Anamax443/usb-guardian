@@ -26,7 +26,7 @@ Serverová konzole agreguje data, drží inventář stanic z AD a ukazuje, kam c
 | **Autorizace konzole** | AD `DOMENA\IT-Admins` + whitelist `DOMENA\it-admin` (+ DB seznam z Nastavení) |
 | **Šifrování agent↔API** | HTTPS + **pinning otisku** (bez CA) — ověřeno end-to-end (heartbeat OK z PC-01) |
 | **AD sync** | zapnutý 60 min + on-demand; **213 v AD, ~212 bez agenta** |
-| **Live commit** (04.09.2026 15:43) | **konzole `3a6a2b2`** (redeploy: kontrola „Fronta incidentů (spool)" ověřena naživo přes `/api/health` – 16 kontrol, nová hlásí `ok`/`prázdná`) · **API `2c8108d`** (redeploy: durabilní spool fronta incidentů `8fbfa6d` + monitoring spoolu `2766344` + dedup fix `e8d702c` + FallbackPolicy `0bc6709`, plus dřívější `297ac7a`) · **agent beta `924b9b8`** (BARTKOVAJW11, CERNYSW11, TRNKAMW11N) · **agent stable `cb8ef1d`** (PC-01/TRNKAMW11, zbytek fleetu — `56b4235`/expirace whitelistu je zatím jen v gitu, na fleet nenasazeno). Lokální konzole ověřena end-to-end na CERNYSW11 — viz 5.11. Bezpečnostní audit + náprava — viz 5.12 |
+| **Live commit** (04.09.2026 16:05) | **konzole `3a6a2b2`** (redeploy: kontrola „Fronta incidentů (spool)" ověřena naživo přes `/api/health` – 16 kontrol, nová hlásí `ok`/`prázdná`) · **API `bbf6772`** (redeploy: durabilní spool fronta incidentů `8fbfa6d` + monitoring spoolu `2766344` + dedup fix `e8d702c` + FallbackPolicy `0bc6709` + hostname warn-only `58f43f3`, plus dřívější `297ac7a`) · **agent beta `924b9b8`** (BARTKOVAJW11, CERNYSW11, TRNKAMW11N) · **agent stable `cb8ef1d`** (PC-01/TRNKAMW11, zbytek fleetu — `56b4235`/expirace whitelistu je zatím jen v gitu, na fleet nenasazeno). Lokální konzole ověřena end-to-end na CERNYSW11 — viz 5.11. Bezpečnostní audit + náprava — viz 5.12 |
 | **Rozvoz agenta – osvědčený postup** | balíček → archiv `…\USBGuardianAgentVersions\<commit>` → **beta na jednu stanici** (dočasně přepsaný `update-beta.txt`) → ověřit → beta na zbytek → teprve pak **stable**. Log `…\deploy\update-agent.log`; „Agent verze" v konzoli se projeví až dalším heartbeatem (≤2 min), takže hned po rozvozu tam ještě chvíli svítí stará verze |
 | **Konzole – stránky** | Přehled (filtr+kumulace+řazení, kapacita, **export CSV + manažerský report s grafy**), Stanice (AD inventář + „Zmlklo agentů" + „Vyžádat data" + **Nasazení / hromadné vyřadit-zařadit**), Whitelist (**kapacita + filtr katalogu + auto-publish podepsané verze**), Nastavení (vynucování/přístup/email/alerty/dohled/auto-enrollment+default PC/retence/**Údržba: reload nastavení**), **Databáze**, **Kontroly** (health checks), Dokumentace (+HTML animace) |
 | **Enforcement (F1-3)** | **whitelist 1:1** (auto-podpis serverem, interní RSA klíč na APP_SERVER) → **vynucování** server→agent (`policy.enforce` v heartbeatu) → **break-glass** (lokální konzole 5080, offline, logováno, zruší se při sync) + **auto-re-enable** + reconciliace s whitelistem. Lokální konzole: restart služby, break-glass, seznam whitelistu |
@@ -419,8 +419,10 @@ bez kontroly. Opraveno dnes, každá věc samostatný commit (kvůli izolovateln
   se volající doopravdy prokázal (`Security/CallerIdentity.cs`, čistá parsovací funkce, 6 testů).
   **Záměrně jen WARN-ONLY (loguje do Event Logu i Aktivity, request neodmítá)** – formát Windows
   identity v produkci nešlo ověřit naživo (na rozdíl od všeho ostatního dnes), tvrdé odmítnutí při
-  špatném předpokladu by umlčelo celý fleet naráz. **Zatím jen v gitu, na fleet nenasazeno** –
-  po redeployi API počkat pár dní bez falešných poplachů v Aktivitě, pak teprve zpřísnit na `403`.
+  špatném předpokladu by umlčelo celý fleet naráz. **Nasazeno a ověřeno 04.09.2026 16:05**
+  (`/api/version` → `bbf6772`; po redeployi `Zmlklí agenti` dál 0 ze 4, nic se nerozbilo – kontrola
+  je čistě logovací, žádnou cestu zpracování nepřerušuje). **Čeká se pár dní bez falešných poplachů
+  v Aktivitě (kategorie „bezpecnost"), pak teprve zpřísnit na `403`.**
 
 **Zatím neřešeno z auditu:** ACL na TLS PFX a RSA signing klíč (server-side, ne kód), víc testů.
 

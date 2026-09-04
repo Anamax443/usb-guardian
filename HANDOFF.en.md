@@ -26,7 +26,7 @@ The server console aggregates data, keeps a station inventory from AD and shows 
 | **Console authorization** | AD `DOMENA\IT-Admins` + whitelist `DOMENA\it-admin` (+ DB list from Settings) |
 | **Agent↔API encryption** | HTTPS + **thumbprint pinning** (no CA) — verified end-to-end (heartbeat OK from PC-01) |
 | **AD sync** | enabled 60 min + on-demand; **213 in AD, ~212 without agent** |
-| **Live commit** (2026-09-04 15:43) | **console `3a6a2b2`** (redeployed: the "Incident queue (spool)" check verified live via `/api/health` – 16 checks, the new one reports `ok`/`empty`) · **API `2c8108d`** (redeployed: durable incident spool `8fbfa6d` + spool monitoring `2766344` + dedup fix `e8d702c` + FallbackPolicy `0bc6709`, plus the earlier `297ac7a`) · **agent beta `924b9b8`** (BARTKOVAJW11, CERNYSW11, TRNKAMW11N) · **agent stable `cb8ef1d`** (PC-01/TRNKAMW11, rest of the fleet — `56b4235`/the whitelist-expiry fix is git-only so far, not rolled out to the fleet). Local console verified end-to-end on CERNYSW11 — see 5.11. External security audit + remediation — see 5.12 |
+| **Live commit** (2026-09-04 16:05) | **console `3a6a2b2`** (redeployed: the "Incident queue (spool)" check verified live via `/api/health` – 16 checks, the new one reports `ok`/`empty`) · **API `bbf6772`** (redeployed: durable incident spool `8fbfa6d` + spool monitoring `2766344` + dedup fix `e8d702c` + FallbackPolicy `0bc6709` + hostname warn-only `58f43f3`, plus the earlier `297ac7a`) · **agent beta `924b9b8`** (BARTKOVAJW11, CERNYSW11, TRNKAMW11N) · **agent stable `cb8ef1d`** (PC-01/TRNKAMW11, rest of the fleet — `56b4235`/the whitelist-expiry fix is git-only so far, not rolled out to the fleet). Local console verified end-to-end on CERNYSW11 — see 5.11. External security audit + remediation — see 5.12 |
 | **Agent rollout – the routine that works** | package → archive `…\USBGuardianAgentVersions\<commit>` → **beta to a single station** (temporarily overwritten `update-beta.txt`) → verify → beta to the rest → only then **stable**. Log `…\deploy\update-agent.log`; the console's "Agent version" only catches up on the next heartbeat (≤2 min), so right after a rollout it still shows the old one |
 | **Console – pages** | Overview (filter+aggregation+sort, capacity, **CSV export + manager report with charts**), Stations (AD inventory + "Agents gone silent" + "Request data" + **Deployment / bulk exclude-include**), Whitelist (**capacity + catalog filter + auto-published signed version**), Settings (enforcement/access/email/alerts/monitoring/auto-enrollment+default PC/retention/**Maintenance: reload settings**), **Database**, **Health checks**, Documentation (+HTML animation) |
 | **Enforcement (P1-3)** | **whitelist 1:1** (server-side auto-sign, internal RSA key on APP_SERVER) → **enforcement** server→agent (`policy.enforce` in heartbeat) → **break-glass** (local console 5080, offline, logged, cleared on sync) + **auto-re-enable** + whitelist reconciliation. Local console: service restart, break-glass, whitelist list |
@@ -408,8 +408,10 @@ on faith. Fixed today, each item its own commit (for isolation if something brea
   pure parsing function, 6 tests). **Deliberately WARN-ONLY (logs to the Event Log and Activity,
   doesn't reject the request)** – the real production format of the Windows identity couldn't be
   verified live (unlike everything else today), and a hard rejection on a wrong assumption would
-  silence the whole fleet at once. **Git-only so far, not deployed to the fleet** – after the API
-  redeploy, wait a few days for zero false positives in Activity, only then tighten to `403`.
+  silence the whole fleet at once. **Deployed and verified 2026-09-04 16:05** (`/api/version` →
+  `bbf6772`; after the redeploy "Silent agents" still 0 of 4, nothing broke – the check is
+  logging-only and never interrupts request processing). **Waiting a few days for zero false
+  positives in Activity ("bezpecnost" category), only then tighten to `403`.**
 
 **Still open from the audit:** ACL on the TLS PFX and the RSA signing key (server-side, not code),
 more tests.
