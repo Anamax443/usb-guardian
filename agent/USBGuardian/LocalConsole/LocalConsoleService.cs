@@ -73,15 +73,38 @@ public class LocalConsoleService : BackgroundService
         _listener.Prefixes.Add($"http://127.0.0.1:{_port}/");
         _listener.AuthenticationSchemes = AuthenticationSchemes.IntegratedWindowsAuthentication;
 
-        try
+        // Po restartu služby drží registraci portu ještě dobíhající starý proces – http.sys ji
+        // uvolní až s jeho koncem. Vzdát se napoprvé znamená, že konzole je mrtvá až do dalšího
+        // restartu služby, přestože za pár vteřin je port volný. Proto to zkusit znovu — a nahlas,
+        // ať je z logu poznat rozdíl mezi "chvíli obsazeno" a "nerozběhlo se vůbec".
+        const int MaxPokusu = 6;
+        var bezi = false;
+        for (var pokus = 1; pokus <= MaxPokusu && !bezi; pokus++)
         {
-            _listener.Start();
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex,
-                "Lokální konzole nelze spustit na portu {Port} – konzole vypnuta", _port);
-            return;
+            try
+            {
+                _listener.Start();
+                bezi = true;
+            }
+            catch (Exception ex)
+            {
+                if (pokus == MaxPokusu)
+                {
+                    _logger.LogError(ex,
+                        "Lokální konzole se na portu {Port} nerozběhla ani na {Pokusu}. pokus – konzole vypnuta. " +
+                        "Port nejspíš drží starý proces agenta po nedokončeném restartu; break-glass ani uživatelská " +
+                        "stránka na této stanici nepůjde.",
+                        _port, MaxPokusu);
+                    return;
+                }
+
+                _logger.LogWarning(
+                    "Port {Port} je zatím obsazený ({Duvod}) – zkusím to znovu za 5 s ({Pokus}/{Pokusu})",
+                    _port, ex.Message, pokus, MaxPokusu);
+
+                try { await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken); }
+                catch (OperationCanceledException) { return; }
+            }
         }
 
         _logger.LogInformation(

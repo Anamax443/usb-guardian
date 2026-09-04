@@ -47,7 +47,13 @@
     "queuePath": "C:\\ProgramData\\USBGuardian\\queue",
     "sentPath": "C:\\ProgramData\\USBGuardian\\sent",
     "sentRetentionDays": 90,
-    "logLevel": "Information"
+    "logLevel": "Information",
+
+    // ── Event Log ───────────────────────────────────────────
+    // Služba pod SYSTEM nemá konzoli: co nepadne do Event Logu, po sobě na stanici
+    // nenechá žádnou stopu. Information by ho zaplavil (sync se ozývá každou minutu),
+    // proto Warning. Hlášky lokální konzole (běží / vypnutá / port obsazený) chodí vždy.
+    "eventLogLevel": "Warning"
   },
 
   "notifications": {

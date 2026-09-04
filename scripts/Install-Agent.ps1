@@ -61,10 +61,44 @@ Write-Host ""
 $existing = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
 if ($existing) {
     Write-Host "Sluzba existuje – zastavuji pred kopirovanim..."
+
+    # PROC TAK DUKLADNE: "Stopped" ve sprave sluzeb jeste neznamena uvolneno. Soubory
+    # i registraci portu lokalni konzole (http.sys) drzi PROCES a pousti je az kdyz
+    # skutecne skonci. Drive bylo cekani v try/catch, takze se timeout spolkl a slo se
+    # dal i s bezicim procesem. Nova instance pak port nezabrala, konzole zustala mrtva
+    # do dalsiho restartu a na stanici to vypadalo jako donekonecna nacitajici stranka.
+    # Proto: zastavit -> OVERIT -> kdyz nestoji, ukoncit natvrdo -> pockat na konec procesu.
+    $svcPid = 0
+    $svcWmi = Get-CimInstance Win32_Service -Filter "Name='$ServiceName'" -ErrorAction SilentlyContinue
+    if ($svcWmi) { $svcPid = [int] $svcWmi.ProcessId }
+
     if ($existing.Status -ne 'Stopped') {
-        Stop-Service -Name $ServiceName -Force
-        try { (Get-Service $ServiceName).WaitForStatus('Stopped', [TimeSpan]::FromSeconds(30)) } catch {}
+        Stop-Service -Name $ServiceName -Force -ErrorAction SilentlyContinue
+        $limit = (Get-Date).AddSeconds(30)
+        while ((Get-Service $ServiceName).Status -ne 'Stopped' -and (Get-Date) -lt $limit) {
+            Start-Sleep -Milliseconds 500
+        }
     }
+
+    $stav = (Get-Service $ServiceName).Status
+    if ($stav -ne 'Stopped') {
+        Write-Host "  Sluzba po 30 s hlasi porad '$stav' – ukoncuji proces natvrdo." -ForegroundColor Yellow
+        if ($svcPid -gt 0) { Stop-Process -Id $svcPid -Force -ErrorAction SilentlyContinue }
+    }
+
+    if ($svcPid -gt 0) {
+        $limit = (Get-Date).AddSeconds(15)
+        while ((Get-Process -Id $svcPid -ErrorAction SilentlyContinue) -and (Get-Date) -lt $limit) {
+            Start-Sleep -Milliseconds 500
+        }
+        if (Get-Process -Id $svcPid -ErrorAction SilentlyContinue) {
+            Write-Host "CHYBA: proces agenta (PID $svcPid) porad bezi." -ForegroundColor Red
+            Write-Host "  Instalace by nechala na stanici smes stare a nove verze – koncim bez zasahu." -ForegroundColor Red
+            exit 1
+        }
+    }
+
+    Write-Host "  Sluzba zastavena, proces ukoncen, soubory i port uvolnene."
 }
 
 # ── 2) Kopie souboru (ZACHOVAT agent.config.local.json) ──────
@@ -119,12 +153,37 @@ if (-not (Test-Path $localCfg)) {
     Write-Host '  { "whitelist": { "syncUrl": "https://SQL_SERVER:5443" }, "tls": { "pinnedThumbprint": "API_CERT_THUMBPRINT" } }'
 }
 
-Write-Host ""
-Write-Host "Spoustim sluzbu..."
-Start-Service -Name $ServiceName
-try { (Get-Service $ServiceName).WaitForStatus('Running', [TimeSpan]::FromSeconds(30)) } catch {}
-$st = (Get-Service $ServiceName).Status
+# ── 6) Zdroj v Event Logu ────────────────────────────────────
+# Agent bezi pod SYSTEM a zadnou konzoli nema – co nenapise do Event Logu, po sobe
+# na stanici nenecha stopu. Zdroj zalozit tady, kde instalace bezi elevovane.
+if (-not [System.Diagnostics.EventLog]::SourceExists($ServiceName)) {
+    try {
+        New-EventLog -LogName Application -Source $ServiceName -ErrorAction Stop
+        Write-Host "Event Log: zalozen zdroj '$ServiceName' v logu Application."
+    } catch {
+        Write-Host "VAROVANI: zdroj '$ServiceName' v Event Logu se nepodarilo zalozit: $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+}
 
 Write-Host ""
-Write-Host "Hotovo. Sluzba '$ServiceName' stav: $st" -ForegroundColor Green
+Write-Host "Spoustim sluzbu..."
+Start-Service -Name $ServiceName -ErrorAction SilentlyContinue
+$limit = (Get-Date).AddSeconds(30)
+while ((Get-Service $ServiceName).Status -ne 'Running' -and (Get-Date) -lt $limit) {
+    Start-Sleep -Milliseconds 500
+}
+$st = (Get-Service $ServiceName).Status
+
+# Verze z nasazeneho exe – aby bylo cerne na bilem, ze bezi nova, ne stara.
+$verze = "?"
+try { $verze = (Get-Item $binPath).VersionInfo.ProductVersion } catch { }
+
+Write-Host ""
+if ($st -ne 'Running') {
+    Write-Host "CHYBA: sluzba '$ServiceName' po instalaci nebezi (stav: $st)." -ForegroundColor Red
+    Write-Host "  Duvod: Get-WinEvent -LogName Application -ProviderName '$ServiceName' -MaxEvents 20"
+    exit 1
+}
+
+Write-Host "Hotovo. Sluzba '$ServiceName' bezi (verze $verze)." -ForegroundColor Green
 Write-Host "  Odinstalace: .\Uninstall-Agent.ps1"

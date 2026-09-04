@@ -23,6 +23,8 @@
     <!-- Logování -->
     <PackageReference Include="Microsoft.Extensions.Logging" Version="8.0.0" />
     <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="8.0.0" />
+    <!-- Služba pod SYSTEM nemá konzoli – bez Event Logu po sobě na stanici nenechá stopu -->
+    <PackageReference Include="Microsoft.Extensions.Logging.EventLog" Version="8.0.0" />
   </ItemGroup>
 
   <ItemGroup>

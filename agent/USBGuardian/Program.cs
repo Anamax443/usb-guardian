@@ -10,6 +10,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.EventLog;
 using USBGuardian;
 using USBGuardian.LocalConsole;
 using USBGuardian.Security;
@@ -38,6 +39,28 @@ builder.Logging
         o.TimestampFormat = "HH:mm:ss ";
     })
     .SetMinimumLevel(LogLevel.Information);
+
+// Jako Windows služba běží agent pod SYSTEM a žádnou konzoli nemá — bez Event Logu po sobě
+// na stanici nenechá ani řádku a nejde poznat, jestli čeká, je vypnutý, nebo spadl.
+// Úroveň je v konfiguraci, ne natvrdo: na Information by Event Log zaplavil běžný provoz
+// (sync se ozývá každou minutu), proto výchozí Warning. Výjimku má lokální konzole — u té
+// je potřeba vidět i to, že naběhla, jinak se obsazený port po nedokončeném restartu
+// nedá odlišit od vypnuté konzole.
+if (!args.Contains("--console"))
+{
+    var urovenEventLog = Enum.TryParse<LogLevel>(
+        builder.Configuration["logging:eventLogLevel"], ignoreCase: true, out var uroven)
+        ? uroven
+        : LogLevel.Warning;
+
+    builder.Logging.AddEventLog(o =>
+    {
+        o.SourceName = "USB Guardian";
+        o.LogName    = "Application";
+    });
+    builder.Logging.AddFilter<EventLogLoggerProvider>(null, urovenEventLog);
+    builder.Logging.AddFilter<EventLogLoggerProvider>("USBGuardian.LocalConsole", LogLevel.Information);
+}
 
 // ── Závislosti (DI) ──────────────────────────────────────────
 builder.Services.AddSingleton(sp =>
@@ -129,7 +152,9 @@ builder.Services.AddHostedService<SelfRestartService>();
 // ── Lokální admin konzole (loopback, read-only) ──────────────
 // Výchozí VYPNUTO – minimální attack surface (NIS2). Zapnout přes
 // agent.config.local.json: { "localConsole": { "enabled": true } }
-if (bool.Parse(builder.Configuration["localConsole:enabled"] ?? "false"))
+var konzoleZapnuta = bool.Parse(builder.Configuration["localConsole:enabled"] ?? "false");
+var konzolePort    = int.Parse(builder.Configuration["localConsole:port"] ?? "5080");
+if (konzoleZapnuta)
 {
     builder.Services.AddHostedService(sp => new LocalConsoleService(
         sp.GetRequiredService<ILogger<LocalConsoleService>>(),
@@ -140,10 +165,7 @@ if (bool.Parse(builder.Configuration["localConsole:enabled"] ?? "false"))
         sp.GetRequiredService<DeviceBlocker>(),
         sp.GetRequiredService<SelfRestartManager>(),
         builder.Configuration["policy:mode"] ?? "warn",
-        int.Parse(builder.Configuration["localConsole:port"] ?? "5080")));
-
-    Console.WriteLine(
-        $"Lokální konzole aktivní → http://127.0.0.1:{builder.Configuration["localConsole:port"] ?? "5080"}/ (admin-only)");
+        konzolePort));
 }
 
 // ── Sync services ────────────────────────────────────────────
@@ -206,4 +228,17 @@ else
 }
 
 var host = builder.Build();
+
+// Stav lokální konzole do logu (a tím i do Event Logu). Vypnutá × zapnutá se musí dát
+// rozeznat dřív, než někdo začne hledat, proč stránka na 127.0.0.1 neodpovídá — a "zapnutá
+// v konfiguraci" ještě neznamená "poslouchá", to potvrdí až hláška ze samotné konzole.
+var logKonzole = host.Services.GetRequiredService<ILogger<LocalConsoleService>>();
+if (konzoleZapnuta)
+    logKonzole.LogInformation(
+        "Lokální konzole je v konfiguraci zapnutá (port {Port}) – jestli opravdu poslouchá, řekne následující hláška.",
+        konzolePort);
+else
+    logKonzole.LogInformation(
+        "Lokální konzole je vypnutá (localConsole.enabled=false) – break-glass ani uživatelská stránka na této stanici nepůjde.");
+
 await host.RunAsync();
