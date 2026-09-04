@@ -4,8 +4,10 @@
 // je do SQL Serveru. Zpracovává sekvenčně → SQL Server
 // dostane rovnoměrnou zátěž místo spike při thundering herd.
 //
-// Při chybě batch NEZTRATÍME – agent ho pošle znovu
-// (offset persist na straně agenta zajistí retry).
+// Při chybě batch NEZTRATÍME – zůstává na disku (IncidentSpool) a při
+// dalším startu služby se přehraje (ReplaySpoolAsync), agent se o něj
+// starat nemusí (2xx už dostal). Dedup v ProcessBatch dělá případné
+// vícenásobné přehrání neškodným.
 // ============================================================
 
 using Microsoft.EntityFrameworkCore;
@@ -19,15 +21,18 @@ public class IncidentQueueWorker : BackgroundService
 {
     private readonly ILogger<IncidentQueueWorker> _logger;
     private readonly IncidentQueue _queue;
+    private readonly IncidentSpool _spool;
     private readonly IServiceScopeFactory _scopeFactory;
 
     public IncidentQueueWorker(
         ILogger<IncidentQueueWorker> logger,
         IncidentQueue queue,
+        IncidentSpool spool,
         IServiceScopeFactory scopeFactory)
     {
         _logger       = logger;
         _queue        = queue;
+        _spool        = spool;
         _scopeFactory = scopeFactory;
     }
 
@@ -35,23 +40,55 @@ public class IncidentQueueWorker : BackgroundService
     {
         _logger.LogInformation("IncidentQueueWorker spuštěn");
 
+        // Co zbylo na disku z minula (pád procesu mezi 202 a zápisem do DB,
+        // nebo prostě běžný restart služby dřív, než Channel stihl vyprázdnit) –
+        // zpracuje se první, před čerstvým provozem, ať se nepřeskočí pořadí.
+        await ReplaySpoolAsync(stoppingToken);
+
         // Čteme dokud služba běží
         await foreach (var item in _queue.Reader.ReadAllAsync(stoppingToken))
         {
             try
             {
                 await ProcessBatch(item, stoppingToken);
+                _spool.Delete(item.SpoolFile);
             }
             catch (Exception ex)
             {
-                // Logujeme ale nepřerušujeme worker – zpracujeme další batch
+                // Batch NEmažeme ze spoolu – zůstává na disku a přehraje se
+                // při dalším startu služby (ReplaySpoolAsync výš).
                 _logger.LogError(ex,
-                    "Chyba při zpracování batche od {Hostname} – batch zahozen, agent zkusí znovu",
+                    "Chyba při zpracování batche od {Hostname} – zůstává ve spoolu, přehraje se při dalším startu",
                     item.Request.Hostname);
             }
         }
 
         _logger.LogInformation("IncidentQueueWorker zastaven");
+    }
+
+    private async Task ReplaySpoolAsync(CancellationToken ct)
+    {
+        var pending = _spool.LoadPending();
+        if (pending.Count == 0) return;
+
+        _logger.LogWarning(
+            "IncidentQueueWorker: {Count} nedokončených batchů ve spoolu z minula – přehrávám",
+            pending.Count);
+
+        foreach (var item in pending)
+        {
+            try
+            {
+                await ProcessBatch(item, ct);
+                _spool.Delete(item.SpoolFile);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex,
+                    "Přehrání spoolu selhalo pro {Hostname} ({File}) – zkusí se zas při dalším startu",
+                    item.Request.Hostname, item.SpoolFile);
+            }
+        }
     }
 
     // --------------------------------------------------------

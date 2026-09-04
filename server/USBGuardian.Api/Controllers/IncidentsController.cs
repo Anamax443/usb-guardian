@@ -1,11 +1,13 @@
 // ============================================================
 // IncidentsController.cs
 // Příjem incidentů z agentů (batch upload)
-// POST /api/incidents → 202 Accepted (zařadí do fronty)
+// POST /api/incidents → 202 Accepted (zapsáno na disk + zařazeno do fronty)
 //
 // Logika zpracování přesunuta do IncidentQueueWorker.
-// Controller jen validuje a zařadí do Channel fronty.
-// Díky tomu HTTP response time < 1ms bez ohledu na SQL zátěž.
+// Controller batch nejdřív zapíše přes IncidentSpool (přežije pád procesu),
+// pak ho zařadí do Channel fronty. Díky tomu HTTP response time zůstává
+// nezávislý na SQL zátěži (lokální diskový zápis, ne vzdálený SQL round-trip),
+// ale 202 už neznamená jen "je v RAM" – agent po 2xx batch víc nepošle.
 // ============================================================
 
 using Microsoft.AspNetCore.Mvc;
@@ -22,17 +24,20 @@ namespace USBGuardian.Api.Controllers;
 public class IncidentsController : ControllerBase
 {
     private readonly IncidentQueue _queue;
+    private readonly IncidentSpool _spool;
     private readonly AppDbContext _db;
     private readonly ILogger<IncidentsController> _logger;
     private readonly ActivityLogger _dennik;
 
     public IncidentsController(
         IncidentQueue queue,
+        IncidentSpool spool,
         AppDbContext db,
         ILogger<IncidentsController> logger,
         ActivityLogger dennik)
     {
         _queue  = queue;
+        _spool  = spool;
         _db     = db;
         _logger = logger;
         _dennik = dennik;
@@ -49,12 +54,31 @@ public class IncidentsController : ControllerBase
         if (request.Incidents.Count == 0)
             return Ok(new { queued = 0 });
 
-        var sourceIp = HttpContext.Connection.RemoteIpAddress?.ToString();
+        var sourceIp   = HttpContext.Connection.RemoteIpAddress?.ToString();
+        var receivedAt = DateTime.UtcNow;
+
+        string spoolFile;
+        try
+        {
+            // Zapsat na disk DŘÍV, než agentovi cokoliv potvrdíme – agent po 2xx
+            // odpovědi batch víc nepošle (offset persist na klientovi), takže
+            // "přijato" musí od teď znamenat "přežije i pád procesu API",
+            // ne jen "je v paměťovém Channelu" (viz IncidentSpool.cs).
+            spoolFile = _spool.Write(request, sourceIp, receivedAt);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "Spool zápis selhal pro {Hostname} – batch NEpotvrzen, agent zkusí znovu",
+                request.Hostname);
+            return StatusCode(500, new { error = "Spool write failed – retry later" });
+        }
 
         var item = new IncidentBatchItem(
             Request:    request,
             SourceIp:   sourceIp,
-            ReceivedAt: DateTime.UtcNow);
+            ReceivedAt: receivedAt,
+            SpoolFile:  spoolFile);
 
         // Deník: kolik incidentů kdo poslal. Bez toho jde zpětně zjistit jen to,
         // co v databázi JE — ne to, že se něco poslat POKUSILO a fronta to odmítla.
@@ -65,7 +89,11 @@ public class IncidentsController : ControllerBase
         // TryWrite je non-blocking – okamžitě vrátí true/false
         if (!_queue.TryEnqueue(item))
         {
-            // Fronta plná (> 1000 čekajících batchů) – agent zkusí příště
+            // Fronta plná (> 1000 čekajících batchů) – batch NEpotvrzujeme
+            // (agent ho pošle znovu), takže rozepsaný spool soubor by tu jen
+            // ležel navíc; smazat.
+            _spool.Delete(spoolFile);
+
             _logger.LogWarning(
                 "Fronta plná – batch od {Hostname} odmítnut (pending: {Count})",
                 request.Hostname, _queue.PendingCount);

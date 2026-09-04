@@ -60,6 +60,9 @@ builder.Services.AddDbContextFactory<AppDbContext>(options =>
     lifetime: ServiceLifetime.Singleton);
 builder.Services.AddSingleton<ActivityLogger>();
 
+// IncidentSpool = durabilita pod frontou (disk přežije pád procesu, Channel ne) –
+// registrace PŘED IncidentQueue/Worker, oba na ní závisí (DI pořadí nevadí, jen čitelnost).
+builder.Services.AddSingleton<USBGuardian.Api.Queue.IncidentSpool>();
 builder.Services.AddSingleton<USBGuardian.Api.Queue.IncidentQueue>();
 builder.Services.AddHostedService<USBGuardian.Api.Queue.IncidentQueueWorker>();
 

@@ -6,6 +6,9 @@
 //
 // Bounded capacity = pojistka proti přetížení paměti.
 // Při plné frontě vrátí controller 503 Service Unavailable.
+//
+// Durabilitu (přežití pádu procesu mezi 202 a zápisem do DB) dělá
+// IncidentSpool – tenhle Channel je jen plánovací vrstva nad ním.
 // ============================================================
 
 using System.Threading.Channels;
@@ -15,11 +18,14 @@ namespace USBGuardian.Api.Queue;
 
 /// <summary>
 /// Jeden položka ve frontě – batch incidentů od jednoho agenta.
+/// SpoolFile = cesta k záznamu na disku (IncidentSpool), který teprve
+/// úspěšný zápis do DB smaže – zajišťuje durabilitu přes pád procesu.
 /// </summary>
 public record IncidentBatchItem(
     IncidentBatchRequest Request,
     string?             SourceIp,
-    DateTime            ReceivedAt);
+    DateTime            ReceivedAt,
+    string              SpoolFile);
 
 /// <summary>
 /// Singleton fronta – jeden Channel sdílený mezi controllery a workerem.
