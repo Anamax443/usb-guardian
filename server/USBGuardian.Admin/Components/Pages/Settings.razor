@@ -9,6 +9,7 @@
 @inject ServiceRestartRunner Restart
 @inject USBGuardian.Admin.Ui.UiStyleCache UiCache
 @inject NavigationManager Nav
+@inject USBGuardian.Admin.Deploy.DeployTrigger Deploy
 
 <h1>Nastavení</h1>
 
@@ -122,6 +123,10 @@
 </dl>
 <div class="toolbar">
     <button class="btn" @onclick="SaveVerze" disabled="@_busy">Uložit verze</button>
+    <button class="btn" @onclick="RozvezBetu" disabled="@(_busy || string.IsNullOrEmpty(_verzeBeta) || string.IsNullOrWhiteSpace(_betaHosts))"
+            title="Nahraje aktuální obsah beta kanálu na schválený vzorek stanic HNED - bez čekání na ruční schtasks/RDU.">
+        ⇪ Rozvézt betu na vzorek
+    </button>
     <button class="btn" @onclick="PovysitBetu" disabled="@(_busy || string.IsNullOrEmpty(_verzeBeta))"
             title="Beta se osvědčila → stane se stable. Dosavadní stable tím spadne do archivu.">
         ▲ Povýšit betu na stable
@@ -353,6 +358,8 @@ denní souhrn) je další krok.</p>
     private string? _healthMsg;
 
     private string? _reloadMsg;
+
+    [CascadingParameter] private Task<Microsoft.AspNetCore.Components.Authorization.AuthenticationState>? AuthState { get; set; }
 
     protected override async Task OnInitializedAsync()
     {
@@ -749,6 +756,26 @@ denní souhrn) je další krok.</p>
         }
         catch (Exception ex) { _verzeMsg = "Chyba: " + ex.Message; _verzeBad = true; }
         finally { _busy = false; }
+    }
+
+    private async Task RozvezBetu()
+    {
+        _verzeMsg = null;
+        _busy = true;
+        try
+        {
+            var (ok, zprava) = await Deploy.SpustBetuAsync(await CurrentUser());
+            _verzeMsg = zprava;
+            _verzeBad = !ok;
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task<string> CurrentUser()
+    {
+        if (AuthState is null) return "?";
+        try { return (await AuthState).User.Identity?.Name ?? "?"; }
+        catch { return "?"; }
     }
 
     private async Task SaveVerze()

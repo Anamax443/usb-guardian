@@ -18,6 +18,9 @@
 // Vše je konfigurovatelné (AppSettings), nic natvrdo:
 //   deploy.targetsFile / deploy.taskName             – čistá instalace
 //   deploy.updateTargetsFile / deploy.updateTaskName  – aktualizace (stable)
+//   deploy.updateBetaTaskName                         – rozvoz bety na vzorek
+//     (cílový soubor update-beta.txt píše Settings.razor při ukládání verze,
+//     ne tenhle typ – vzorek je stálý seznam, ne volba za běhu jako u stable)
 // ============================================================
 
 using System.Diagnostics;
@@ -44,6 +47,12 @@ public sealed class DeployTrigger
     public const string DefaultTaskName = @"\USBGuardian\USBGuardian-AutoDeploy";
     public const string DefaultUpdateTargetsFile = @"C:\ProgramData\USBGuardian\deploy\update.txt";
     public const string DefaultUpdateTaskName = @"\USBGuardian\USBGuardian-UpdateAgent";
+
+    // Beta ma jiny tvar nez stable/instalace: cil neni JEDNA stanice zvolena v okamziku
+    // kliknuti, ale STÁLÝ vzorek z Nastaveni (update-beta.txt), ktery uz drzi ZapisBetaHosts()
+    // v Settings.razor pri ukladani verze. Sem se tedy nepredava hostname - jen se stouchne
+    // do ulohy, ktera si soubor precte sama.
+    public const string DefaultUpdateBetaTaskName = @"\USBGuardian\USBGuardian-UpdateAgentBeta";
 
     public enum Akce { Instalace, Aktualizace }
 
@@ -130,6 +139,64 @@ public sealed class DeployTrigger
             return (true, akce == Akce.Instalace
                 ? $"Instalace na {hostname} spuštěna. Průběh: log úlohy na serveru, výsledek se projeví v Posledním kontaktu (do ~2 min po startu agenta)."
                 : $"Aktualizace {hostname} spuštěna. Až doběhne, ukáže se nová verze ve sloupci Agent verze.");
+        }
+        catch (Exception ex)
+        {
+            return (false, "Spuštění úlohy selhalo: " + Kratce(ex.Message));
+        }
+    }
+
+    /// <summary>
+    /// Rozveze aktualni obsah beta kanalu na cely schvaleny vzorek stanic (Nastaveni →
+    /// Beta stanice). Bez tlacitka to slo jen rucne přes RDP + schtasks - stable uz svuj
+    /// spoustec ma (SpustAsync/Aktualizace), beta ne.
+    /// </summary>
+    public async Task<(bool Ok, string Zprava)> SpustBetuAsync(string kdo, CancellationToken ct = default)
+    {
+        string taskName;
+        try
+        {
+            await using var db = await _dbFactory.CreateDbContextAsync(ct);
+            var v = (await db.AppSettings.FirstOrDefaultAsync(s => s.Key == "deploy.updateBetaTaskName", ct))?.Value;
+            taskName = string.IsNullOrWhiteSpace(v) ? DefaultUpdateBetaTaskName : v.Trim();
+        }
+        catch (Exception ex)
+        {
+            return (false, "Nelze načíst nastavení nasazení: " + Kratce(ex.Message));
+        }
+
+        try
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName = "schtasks.exe",
+                Arguments = $"/Run /TN \"{taskName}\"",
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true,
+            };
+            using var p = Process.Start(psi);
+            if (p is null) return (false, "Úlohu se nepodařilo spustit (proces nevznikl).");
+
+            var vystup = (await p.StandardOutput.ReadToEndAsync(ct)
+                        + await p.StandardError.ReadToEndAsync(ct)).Trim();
+            await p.WaitForExitAsync(ct);
+
+            if (p.ExitCode != 0)
+            {
+                _logger.LogWarning("Rozvoz bety: schtasks skončil {Code}: {Vystup}", p.ExitCode, vystup);
+                _dennik.Log("deploy", $"úlohu {taskName} se nepodařilo spustit (kód {p.ExitCode})",
+                    ActivityLevel.Error, null, kdo);
+                return (false, $"Úloha {taskName} nešla spustit (kód {p.ExitCode}): {Kratce(vystup)}");
+            }
+
+            _logger.LogWarning("Rozvoz bety na vzorek vyžádán ({Kdo}) – spuštěna úloha {Task}", kdo, taskName);
+            _dennik.Log("deploy", $"ruční rozvoz beta kanálu na vzorek – spuštěna úloha {taskName}",
+                ActivityLevel.Warn, null, kdo);
+
+            return (true,
+                "Rozvoz na vzorek beta spuštěn. Výsledek se ukáže ve sloupci Agent verze u vzorkových stanic (do pár minut).");
         }
         catch (Exception ex)
         {
