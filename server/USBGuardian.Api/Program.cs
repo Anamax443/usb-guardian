@@ -88,10 +88,26 @@ builder.Services.AddAuthentication(
 // Policy "USBGuardianClients" – přístup k API jen pro členy AD skupin z konfigurace
 var allowedGroups = builder.Configuration.GetSection("Authorization:AllowedGroups").Get<string[]>()
                     ?? Array.Empty<string>();
+
+// Fail-closed, ne fail-open: prázdné/chybějící AllowedGroups dřív znamenalo "pusť kohokoliv
+// autentizovaného Windows účtem" (komentář to i přiznával: "bez konfigurace nepřekážet").
+// Základní appsettings.json má sice v repu vzorové skupiny, ale appsettings.local.json na
+// serveru je přepisuje – překlep nebo "AllowedGroups": [] tam by tiše otevřel API komukoliv
+// v doméně. Radši spadnout hned při startu s jasnou hláškou, než nechat běžet rozbitou
+// konfiguraci, která vypadá funkčně (API odpovídá), ale nikoho nefiltruje.
+if (allowedGroups.Length == 0)
+{
+    throw new InvalidOperationException(
+        "Authorization:AllowedGroups je prázdné nebo chybí. Bez něj by API přijalo " +
+        "kohokoliv autentizovaného ve doméně – doplň skupiny do appsettings.local.json.");
+}
+
 // Policy "USBGuardianAdmins" – zápisové/administrativní endpointy (např. přidání zařízení
 // na whitelist přes API). Záměrně SAMOSTATNÁ od USBGuardianClients: agent smí číst
 // (heartbeat, stažení whitelistu), ale nemá důvod umět zapisovat security policy – účet
 // stanice v USB-Guardian-Clients dřív procházel i na POST /api/whitelist/devices.
+// Prázdné AdminGroups tu ale (na rozdíl od chybějícího AllowedGroups) NESPADNE celé API -
+// jen ta jedna admin cesta zůstane nepřístupná, dokud si ji operátor sám nenastaví.
 var adminGroups = builder.Configuration.GetSection("Authorization:AdminGroups").Get<string[]>()
                     ?? Array.Empty<string>();
 builder.Services.AddAuthorization(options =>
@@ -99,14 +115,10 @@ builder.Services.AddAuthorization(options =>
     options.AddPolicy("USBGuardianClients", policy => policy.RequireAssertion(ctx =>
     {
         if (ctx.User.Identity is not WindowsIdentity { IsAuthenticated: true } wi) return false;
-        if (allowedGroups.Length == 0) return true;            // bez konfigurace nepřekážet
         var principal = new WindowsPrincipal(wi);
         return allowedGroups.Any(principal.IsInRole);
     }));
 
-    // Fail-closed záměrně (na rozdíl od USBGuardianClients výše): tohle je nová, admin-only
-    // cesta bez existujícího nasazení, které by se prázdnou konfigurací mohlo rozbít. Prázdné
-    // AdminGroups tedy znamená "nikdo", ne "kdokoli" – dokud si to operátor nenastaví sám.
     options.AddPolicy("USBGuardianAdmins", policy => policy.RequireAssertion(ctx =>
     {
         if (ctx.User.Identity is not WindowsIdentity { IsAuthenticated: true } wi) return false;
