@@ -9,13 +9,31 @@
     inventář stanic.</p>
 
     <h2>Rozcestník dokumentace</h2>
-    <p class="muted">Samostatné tisknutelné stránky (🖨 v light režimu) — žádné externí odkazy.</p>
+    <p class="muted">Samostatné tisknutelné stránky (🖨 v light režimu) — žádné externí odkazy.
+    Grafické výstupy mají v hlavičce přepínač <strong>Čeština / English</strong>.</p>
+
+    <h3>Pro vedení a prezentaci</h3>
     <ul class="linklist">
-        <li><a href="dokumentace/architektura">Architektura</a> — datový tok, komponenty, bezpečnostní vrstvy</li>
-        <li><a href="dokumentace/handoff">HANDOFF</a> — předávka projektu + živý stav</li>
-        <li><a href="dokumentace/readme">README</a> — funkční přehled, komponenty, konfigurace, nasazení</li>
-        <li><a href="dokumentace/readme-en">README (EN)</a> · <a href="dokumentace/handoff-en">HANDOFF (EN)</a></li>
-        <li><a href="how-it-works.html" target="_blank" rel="noopener">▶ Jak to funguje (animace)</a> — interaktivní datový tok krok po kroku</li>
+        <li><a href="management-summary.html" target="_blank" rel="noopener">📄 Shrnutí pro vedení (A4)</a> —
+            jedna strana na výšku, k vytištění: co to je, proč to je, kde jsme a co dál</li>
+        <li><a href="how-it-works.html" target="_blank" rel="noopener">▶ Jak to funguje (animace)</a> —
+            tok informací krok po kroku, 15 kroků od zapojení média po nasazení</li>
+        <li><a href="mind-map.html" target="_blank" rel="noopener">🧠 Myšlenková mapa</a> —
+            z čeho se systém skládá a co k čemu patří</li>
+        <li><a href="flowchart.html" target="_blank" rel="noopener">🔀 Vývojový diagram</a> —
+            cesta jednoho média od zapojení po auditní stopu, včetně rozhodovacích bodů</li>
+    </ul>
+
+    <h3>Technická dokumentace</h3>
+    <ul class="linklist">
+        <li><a href="dokumentace/architektura">Architektura</a> · <a href="dokumentace/architektura-en">EN</a>
+            — datový tok, komponenty, bezpečnostní vrstvy, deník provozu</li>
+        <li><a href="dokumentace/handoff">HANDOFF</a> · <a href="dokumentace/handoff-en">EN</a>
+            — předávka projektu + živý stav</li>
+        <li><a href="dokumentace/readme">README</a> · <a href="dokumentace/readme-en">EN</a>
+            — funkční přehled, komponenty, konfigurace, nasazení</li>
+        <li><a href="dokumentace/auto-deploy">Nastavení auto-enrollmentu</a> · <a href="dokumentace/auto-deploy-en">EN</a>
+            — deploy účty (gMSA), GPO, úlohy na app serveru</li>
         <li>Provozní nápověda → níže na této stránce</li>
     </ul>
 
@@ -45,10 +63,21 @@
     (nic se nezadává natvrdo).</p>
 
     <h2>Jak schválit médium (whitelist)</h2>
-    <p>Zjisti VID/PID/sériové číslo z Přehledu a přidej zařízení do whitelistu. Whitelist je
-    podepsaný RSA klíčem — publikace nové verze vyžaduje podpis (offline nástroj
-    <code>WhitelistSigner</code>, privátní klíč nikdy na serveru); webová správa s podpisovým
-    workflow je v plánu.</p>
+    <p>Stačí <strong>sériové číslo</strong> — VID/PID i název se dotáhnou z incidentů (i zpětně, až se
+    médium na síti objeví). Po každé změně katalogu konzole sama <strong>vydá a podepíše</strong> novou verzi
+    whitelistu interním RSA klíčem a agenti si ji do ~2 minut stáhnou; klient je tak <strong>1:1 kopie</strong>
+    serveru. Nový záznam je nejdřív neaktivní — aktivuje se zaškrtnutím <em>Aktivní</em>.</p>
+
+    <h2>Kontroly</h2>
+    <p>Health checks serveru i klientů. Seznam kontrol se ukáže dopředu a odškrtává se s průběžnými výsledky,
+    takže je vidět, co se právě ověřuje. Výsledky jdou exportovat do CSV, HTML, PDF (tisk) i TXT. Na téže
+    stránce je i <strong>plánovaný restart</strong> služeb.</p>
+
+    <h2>Aktivita (deník provozu)</h2>
+    <p>Do Přehledu se dostane jen to, co skončilo incidentem. <strong>Aktivita</strong> ukazuje zbytek provozu:
+    heartbeaty (a co na ně server odpověděl), příjem dávek incidentů, publikace whitelistu, ruční nasazení
+    a vyřazení stanice. Píše do ní <strong>API i konzole</strong>, takže se to čte jako jeden příběh.
+    Filtry (období, úroveň, zdroj, hledání), režim <em>živě</em> s obnovou po 3 s a export CSV.</p>
 
     <h2>Tato instance</h2>
     <dl class="cfg">

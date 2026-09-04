@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>USB Guardian — myšlenková mapa</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#161b22; --line:#30363d; --ink:#e6edf3; --muted:#8b949e;
+    --c1:#3b82f6; --c2:#22c55e; --c3:#a855f7; --c4:#f59e0b; --c5:#22d3ee; --c6:#f472b6;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:Segoe UI,Arial,sans-serif;background:var(--bg);color:var(--ink)}
+  header{padding:16px 24px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+  header h1{font-size:18px;margin:0}
+  header .tag{font-size:12px;color:var(--muted)}
+  .lang{margin-left:auto;display:flex;gap:6px}
+  .lang button{font:inherit;font-size:12px;padding:4px 10px;border:1px solid var(--line);background:var(--panel);color:var(--muted);border-radius:6px;cursor:pointer}
+  .lang button.on{border-color:var(--c1);color:var(--ink);background:rgba(59,130,246,.12)}
+  .hint{padding:10px 24px;font-size:12px;color:var(--muted);border-bottom:1px solid var(--line)}
+  .stage{overflow:auto;padding:24px}
+  .canvas{position:relative;width:1460px;height:1080px;margin:0 auto}
+  svg{position:absolute;inset:0;width:100%;height:100%;z-index:0;overflow:visible}
+  .n{position:absolute;z-index:1;transform:translate(-50%,-50%);background:var(--panel);border:1px solid var(--line);
+     border-radius:10px;padding:7px 11px;max-width:250px;box-shadow:0 1px 0 rgba(0,0,0,.35)}
+  .n .t{font-size:12.5px;font-weight:600;line-height:1.25}
+  .n .d{font-size:10.5px;color:var(--muted);margin-top:3px;line-height:1.3}
+  .n.root{background:#111a2b;border-width:2px;padding:14px 18px;max-width:280px}
+  .n.root .t{font-size:17px}
+  .n.b{border-left-width:4px;padding-left:12px}
+  .n.leaf{background:#141a22}
+  @media print{
+    body{background:#fff;color:#111}
+    header,.hint,.lang{display:none}
+    .n{background:#fff;border-color:#bbb;box-shadow:none}
+    .n .d{color:#555}
+    .stage{padding:0}
+    @page{size:A3 landscape;margin:8mm}
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>USB Guardian — <span data-cs="myšlenková mapa" data-en="mind map"></span></h1>
+  <span class="tag" data-cs="z čeho se systém skládá a co k čemu patří" data-en="what the system is made of and what belongs where"></span>
+  <div class="lang"><button id="lang-cs" class="on">Čeština</button><button id="lang-en">English</button></div>
+</header>
+<div class="hint" data-cs="Tisk: Ctrl+P (A3 na šířku). Barva větve se drží i u jejích listů."
+                  data-en="Print: Ctrl+P (A3 landscape). Each branch keeps its colour down to its leaves."></div>
+
+<div class="stage">
+  <div class="canvas" id="canvas"><svg id="wires"></svg></div>
+</div>
+
+<script>
+(function(){
+  "use strict";
+  var LANG='cs';
+
+  // Strom: každá větev jde vlevo nebo vpravo od kořene.
+  var TREE = {
+    label:{cs:'USB Guardian', en:'USB Guardian'},
+    note:{cs:'kontrola paměťových médií na firemních stanicích (NIS2)', en:'control of removable media on company workstations (NIS2)'},
+    branches:[
+      { side:'left', color:'--c1',
+        label:{cs:'Agent na stanici', en:'Agent on the station'},
+        children:[
+          {label:{cs:'DeviceMonitor', en:'DeviceMonitor'}, note:{cs:'WMI watcher + sken při startu', en:'WMI watcher + scan at startup'}},
+          {label:{cs:'WhitelistChecker', en:'WhitelistChecker'}, note:{cs:'VID:PID:sériové číslo, ověření podpisu', en:'VID:PID:serial, signature verification'}},
+          {label:{cs:'PolicyEnforcer', en:'PolicyEnforcer'}, note:{cs:'varovat / zablokovat, vracení médií', en:'warn / block, returning media'}},
+          {label:{cs:'IncidentLogger', en:'IncidentLogger'}, note:{cs:'fronta na disku, atribuce uživatele (WTS)', en:'on-disk queue, user attribution (WTS)'}},
+          {label:{cs:'Lokální konzole', en:'Local console'}, note:{cs:'127.0.0.1:5080, jen lokální admin, break-glass', en:'127.0.0.1:5080, local admins only, break-glass'}},
+          {label:{cs:'Watchdog + ToastHelper', en:'Watchdog + ToastHelper'}, note:{cs:'úloha à 3 min; notifikace v session uživatele', en:'task every 3 min; notification in the user session'}}
+        ]},
+      { side:'left', color:'--c5',
+        label:{cs:'Nasazení a verze', en:'Deployment and versions'},
+        children:[
+          {label:{cs:'AutoDeploy', en:'AutoDeploy'}, note:{cs:'čistá instalace na stanice bez agenta', en:'clean install on stations without an agent'}},
+          {label:{cs:'UpdateAgent', en:'UpdateAgent'}, note:{cs:'aktualizace: stop → čekat STOPPED → kopie → RUNNING', en:'update: stop → wait for STOPPED → copy → RUNNING'}},
+          {label:{cs:'ApiDeploy', en:'ApiDeploy'}, note:{cs:'nasazení API pod serverovým gMSA', en:'API deployment under the server gMSA'}},
+          {label:{cs:'Kanály stable / beta', en:'Stable / beta channels'}, note:{cs:'archiv verzí + návrat k předchozí', en:'version archive + rollback'}},
+          {label:{cs:'Offline instalátor', en:'Offline installer'}, note:{cs:'pro stanici, kam deploy kanál nedosáhne', en:'for a station the deploy channel cannot reach'}}
+        ]},
+      { side:'left', color:'--c6',
+        label:{cs:'Provoz a dohled', en:'Operations and monitoring'},
+        children:[
+          {label:{cs:'Deník provozu', en:'Activity log'}, note:{cs:'kdo s kým mluvil a kdo co změnil', en:'who talked to whom and who changed what'}},
+          {label:{cs:'Zmlklí agenti', en:'Silent agents'}, note:{cs:'práh v nastavení, dlaždice + ikona', en:'threshold in settings, tile + icon'}},
+          {label:{cs:'Kontroly stavu', en:'Health checks'}, note:{cs:'odškrtávaný seznam, export CSV/HTML/PDF', en:'checklist with results, CSV/HTML/PDF export'}},
+          {label:{cs:'E-mail a alerty', en:'E-mail and alerts'}, note:{cs:'upozornění nad incidenty', en:'notifications over incidents'}},
+          {label:{cs:'Retence dat', en:'Data retention'}, note:{cs:'incidenty se po nastavené době mažou', en:'incidents deleted after the configured period'}}
+        ]},
+      { side:'right', color:'--c2',
+        label:{cs:'Server', en:'Server'},
+        children:[
+          {label:{cs:'API', en:'API'}, note:{cs:'příjem incidentů, heartbeat, distribuce whitelistu', en:'incident intake, heartbeat, whitelist distribution'}},
+          {label:{cs:'Admin konzole', en:'Admin console'}, note:{cs:'Blazor na app serveru, Windows autentizace', en:'Blazor on the app server, Windows authentication'}},
+          {label:{cs:'SQL databáze', en:'SQL database'}, note:{cs:'incidenty, stanice, whitelist, deník', en:'incidents, stations, whitelist, activity log'}},
+          {label:{cs:'AD sync', en:'AD sync'}, note:{cs:'inventář stanic z domény, klíč = hostname', en:'station inventory from the domain, key = hostname'}},
+          {label:{cs:'Centrální nastavení', en:'Central settings'}, note:{cs:'v databázi, ne v souborech na discích', en:'in the database, not in files on disks'}}
+        ]},
+      { side:'right', color:'--c3',
+        label:{cs:'Bezpečnost', en:'Security'},
+        children:[
+          {label:{cs:'Podepsaný whitelist', en:'Signed whitelist'}, note:{cs:'RSA; agent neověřený katalog nepoužije', en:'RSA; the agent refuses an unverified catalog'}},
+          {label:{cs:'TLS s pinningem otisku', en:'TLS with thumbprint pinning'}, note:{cs:'šifrováno i ověřeno bez certifikační autority', en:'encrypted and verified without a certificate authority'}},
+          {label:{cs:'Windows autentizace', en:'Windows authentication'}, note:{cs:'Kerberos; do konzole jen členové skupiny', en:'Kerberos; only group members reach the console'}},
+          {label:{cs:'Oddělené deploy účty', en:'Separate deploy accounts'}, note:{cs:'jeden na stanice, druhý na server, konzole nikde', en:'one for stations, one for the server, the console nowhere'}},
+          {label:{cs:'Least-privilege v SQL', en:'Least privilege in SQL'}, note:{cs:'zápis jen tam, kam komponenta opravdu píše', en:'writes only where the component really writes'}},
+          {label:{cs:'Podepsané PS skripty', en:'Signed PS scripts'}, note:{cs:'prostředí vynucuje AllSigned přes GPO', en:'the environment enforces AllSigned through GPO'}}
+        ]},
+      { side:'right', color:'--c4',
+        label:{cs:'Proč to je', en:'Why it exists'},
+        children:[
+          {label:{cs:'NIS2 / 181/2014 Sb.', en:'NIS2 / Act 181/2014'}, note:{cs:'technické opatření a doložitelnost', en:'a technical measure and evidence of it'}},
+          {label:{cs:'ISO 27001', en:'ISO 27001'}, note:{cs:'kontrola výměnných médií', en:'control of removable media'}},
+          {label:{cs:'Únik dat', en:'Data leakage'}, note:{cs:'cizí médium ve firemním PC', en:'a foreign medium in a company PC'}},
+          {label:{cs:'Doložitelnost', en:'Auditability'}, note:{cs:'kdo, kdy, jaké médium, co se stalo', en:'who, when, which medium, what happened'}}
+        ]}
+    ]
+  };
+
+  var C=document.getElementById('canvas'), SVG=document.getElementById('wires');
+  var W=1460, H=1080, CX=W/2, CY=H/2;
+
+  function el(cls, html){ var d=document.createElement('div'); d.className=cls; d.innerHTML=html; C.appendChild(d); return d; }
+  function txt(o){ return o ? o[LANG] : ''; }
+
+  function wire(x1,y1,x2,y2,color){
+    var p=document.createElementNS('http://www.w3.org/2000/svg','path');
+    var mx=(x1+x2)/2;
+    p.setAttribute('d','M '+x1+' '+y1+' C '+mx+' '+y1+', '+mx+' '+y2+', '+x2+' '+y2);
+    p.setAttribute('fill','none'); p.setAttribute('stroke',color); p.setAttribute('stroke-width','2'); p.setAttribute('opacity','.65');
+    SVG.appendChild(p);
+  }
+
+  function draw(){
+    C.querySelectorAll('.n').forEach(function(n){ n.remove(); });
+    SVG.innerHTML='';
+    SVG.setAttribute('viewBox','0 0 '+W+' '+H);
+
+    el('n root', '<div class="t">'+txt(TREE.label)+'</div><div class="d">'+txt(TREE.note)+'</div>')
+      .style.cssText='left:'+CX+'px;top:'+CY+'px';
+
+    var sides={left:[],right:[]};
+    TREE.branches.forEach(function(b){ sides[b.side].push(b); });
+
+    Object.keys(sides).forEach(function(side){
+      var list=sides[side], dir = side==='left' ? -1 : 1;
+      // svislé rozdělení: každá větev dostane pás podle počtu listů
+      var totalLeaves=list.reduce(function(a,b){ return a+b.children.length; },0);
+      var y=70, gapBranch=34;
+      var usable=H-140-(list.length-1)*gapBranch;
+      list.forEach(function(b){
+        var h = usable*(b.children.length/totalLeaves);
+        var col = getComputedStyle(document.documentElement).getPropertyValue(b.color).trim();
+        var bx = CX + dir*250, by = y + h/2;
+
+        var bn = el('n b', '<div class="t">'+txt(b.label)+'</div>');
+        bn.style.cssText='left:'+bx+'px;top:'+by+'px;border-left-color:'+col+(side==='left'?';border-left-width:1px;border-right:4px solid '+col:'');
+        wire(CX + dir*90, CY, bx - dir*70, by, col);
+
+        var step = h/b.children.length;
+        b.children.forEach(function(c,i){
+          var lx = CX + dir*560, ly = y + step*i + step/2;
+          var ln = el('n leaf', '<div class="t">'+txt(c.label)+'</div>'+(c.note?'<div class="d">'+txt(c.note)+'</div>':''));
+          ln.style.cssText='left:'+lx+'px;top:'+ly+'px;border-color:'+col+'55';
+          wire(bx + dir*70, by, lx - dir*125, ly, col);
+        });
+        y += h + gapBranch;
+      });
+    });
+  }
+
+  function applyLang(){
+    document.querySelectorAll('[data-cs]').forEach(function(e){ e.textContent=e.getAttribute('data-'+LANG); });
+    document.documentElement.lang=LANG;
+    document.getElementById('lang-cs').classList.toggle('on', LANG==='cs');
+    document.getElementById('lang-en').classList.toggle('on', LANG==='en');
+    draw();
+  }
+
+  document.getElementById('lang-cs').onclick=function(){ LANG='cs'; applyLang(); };
+  document.getElementById('lang-en').onclick=function(){ LANG='en'; applyLang(); };
+  applyLang();
+})();
+</script>
+</body>
+</html>

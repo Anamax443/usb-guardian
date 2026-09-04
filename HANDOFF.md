@@ -18,7 +18,7 @@ Serverová konzole agreguje data, drží inventář stanic z AD a ukazuje, kam c
 | | |
 |---|---|
 | **Doména** | `axinetwork.loc` |
-| **DB** | SQL Server `B-S-W-SQL-04` (= `10.8.2.225`), databáze `USBGuardian`, skripty `database/01–07` aplikované, **`08_deploy_ignored.sql` = trvalé vyřazení stanice (Ignorovat)**; **+ `GRANT DELETE ON dbo.WhitelistDevices` účtu konzole** (mazání z katalogu – aplikováno ručně) |
+| **DB** | SQL Server `B-S-W-SQL-04` (= `10.8.2.225`), databáze `USBGuardian`, skripty `database/01–07` aplikované, **`08_deploy_ignored.sql` = trvalé vyřazení stanice (Ignorovat)**, **`09_activity_log.sql` = deník provozu (04.09.2026)**; **+ `GRANT DELETE ON dbo.WhitelistDevices` účtu konzole** (mazání z katalogu – aplikováno ručně) **+ granty na `ActivityLog`**: `SELECT,INSERT` pro `B-S-W-MIKOS$` i `gmsa-SQL$`, `EXECUTE ON sp_PurgeActivityLog` pro `gmsa-SQL$` |
 | **API** | `B-S-W-SQL-04`, Windows služba „USB Guardian API", install `C:\USBGuardian.Api`, gMSA `AXINETWORK\gmsa-SQL$`; **HTTPS `:5443`** (self-signed, **PIN `E6F6B4FCE0BB627F564E85D6509DE7C4B82CF2F0`**) + HTTP `:5050`. **Živá verze přes `GET /api/version`** |
 | **Verze/commit (kontrola)** | konzole patička + `:4200/api/version`; API `:5050/api/version`; agent hlásí commit → konzole „Agent verze". Vše stampuje `git rev-parse` (MSBuild) |
 | **Admin konzole** | **živá** `http://10.8.2.213:4200/` (`B-S-W-MIKOS`), služba `USBGuardianConsole`, `C:\Apps\USBGuardianConsole`, self-contained |
@@ -26,10 +26,10 @@ Serverová konzole agreguje data, drží inventář stanic z AD a ukazuje, kam c
 | **Autorizace konzole** | AD `AXINETWORK\SQL Admins2` + whitelist `AXINETWORK\trnkam` (+ DB seznam z Nastavení) |
 | **Šifrování agent↔API** | HTTPS + **pinning otisku** (bez CA) — ověřeno end-to-end (heartbeat OK z .181) |
 | **AD sync** | zapnutý 60 min + on-demand; **213 v AD, ~212 bez agenta** |
-| **Live commit** | **konzole `fa127ea`** (patička / `/api/version`; staged `cbc7a0a` = rozbalená chybová hláška – čeká na redeploy .213) · **API live `6f48153`** · **agent `f2bb194`** na .181 (spolehlivý unblock + re-blokace připojených – ověřeno z Event Logu; **staged `8b2dcaa`** = invalidace whitelist cache – čeká na redeploy agenta). Repo HEAD = `8b2dcaa`/`cbc7a0a`. Stamp spolehlivý = footer = git HEAD |
+| **Live commit** (04.09.2026 8:17) | **konzole `5431dce`** · **API `5431dce`** · **agent `b0e1a0d`** — vše na repo HEAD. Deník ověřen end-to-end: heartbeaty čtyř stanic (TRNKAMW11, TRNKAMW11N, CERNYSW11, BARTKOVAJW11) padají do `ActivityLog` a jsou vidět na stránce Aktivita. Stamp spolehlivý = footer = git HEAD |
 | **Konzole – stránky** | Přehled (filtr+kumulace+řazení, kapacita, **export CSV + manažerský report s grafy**), Stanice (AD inventář + „Zmlklo agentů" + „Vyžádat data" + **Nasazení / hromadné vyřadit-zařadit**), Whitelist (**kapacita + filtr katalogu + auto-publish podepsané verze**), Nastavení (vynucování/přístup/email/alerty/dohled/auto-enrollment+default PC/retence/**Údržba: reload nastavení**), **Databáze**, **Kontroly** (health checks), Dokumentace (+HTML animace) |
 | **Enforcement (F1-3)** | **whitelist 1:1** (auto-podpis serverem, interní RSA klíč na .213) → **vynucování** server→agent (`policy.enforce` v heartbeatu) → **break-glass** (lokální konzole 5080, offline, logováno, zruší se při sync) + **auto-re-enable** + reconciliace s whitelistem. Lokální konzole: restart služby, break-glass, seznam whitelistu |
-| **Deploy účty (oddělené vrstvy)** | **klienti:** gMSA `AXINETWORK\gmsa-USBGdep$` – v `PC Admins`, admin **jen na stanicích**, task `USBGuardian-AutoDeploy` na `.213`. **servery:** gMSA `AXINETWORK\gmsa-USBGsrv$` – lokální admin **jen na SQL-04**, task `USBGuardian-ApiDeploy` na `.213`. **Konzole (`B-S-W-MIKOS$`) není admin nikde.** Od 03.09.2026 – jeden účet už nedrží fleet i server současně |
+| **Deploy účty (oddělené vrstvy)** | **klienti:** gMSA `AXINETWORK\gmsa-USBGdep$` – v `PC Admins`, admin **jen na stanicích**, task `USBGuardian-AutoDeploy` na `.213`. **servery:** gMSA `AXINETWORK\gmsa-USBGsrv$` – lokální admin **jen na SQL-04**, task `USBGuardian-ApiDeploy` na `.213` — **úloha vznikla až 04.09.2026** (do té doby tam byl jen skript `Deploy-Api.cmd`, takže se API od června nenasazovalo; viz 5.10). **Konzole (`B-S-W-MIKOS$`) není admin nikde.** Od 03.09.2026 – jeden účet už nedrží fleet i server současně |
 | **Agent (test) .181** | **PILOT ÚSPĚŠNÝ** – `.181` = **TRNKAMW11** (vlastní workstation); služba „USB Guardian" RUNNING, heartbeat + **incidenty tečou do DB**. Agent live **`f2bb194`** – atribuce uživatele, klient 100% (watchdog+toast), **enforcement F1-3 + auto-re-enable + spolehlivý unblock + re-blokace připojených médií**. Update agenta chce elevaci (UAC) → spustí uživatel (build staged na .213) |
 
 ## 3. Klíčová rozhodnutí (proč)
@@ -278,11 +278,39 @@ Spouští se úlohou **`USBGuardian-UpdateAgent`** na `.213` pod `gmsa-USBGdep$`
 **Ověřeno 03.09.2026:** TRNKAMW11 přeskočena z `f2bb194` na `560722b`, kontrola Verze komponent hlásí jedinou
 verzi agenta. Zároveň se tím uklidily dva soubory, které od července visely ve frontě.
 
+### 5.10 Deník provozu — nasazení a co u něj nesedí (04.09.2026)
+Tabulka `dbo.ActivityLog` + `sp_PurgeActivityLog` jsou v DB, granty vydané (viz Živý stav), konzole i API běží na
+`5431dce` a deník se plní: v 8:16 se na stránce **Aktivita** objevily heartbeaty čtyř stanic
+(`tep OK (whitelist 2026-06-19-v7, agent b0e1a0d)`). Řádky o komunikaci píše API, operátorské zásahy
+(nasazení, aktualizace, vyřazení stanice) píše konzole — obojí do téže tabulky.
+
+**Úloha `USBGuardian-ApiDeploy` na `.213` chyběla** a založila se až 04.09.2026 (XML v UTF-16, `LogonType=Password`,
+principál `gmsa-USBGsrv$` uvedený SIDem). První běh: Last Result `0`, robocopy rc 3, služba naběhla, `/api/version`
+hlásí `5431dce`. Kanál pro nasazení API tedy existuje teprve teď — dřívější text v 5.8 popisoval záměr, ne stav.
+
+**Úklid nikdo nevolá.** `sp_PurgeActivityLog` v DB je, ale v kódu na ni není jediný odkaz — v Nastavení je pouze
+`retention.incidentDays`, deník tam vlastní hodnotu nemá. Při 213 stanicích a heartbeatu po 2 minutách to je
+řádově **150 tisíc řádků denně**; než se retence zapojí, tabulka poroste bez omezení.
+
+**Nekonzistence lokální konzole na fleetu.** Commit `3c8ba3f` uvádí, že balíček i archiv mají
+`localConsole.enabled=false`, ale na `.213` má **zdroj nasazení i všechny tři archivované verze
+(`f2bb194`, `560722b`, `b0e1a0d`) hodnotu `true`** — poslední sestavení balíčku ji vrátilo zpět. Další běh
+`AutoDeploy`/`UpdateAgent` tedy lokální konzoli na stanicích zase zapne. Komentář v `Build-AgentPackage.ps1`
+přitom říká pravý opak commitu (konzole **má** být zapnutá, je to break-glass pro člověka v terénu).
+**Je to rozhodnutí k udělání, ne překlep** — a od opravy `b0e1a0d` má proti sobě slabší argument: odmítnutí
+už uživateli vysvětlí, na co kouká, místo holé 403.
+
+**Opravena pojistka z `3c8ba3f`:** v `Build-AgentPackage.ps1` byl v cestě ke konfiguraci místo `\a` uložený
+skutečný bajt BEL (`Config␇gent.config.local.json`), takže `Test-Path` byl vždy `false` a kontrola obsahu se
+nikdy nespustila — skript jen hlásil „balíček nemá config". Po opravě kontrola na reálném balíčku projde.
+
 ### 5.5 Roadmapa (pending)
 - **Monitoring expirace podpisového certu** – `CN=powershell.axinetwork.loc` platí do 2028-06-17; alert e-mailem z konzole.
 - **„Vše server na .213":** přesun API runtime z SQL-04 na .213 (konzole+API na .213, DB na SQL-04, agent repoint na
   `https://10.8.2.213:5443`) → .181 fakt netřeba. **Build/deploy artefakty jsou na D:\deploy (lokálně), ne na .181.**
 - **Zavřít HTTP 5050** na SQL-04 (jen HTTPS) – NIS2.
+- **Retence deníku** – `sp_PurgeActivityLog` nikdo nevolá; doplnit `activity.retentionDays` do Nastavení a volání do API.
+- **`Microsoft.AspNetCore.Authentication.Negotiate` 8.0.0** – build hlásí NU1903 (známá vysoká zranitelnost), zvednout na aktuální 8.0.x.
 - **Per-serial blocklist** + **blokace už-připojeného média** (startovní sken je půlka cesty).
 - **Hardening:** dedikovaná `USB-Guardian-Admins` místo `SQL Admins2`, HTTPS konzole.
 - **Úklid:** stray (untracked) `server/USBGuardianAPI/` (ke smazání).
@@ -298,8 +326,12 @@ verzi agenta. Zároveň se tím uklidily dva soubory, které od července visely
 |--------|-------|
 | `README.md` / `.en.md` | Funkční přehled, komponenty, konfigurace, nasazení |
 | `HANDOFF.md` / `.en.md` | Tento dokument – předávka + živý stav |
-| `docs/architecture.md` | Technická architektura, datový tok, bezpečnostní vrstvy |
-| `docs/auto-deploy-setup.md` | Nastavení deploy gMSA + GPO + scheduled task pro auto-enrollment |
+| `docs/architecture.md` / `.en.md` | Technická architektura, datový tok, bezpečnostní vrstvy, deník provozu |
+| `docs/auto-deploy-setup.md` / `.en.md` | Nastavení deploy gMSA (klientské i serverové) + GPO + úlohy |
+| `docs/how-it-works.html` | Animace toku informací (15 kroků), CS/EN přepínačem |
+| `docs/mind-map.html` | Myšlenková mapa systému, CS/EN |
+| `docs/flowchart.html` | Vývojový diagram cesty jednoho média (rozhodovací body), CS/EN |
+| `docs/management-summary.html` | **Shrnutí pro vedení — 1× A4 na výšku**, k tisku, CS/EN |
 | `docs/oponentura.md` | Komplexní technický dokument k oponentuře (kontext, NIS2, obhajoba rozhodnutí, bezpečnost, omezení) |
 | `docs/oponentura-komercni.md` | Komerční oponentní posudek (business/product readiness) + reakce autora |
 | `wwwroot/bank/README.md` | Banka UI – jak se zapojuje styl a rozvržení (kopie z Interface-Par) |

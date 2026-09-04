@@ -1,5 +1,7 @@
 # USB Guardian – Architektura
 
+*🇨🇿 Čeština · [🇬🇧 English](architecture.en.md)*
+
 ## Přehled systému
 
 ```
@@ -36,13 +38,23 @@
 │  │                                  │   │                        │ │
 │  │  /api/whitelist  (GET)           │◄─►│  Incidents             │ │
 │  │  /api/incidents  (POST/GET)      │   │  WhitelistVersions     │ │
-│  │  /api/heartbeat  (GET)           │   │                        │ │
-│  │                                  │   │  gMSA: gmsa-SQL$       │ │
-│  │  Windows Auth (Kerberos)         │   │  AD: USB-Guardian-     │ │
-│  │  AD skupiny: USB-Guardian-Clients│   │       Clients          │ │
-│  └──────────────────────────────────┘   └────────────────────────┘ │
+│  │  /api/heartbeat  (GET)           │   │  Computers             │ │
+│  │  ActivityLogger (deník)          │   │  AppSettings           │ │
+│  │  Windows Auth (Kerberos)         │   │  ActivityLog  ◄──────┐ │ │
+│  │  AD skupiny: USB-Guardian-Clients│   │  gMSA: gmsa-SQL$     │ │ │
+│  └──────────────────────────────────┘   └──────────────────────┼─┘ │
+│                                                                │   │
+│  ┌──────────────────────────────────┐                          │   │
+│  │  Admin konzole (Blazor :4200)    │  zásahy operátora ───────┘   │
+│  │  Přehled · Stanice · Whitelist   │  (nasazení, vyřazení,        │
+│  │  Nastavení · Kontroly · Aktivita │   publikace whitelistu)      │
+│  │  AD sync ◄── Active Directory    │                              │
+│  └──────────────────────────────────┘                              │
 └─────────────────────────────────────────────────────────────────────┘
 ```
+
+> Deník (`ActivityLog`) je jediné místo, kam píšou **obě** serverové strany — API komunikaci agentů,
+> konzole zásahy operátora. Proto se dá provoz číst jako jeden příběh.
 
 ## Komponenty agenta
 
@@ -69,6 +81,7 @@
 | `HeartbeatController` | GET zdravotní stav serveru |
 | `IncidentQueue` | In-memory fronta přijatých incidentů (mezi controllerem a workerem) |
 | `IncidentQueueWorker` | Background worker – odebírá z `IncidentQueue` a **až on zapisuje** incidenty do DB (async) |
+| `ActivityLogger` | Zápis do **deníku provozu** (`ActivityLog`) – sdílený zdroj slinkovaný do API i konzole, fire-and-forget (viz níže) |
 | `AppDbContext` | EF Core kontext – SQL Server přes gMSA Windows Auth |
 
 > **DI:** příjem→zápis je rozdělený, proto je nutné v `Program.cs` zaregistrovat **`IncidentQueue`** (singleton)
@@ -118,6 +131,23 @@ vedle automatického vrácení) · `POST /api/restart` (**restart klientské slu
 restartne vlastní službu odděleným `cmd: sc stop → pauza → sc start`; lokální admin to spustí z dashboardu, žádný
 server/admin na klientech netřeba).
 
+### Autorizace lokální konzole – filtrovaný token
+
+Požadavek na `127.0.0.1` je z pohledu Windows **síťové přihlášení**. U **lokálního** účtu z takového tokenu
+`LocalAccountTokenFilterPolicy` odebere skupinu `Administrators` (zůstane v něm jen jako *deny-only*), takže
+`WindowsPrincipal.IsInRole(Administrator)` vrátí **false**, i když člověk lokální admin **je**. Tím byl
+break-glass nedostupný přesně v situaci, na kterou je určený (člověk v terénu na vlastním PC).
+
+Kontrola proto **uznává i filtrovaný token** (deny-only SID členství). Je to bezpečné, protože členství tu slouží
+jako **autorizace**, ne jako zdroj práv: samotnou akci provádí služba běžící pod SYSTEM, žádný elevovaný token
+volajícího k tomu není potřeba. Odmítnutí vrací stránku, která ukáže **jako kdo** byl požadavek viděn a co je
+potřeba — bez toho se to nedalo diagnostikovat na dálku ani na místě.
+
+### Denní restart agenta
+
+`SelfRestart` (výchozí **zapnuto, 04:15**, konfigurovatelné, vypnutelné z lokální konzole) drží agenta svěží —
+zaseknutý WMI watcher nebo ukousnutý handle přežije restart služby, ne den provozu.
+
 ## Identifikace zařízení
 
 ```
@@ -141,12 +171,19 @@ Whitelist záznam obsahuje: `vendorId`, `productId`, `serialNumber`, `descriptio
 
 | Vrstva | Mechanismus |
 |--------|-------------|
-| Transport | TLS 1.2+ (Kestrel), agent validuje certifikát serveru |
+| Transport | TLS 1.2+ (Kestrel), agent ověřuje server **pinningem otisku** (bez CA) |
 | Autentizace | Windows Auth – Kerberos Negotiate |
-| Autorizace | AD skupiny – `USB-Guardian-Clients` |
-| Integrita dat | RSA-4096 podpis whitelistu |
+| Autorizace | AD skupiny – `USB-Guardian-Clients` (API), admin skupina + whitelist účtů (konzole) |
+| Integrita dat | RSA podpis whitelistu, fail-secure (co agent neověří, nepoužije) |
 | Service účet | gMSA `AXINETWORK\gmsa-SQL$` – bez hesla v konfiguraci |
+| Oddělení vrstev | tři deploy identity: fleet × server × běžící konzole (ta není admin nikde) |
+| Auditní stopa | incidenty + **deník provozu** (kdo s kým mluvil, kdo co změnil) |
 | Konfigurace | `appsettings.local.json` gitignored – citlivé hodnoty mimo repo |
+
+> **Kde je podpisový klíč:** privátní klíč whitelistu **je na app serveru** (`Whitelist:PrivateKeyPath`).
+> Je to vědomý kompromis za plně automatickou publikaci — ruční offline podpis po každé změně katalogu byl
+> provozně neúnosný. Klíč je interní klíč nástroje (agenti mají jen veřejnou část), ne firemní CA; chrání ho
+> ACL na serveru. Offline `WhitelistSigner` zůstává pro generování klíčů a ruční ověření.
 
 ## Konfigurace – klíčové hodnoty
 
@@ -222,7 +259,34 @@ jinak nezměnil žádný `.cs`. Dřív (`BeforeTargets=CoreGenerateAssemblyInfo`
 7. IncidentSync (1 min): odeslat na server /api/incidents
 8. IncidentsController: zařadit do IncidentQueue → vrátit 202 Accepted (NEpíše do DB)
 9. IncidentQueueWorker (async): odebrat z fronty a zapsat do SQL tabulky Incidents
+10. ActivityLogger: řádek do deníku „přijata dávka N incidentů ze stanice X" (fire-and-forget)
 ```
+
+## Deník provozu (ActivityLog)
+
+Do `Incidents` se dostane jen to, co **skončilo incidentem**. Když agent přestal komunikovat, když někdo změnil
+whitelist nebo když se nasadila verze, nezůstala po tom stopa nikde než v Event Logu jednoho stroje — a tam se
+nikdo nedívá. Deník je jedno místo, kde je vidět provoz celého systému.
+
+```
+API      → heartbeat (vč. toho, CO server odpověděl), příjem dávek incidentů
+Konzole  → ruční nasazení/aktualizace, trvalé vyřazení stanice, publikace whitelistu
+              ↓ oba přes sdílený ActivityLogger
+        dbo.ActivityLog (Timestamp · Level · Source · Hostname · User · Message)
+              ↓
+        stránka Aktivita: filtry (období/úroveň/zdroj/hledání), režim „živě" (3 s), export CSV
+```
+
+**Proč fire-and-forget:** zápis běží mimo hlavní cestu požadavku a každá chyba se spolkne. Kdyby heartbeat agenta
+spadl kvůli tomu, že nešlo zapsat řádek deníku, byl by **pozorovatel důležitější než to, co pozoruje**. Ze stejného
+důvodu se na dokončení zápisu nečeká — tep stovek agentů nemá být svázaný s latencí databáze.
+
+**Obě strany píšou do TÉŽE tabulky**, takže se provoz čte jako jeden příběh, ne jako dva. Nabídka zdrojů ve filtru
+se bere z dat, ne z pevného seznamu — jinak by se rozešla s tím, co se do deníku doopravdy píše.
+
+**Retence:** řádků přibývá rychle (heartbeat à 2 min × počet stanic ≈ 150 tis./den při 213 stanicích). Úklid má
+dělat `sp_PurgeActivityLog` (maže po dávkách po 5000, aby z něj nebyl dlouhý zámek nad tabulkou, do které zrovna
+píšou agenti). **Pozor – procedura zatím není odnikud volaná**, viz roadmap.
 
 ## Deployment
 
@@ -245,6 +309,47 @@ dotnet run                 (server)
 - Server: Windows Service, spouštěn pod gMSA
 - HTTPS certifikát: `scripts\New-Certificate.ps1` na produkčním serveru
 - AD skupiny: `USB-Guardian-Clients` – stroje s nasazeným agentem
+
+### Aktualizace už nasazeného agenta a nasazení API
+
+Instalace a aktualizace jsou **dvě různé úlohy**. Fleet skript uměl jen čistou instalaci; aktualizace „rovnou
+robocopy" by na běžícím agentovi přepsala část DLL, kopie zamčeného `.exe` by selhala a na stanici by zůstala
+**směs verzí**, zatímco deploy hlásí úspěch.
+
+| Krok | Skript | Úloha na `.213` | Účet |
+|------|--------|-----------------|------|
+| Čistá instalace na stanice bez agenta | `Deploy-AgentFleet.ps1` | `USBGuardian-AutoDeploy` | `gmsa-USBGdep$` |
+| Aktualizace nasazeného agenta | `Update-Agent.cmd` | `USBGuardian-UpdateAgent` (+ `-UpdateAgentBeta`) | `gmsa-USBGdep$` |
+| Nasazení API na jeho server | `Deploy-Api.cmd` | `USBGuardian-ApiDeploy` | `gmsa-USBGsrv$` |
+
+Oba `.cmd` drží stejný vzor: **zastav službu → počkej na `STOPPED` → zkopíruj (bez `*.local.json`) → nastartuj →
+ověř `RUNNING`**; návratový kód = počet neúspěšných stanic, log v `C:\ProgramData\USBGuardian\deploy\`.
+
+**Dávka (.cmd), ne PowerShell:** prostředí vynucuje `AllSigned` přes GPO; `.cmd` mu nepodléhá, takže změna
+nasazovacího kroku nevyžaduje nový podpis.
+
+**Kanály a návrat zpět:** balíček se archivuje po verzích (`stable` / `beta`, `Set-AgentVersion.cmd` /
+`Archive-AgentVersion.cmd`), takže jde nasadit předchozí verzi. V balíčku je i **offline instalátor**
+(`Install-Agent.cmd` / `Uninstall-Agent.cmd`) pro stanici, kam deploy kanál nedosáhne — včetně úklidu po sobě.
+
+> **Gotcha – úloha pod gMSA:** `schtasks /Create /RU "…gmsa$"` bez hesla vyrobí úlohu s `LogonType=InteractiveToken`
+> → nespustí se („uživatel nebyl přihlášen", event 332). S4U (`/NP`) nemá síťové credentials a nedosáhne na
+> `\\HOST\C$`. Funguje jediné: vzít XML fungující úlohy, vyměnit `<Command>`/`<Arguments>`/`<URI>`, uložit jako
+> **UTF-16** a založit přes `/XML` — to nese `LogonType=Password`, u kterého si heslo gMSA vyzvedne systém.
+
+### Oddělené deploy identity
+
+Jeden účet nesmí držet fleet i server současně — kompromitace deploy identity by jinak sáhla na obojí.
+
+| Role | Účet | Kde je admin |
+|---|---|---|
+| Klienti (auto-enrollment, update) | `gmsa-USBGdep$` | skupina `PC Admins` → jen stanice |
+| Server (nasazení API) | `gmsa-USBGsrv$` | lokální admin jen na serveru API |
+| Konzole (běžící aplikace) | strojový účet app serveru | **nikde** |
+
+`gmsa-USBGsrv$` je záměrně **mimo** skupinu serverových adminů; členství je lokální, jen na tom jednom stroji.
+Když deploy úloha začne hlásit `ERROR_LOGON_FAILURE (0x8007052E)`, není to o právech — je to zastaralá lokální
+kopie hesla gMSA (`Install-ADServiceAccount`).
 
 ## Šifrovaná komunikace agent ↔ API (self-contained TLS)
 
@@ -312,9 +417,16 @@ Nastavení: [auto-deploy-setup.md](auto-deploy-setup.md).
   bez agenta = přepínač zařadit/vyřadit z auto-enrollmentu (výjimka proti `deploy.defaultEnroll`); hromadně „Vyřadit/Zařadit vše".
 - **Whitelist** – serial-only zadání + backfill VID/PID z incidentů + import + inline edit + `IsActive` checkbox.
   **Kapacita** média se dotahuje z incidentů (max `SizeBytes` dle sériáku, display-only – na whitelistu se nedrží).
+- **Kontroly** – health checks serveru i klientů. Seznam kontrol se ukáže **dopředu** a odškrtává se s průběžnými
+  výsledky (aby bylo vidět, že to běží, ne jen že se něco točí); prodleva mezi kroky je záměrná. Export výsledků
+  do CSV / HTML / PDF (tisk) / TXT. Součástí je i **plánovaný restart** služeb (server i klient).
+- **Aktivita** – deník provozu (viz [Deník provozu](#deník-provozu-activitylog)): filtry (období, úroveň, zdroj,
+  hledání), režim **živě** s obnovou po 3 s, export CSV.
 - **Databáze** – read-only přehled obsahu DB: počty záznamů v tabulkách, rozsah incidentů (kontrola retence),
   výpis `AppSettings` a posledních 20 incidentů.
-- **Dokumentace** – render `.md` (Markdig) jako tisknutelné HTML, rozcestník.
+- **Dokumentace** – render `.md` (Markdig) jako tisknutelné HTML, rozcestník + grafické výstupy:
+  animace „Jak to funguje", **myšlenková mapa**, **vývojový diagram** a **shrnutí pro vedení (A4)**.
+  Všechny čtyři jsou dvojjazyčné (přepínač CS/EN v hlavičce stránky).
 
 **Přehled – kapacita & export:** kumulovaný i detailní výpis ukazují velikost média. Dvě tlačítka exportu (dědí
 aktivní filtr období/akce/hledání):
@@ -338,6 +450,8 @@ Konzole má na `AppSettings` jen write (ne delete na `Incidents`), proto je enfo
 | Zavřít HTTP 5050 | NIS2 – jen HTTPS (firewall block / přebindovat API na SQL-04) |
 | Per-serial blocklist | Zákaz konkrétního média, near-real-time k agentům (přednost před whitelistem) |
 | Hardening konzole | gMSA místo LocalSystem; dedikovaná `USB-Guardian-Admins`; HTTPS konzole; přesun API na .213 |
+| **Retence deníku** | `sp_PurgeActivityLog` existuje, ale **nikdo ji nevolá** – doplnit `activity.retentionDays` do Nastavení a volání do API (vzor: `RetentionService`) |
+| **Lokální konzole na fleetu** | Rozhodnout, jestli je v balíčku zapnutá (break-glass dostupný) nebo vypnutá (menší attack surface). Dnes je v šabloně `false`, v rozvezeném balíčku `true` — to se musí sjednotit |
 | Toast Privilege Separation | Helper process v user session – jednosměrné Pipes SYSTEM → user |
 
 > Hotovo (dřív pending): Admin UI (Blazor konzole + AD sync), **šifrovaná komunikace agent↔API**

@@ -1,5 +1,7 @@
 # Auto-enrollment agenta – nastavení deploy účtu
 
+*🇨🇿 Čeština · [🇬🇧 English](auto-deploy-setup.en.md)*
+
 Konzole na `.213` umí sama nasazovat agenta na stanice z AD bez agenta
 (`AgentDeployService` + `scripts\Deploy-AgentFleet.ps1`). Aby to šlo „naostro",
 potřebuje **deploy identitu s lokálním adminem na klientech**.
@@ -82,6 +84,36 @@ Register-ScheduledTask -TaskName "USBGuardian-AutoDeploy" -TaskPath "\USBGuardia
 Nejdřív **master ZAPNUTO + dry-run ZAPNUTO** → ověřit report „nasadilo by se N" →
 pak **dry-run VYPNOUT** → konzole začne psát `deploy-targets.txt`, task instaluje.
 Pilot: allowlist jen `.181`, pak `.180`, pak prázdný allowlist = celý fleet.
+
+## Druhý deploy účet: `gmsa-USBGsrv$` (nasazení API)
+
+Klientský deploy účet **nesmí** být admin na serveru API — jinak by kompromitace jedné identity sáhla na fleet
+i na server současně. Pro nasazení API je proto samostatné gMSA, které je **lokální admin jen na serveru API**
+(záměrně mimo skupinu serverových adminů — ta by dala admina na všechny servery):
+
+```powershell
+# (DC) účet + povolit .213 číst heslo
+New-ADServiceAccount -Name "gmsa-USBGsrv" `
+    -DNSHostName "gmsa-USBGsrv.axinetwork.loc" `
+    -PrincipalsAllowedToRetrieveManagedPassword "B-S-W-MIKOS$"
+
+# (na serveru API) přidat do lokálních administrátorů TOHO JEDNOHO stroje
+Add-LocalGroupMember -Group Administrators -Member "AXINETWORK\gmsa-USBGsrv$"
+
+# (na .213) nainstalovat
+Install-ADServiceAccount gmsa-USBGsrv
+```
+
+Úloha `USBGuardian-ApiDeploy` na `.213` pak spouští `Deploy-Api.cmd`:
+
+```
+cmd /c C:\Apps\USBGuardianConsole\scripts\Deploy-Api.cmd "C:\Apps\USBGuardianApiPublish" "API-SERVER" "C$\USBGuardian.Api"
+```
+
+> **Založení úlohy pod gMSA:** `schtasks /Create /RU "…gmsa$"` bez hesla vyrobí `LogonType=InteractiveToken`
+> → úloha se nespustí (event 332). S4U (`/NP`) nemá síťové credentials a nedosáhne na `\\HOST\C$`.
+> Funguje jedině **XML s `LogonType=Password` uložené v UTF-16** a založené přes `schtasks /Create /XML`.
+> Stejná past platí i pro `USBGuardian-UpdateAgent`.
 
 ## Alternativa: konzole běží přímo pod deploy účtem
 

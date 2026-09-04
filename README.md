@@ -40,9 +40,16 @@ technické opatření pro **NIS2 / zákon 181/2014 Sb. / ISO 27001**.
 | 30 | **Auto-re-enable + reconciliace** – při vypnutí blokování / break-glass agent vrátí dříve zablokovaná média; mezitím schválené médium vrátí i při zapnutém blokování | ✅ |
 | 31 | **Restart klientské služby** (lokální konzole, agent self-restart) + **reload nastavení** (serverová konzole, AccessCache) | ✅ |
 | 32 | **Spolehlivé vynucování (symetrie)** – vypnout blokování = vrátit **vše hned** (přesný `Enable-PnpDevice`, ošetření odpojeného média); zapnout zpět = znovu zablokovat **už připojená** neschválená média; nově schválené médium platí **ihned po stažení** (invalidace whitelist cache); ✕ mazání z katalogu (DELETE grant); rozbalená chybová hláška konzole | ✅ |
+| 33 | **Kontroly stavu** – odškrtávaný seznam kontrol (server i klient) s průběžnými výsledky a **exportem CSV / HTML / PDF / TXT**; **plánovaný restart** služeb (server i agent) | ✅ |
+| 34 | **Vzhled z banky UI** – přepínatelný v Nastavení, dark/light bez FOUC, přežije překliknutí mezi stránkami | ✅ |
+| 35 | **Oddělené deploy účty** – `gmsa-USBGdep$` (jen stanice) × `gmsa-USBGsrv$` (jen server API) × konzole (admin nikde); jedna identita už nedrží fleet i server současně | ✅ |
+| 36 | **Aktualizace nasazeného agenta** – `Update-Agent.cmd` (stop → čekat `STOPPED` → kopie → ověřit `RUNNING`), **offline instalátor** v balíčku, **kanály stable/beta**, **archiv verzí** + návrat k předchozí | ✅ |
+| 37 | **Deník provozu (Aktivita)** – `ActivityLog`: heartbeaty a odpovědi serveru, příjem dávek, publikace whitelistu, ruční zásahy operátora; API i konzole píšou do téže tabulky, stránka s filtry, živým režimem a exportem CSV | ✅ |
+| 38 | **Lokální konzole: přihlášení lokálního admina** – loopback token je síťový a u lokálního účtu z něj Windows odebere Administrators (`LocalAccountTokenFilterPolicy`); kontrola nově uznává i filtrovaný token a odmítnutí ukáže, **jako kdo** byl člověk viděn | ✅ |
 | – | Zavřít nešifrované HTTP 5050 (jen HTTPS) | 🔜 NIS2 |
 | – | Per-serial **blocklist** + blokace už-připojeného média | 🔜 |
 | – | Monitoring expirace podpisového certu | 🔜 |
+| – | **Retence deníku** – `sp_PurgeActivityLog` existuje, ale nikdo ji nevolá | 🔜 |
 
 ## Architektura
 
@@ -50,21 +57,29 @@ Tři komponenty, push model (agent → API), dvouvrstvý server (operativa na ap
 
 ```
 [Klientská stanice]                  [App server .213]            [DB server SQL-04]
-┌────────────────────┐               ┌────────────────────┐       ┌──────────────────┐
-│ Agent (.NET8 svc)  │               │ Admin konzole       │       │ SQL Server       │
-│  WMI detekce       │  push  HTTPS  │ (Blazor :4200)      │ read/ │ DB USBGuardian   │
-│  whitelist check   ├──────────────►│  Přehled / Stanice  │ write │  Incidents       │
-│  warn / block      │   ┌───────────┤  AD sync ◄── AD     ├──────►│  Computers       │
-│  lokální konzole   │   │  push     │  Nastavení / Docs   │       │  WhitelistDevices│
-│  (loopback :5080)  │   │           └────────────────────┘       │  WhitelistVersions│
-└────────────────────┘   │           ┌────────────────────┐       └──────────────────┘
-                         └──────────►│ API (:5050/:5443)   ├──read/write──────▲
-                                     │  příjem incidentů    │                  │
-                                     │  whitelist distribuce│──────────────────┘
-                                     └────────────────────┘
+┌────────────────────┐               ┌─────────────────────┐      ┌───────────────────┐
+│ Agent (.NET8 svc)  │               │ Admin konzole       │      │ SQL Server        │
+│  WMI detekce       │  push  HTTPS  │ (Blazor :4200)      │ read/│ DB USBGuardian    │
+│  whitelist check   ├──────────────►│  Přehled / Stanice  │ write│  Incidents        │
+│  warn / block      │   ┌───────────┤  Aktivita (deník)   ├─────►│  Computers        │
+│  lokální konzole   │   │  push     │  AD sync ◄── AD     │      │  WhitelistDevices │
+│  (loopback :5080)  │   │           │  Nastavení / Docs   │      │  WhitelistVersions│
+└─────────▲──────────┘   │           └─────────────────────┘      │  AppSettings      │
+          │              │           ┌─────────────────────┐      │  ActivityLog      │
+   instalace/update      └──────────►│ API (:5050/:5443)   ├─read/─└───────────────────┘
+   (úlohy pod gMSA)                  │  příjem incidentů   │ write            ▲
+          │                          │  heartbeat + politika│                 │
+          └──────────────────────────┤  whitelist distribuce│─────────────────┘
+                                     │  zápis do deníku     │
+                                     └─────────────────────┘
 ```
 
+Deník provozu (`ActivityLog`) píše **API i konzole do téže tabulky** — komunikace agentů z jedné strany,
+zásahy operátora z druhé, aby se provoz četl jako jeden příběh.
+
 Detail viz [docs/architecture.md](docs/architecture.md). Předávka a živý stav: [HANDOFF.md](HANDOFF.md).
+Vizuálně: [animace toku dat](docs/how-it-works.html) · [myšlenková mapa](docs/mind-map.html) ·
+[vývojový diagram](docs/flowchart.html) · [shrnutí pro vedení (A4)](docs/management-summary.html).
 
 ## Komponenty
 
@@ -100,10 +115,16 @@ dark/light přepínač `axima.theme` bez FOUC, tisk = light, semafor stavů). St
   **whitelist přístupu** do konzole, **e-mail** + **alerty nad incidenty**, **auto-enrollment agenta**
   (master + dry-run + **výchozí pro nové PC** + cíle), **retence dat** (kolik dní uchovat incidenty),
   AD sync / DB / build info.
+- **Kontroly** – health checks serveru i klientů: **seznam kontrol dopředu** a odškrtávání s průběžnými
+  výsledky (aby bylo vidět, že běží), **plánovaný restart** služeb, **export** CSV / HTML / PDF (tisk) / TXT.
+- **Aktivita** – **deník provozu**: heartbeaty (včetně toho, co server odpověděl), příjem dávek incidentů,
+  publikace whitelistu, ruční nasazení a vyřazení stanice. Filtry (období, úroveň, zdroj, hledání),
+  režim **živě** (obnova po 3 s) a export CSV. Nabídka zdrojů se bere z dat, ne z pevného seznamu.
 - **Databáze** – read-only přehled obsahu DB (počty v tabulkách, rozsah incidentů pro kontrolu retence,
   výpis `AppSettings`, posledních 20 incidentů).
-- **Dokumentace** – rozcestník + **tisknutelné HTML** stránky (render `.md` přes Markdig) +
-  **interaktivní animace** „Jak to funguje" (`/how-it-works.html`).
+- **Dokumentace** – rozcestník + **tisknutelné HTML** stránky (render `.md` přes Markdig) + grafické výstupy:
+  **animace** „Jak to funguje", **myšlenková mapa**, **vývojový diagram** a **shrnutí pro vedení (A4)** —
+  všechny čtyři dvojjazyčně (CS/EN přepínačem).
 
 Patička (servisní řádek dle standardu): **živé hodiny + klikací commit hash + DB health + © Milan Trnka**.
 Kontrakt **`GET /api/version`**.
@@ -132,11 +153,18 @@ automaticky podle serveru (`new DirectoryEntry()`, nic natvrdo). Reconciliation:
 
 ## Lokální admin konzole agenta
 
-Volitelná (default vypnutá), `localConsole.enabled` v `agent.config.local.json`. `HttpListener`
-na `127.0.0.1:5080`, **admin-only, read-only** – živý stav agenta: **seznam schválených zařízení (whitelist)**,
+Volitelná (`localConsole.enabled` v `agent.config.local.json`, v šabloně vypnutá). `HttpListener`
+na `127.0.0.1:5080`, **jen lokální admin** – živý stav agenta: **seznam schválených zařízení (whitelist)**,
 stav+verze whitelistu, **verze agenta (commit)**, WMI watchdog, fronta, připojená média a poslední události.
-Pro ověření funkčnosti a offline diagnostiku. Použit `HttpListener` (ne Kestrel), aby agent
-nepotřeboval ASP.NET Core runtime. Heslo netřeba (loopback + Windows auth + jen lokální admin + read-only).
+Kromě čtení umí tři akce: **break-glass** (dočasně vypnout blokování offline), **vrátit všechna média hned**
+a **restart služby**. Použit `HttpListener` (ne Kestrel), aby agent nepotřeboval ASP.NET Core runtime.
+Heslo netřeba (loopback + Windows auth + členství v Administrators).
+
+> **Přihlášení lokálního admina (gotcha):** požadavek na `127.0.0.1` je z pohledu Windows **síťový** a
+> u lokálního účtu z něj `LocalAccountTokenFilterPolicy` odebere skupinu Administrators (zůstane
+> deny-only) → `IsInRole` řekne NE, i když člověk admin je. Kontrola proto uznává i **filtrovaný token**:
+> členství tu slouží jako **autorizace**, ne jako zdroj práv — akci provádí služba pod SYSTEM.
+> Odmítnutí není holá 403, ale stránka, která ukáže, **jako kdo** byl člověk viděn a co je potřeba.
 
 ## Šifrovaná komunikace agent ↔ API (self-contained TLS)
 
@@ -167,6 +195,25 @@ Stanice bez agenta jsou vidět na **Stanicích** (dlaždice „Chybí agent"). N
   uplatní **výchozí `deploy.defaultEnroll` + výjimky** (`includeHosts`/`excludeHosts` spravované v Stanicích) a
   (v ostrém režimu) zapíše cíle do `deploy.targetsFile`; instalaci provede **scheduled task na .213 pod dedikovaným
   gMSA** (least-privilege). **Default VYPNUTO + dry-run.** Nastavení: [docs/auto-deploy-setup.md](docs/auto-deploy-setup.md).
+- **Aktualizace už nasazeného agenta:** `scripts\Update-Agent.cmd <ZDROJ> <HOST|SOUBOR> [SLUŽBA]` – zastaví službu,
+  **počká na `STOPPED`**, zkopíruje a **ověří `RUNNING`**. Bez toho je běžící `.exe` zamčený, přepíše se jen část
+  souborů a na stanici zůstane **směs verzí**, zatímco deploy hlásí úspěch. Stanici bez služby přeskočí.
+- **Nasazení API:** `scripts\Deploy-Api.cmd <ZDROJ> <HOST> <CÍL> [SLUŽBA]` – stejný vzor (stop → čekat → kopie →
+  ověřit), běží jako úloha pod **serverovým** gMSA. Klientský deploy účet na server nesahá.
+- **Kanály a návrat zpět:** balíček se archivuje po verzích (`stable` / `beta`), takže jde nasadit předchozí verzi.
+  V balíčku je i **offline instalátor** (`Install-Agent.cmd` / `Uninstall-Agent.cmd`) pro stanici, kam deploy kanál
+  nedosáhne — včetně úklidu po sobě.
+
+> **Dávky (.cmd), ne PowerShell:** nasazovací kroky jsou `.cmd`, protože nepodléhají `AllSigned` z GPO —
+> změna deploy skriptu tak nevyžaduje nový podpis.
+
+**Oddělené deploy identity (od 09/2026):** jeden účet nesmí držet fleet i server současně.
+
+| Role | Účet | Kde je admin |
+|---|---|---|
+| Klienti (auto-enrollment, update) | `gmsa-USBGdep$` | jen stanice |
+| Server (nasazení API) | `gmsa-USBGsrv$` | jen server API |
+| Konzole (běžící aplikace) | strojový účet app serveru | **nikde** |
 
 > **Prostředí AXIMA:** PS skripty co běží na strojích **musí být podepsané** (execution policy AllSigned přes GPO)
 > prod certem `CN=powershell.axinetwork.loc` a publisher musí být v `LocalMachine\TrustedPublisher`
@@ -212,6 +259,11 @@ SQL skripty v `database/` (spustit v pořadí):
 | `05_adpath.sql` | AdPath (cesta v AD) |
 | `06_appsettings.sql` | AppSettings (centrální nastavení: vynucování, přístup, e-mail, retence, deploy) + grant; `Value` = `NVARCHAR(MAX)` (dlouhé seznamy) |
 | `07_whitelist_publish.sql` | WhitelistVersions: `Json` (podepsaný blob) + `Signature` → `NVARCHAR(MAX)` (publikační workflow) |
+| `08_deploy_ignored.sql` | trvalé vyřazení stanice z nasazení (hromadné akce ho nepřepíšou) |
+| `09_activity_log.sql` | `ActivityLog` (deník provozu) + indexy + `sp_PurgeActivityLog` (úklid po dávkách 5000) |
+
+Granty se do skriptů **nepíšou** (portabilita – žádné firemní účty v repu). Pro deník je potřeba
+`SELECT, INSERT ON dbo.ActivityLog` pro účet konzole i API a `EXECUTE ON dbo.sp_PurgeActivityLog` pro API.
 
 ## Rychlý start (vývoj)
 
@@ -259,13 +311,17 @@ GRANT INSERT, UPDATE ON dbo.WhitelistVersions TO [DOMENA\B-S-W-MIKOS$];         
 
 ## Bezpečnost
 
-- Whitelist podepsaný RSA-4096 – agent odmítne podvrhnutý whitelist (privátní klíč **nikdy na serveru**).
-- TLS validace certifikátu serveru (vypnutelné pro vývoj).
+- Whitelist podepsaný RSA – agent odmítne podvrhnutý katalog (fail-secure: co neověří, nepoužije).
+  **Vědomý kompromis:** podpisový klíč **je na app serveru**, protože publikace musí být automatická —
+  ruční offline podpis po každé změně katalogu byl provozně neúnosný. Klíč je interní klíč nástroje,
+  ne firemní CA, a agenti mají jen veřejnou část.
+- TLS s **pinningem otisku** – šifrováno i ověřeno bez certifikační autority (vypnutelné jen pro vývoj).
 - Windows Auth (Kerberos) – agenti strojovým účtem; konzole admin skupina / whitelist.
 - gMSA pro SQL – žádné heslo v konfiguraci.
-- Least-privilege SQL grant pro konzoli (read vše, write jen Computers + whitelist).
+- Least-privilege SQL grant pro konzoli (read vše, write jen tam, kam opravdu píše).
+- **Oddělené deploy identity** – kompromitace jedné nesáhne na obě vrstvy (fleet × server).
 - `*.local.json` gitignored.
-- Lokální konzole agenta i serverová: loopback / admin-only / read-only dle role.
+- Lokální konzole agenta: loopback, jen lokální admin, zápis omezený na break-glass a restart služby.
 
 ## Repo struktura
 
@@ -286,10 +342,13 @@ usb-guardian/
 │       ├── Notifications/     # IncidentAlertService + EmailSender
 │       └── appsettings.local.json.example
 ├── tools/WhitelistSigner/    # offline RSA podpis whitelistu (generate/sign/verify)
-├── database/                 # 01–07 SQL skripty
+├── database/                 # 01–09 SQL skripty
 ├── scripts/                  # certifikáty, Build-AgentPackage, watchdog, ToastHelper,
-│                             #   Install/Uninstall-Agent, Deploy-AgentFleet, New-DeployGmsa, tasks/
-├── docs/architecture.md, docs/auto-deploy-setup.md, docs/how-it-works.html (animace)
+│                             #   Install/Uninstall-Agent, Deploy-AgentFleet, Update-Agent.cmd,
+│                             #   Deploy-Api.cmd, Set/Archive-AgentVersion, New-DeployGmsa, tasks/
+├── docs/                     # architecture(.en).md, auto-deploy-setup(.en).md, oponentura(.en).md,
+│                             #   how-it-works.html (animace), mind-map.html (myšlenková mapa),
+│                             #   flowchart.html (vývojový diagram), management-summary.html (A4)
 ├── README.md / README.en.md
 └── HANDOFF.md / HANDOFF.en.md
 ```

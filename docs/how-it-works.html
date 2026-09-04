@@ -7,7 +7,7 @@
 <style>
   :root{
     --bg:#0d1117; --panel:#161b22; --panel2:#1c2333; --line:#30363d; --ink:#e6edf3; --muted:#8b949e;
-    --brand:#3b82f6; --ok:#22c55e; --warn:#f59e0b; --bad:#ef4444; --rsa:#a855f7; --tls:#22d3ee;
+    --brand:#3b82f6; --ok:#22c55e; --warn:#f59e0b; --bad:#ef4444; --rsa:#a855f7; --tls:#22d3ee; --log:#f472b6;
   }
   *{box-sizing:border-box}
   body{margin:0;font-family:Segoe UI,Arial,sans-serif;background:var(--bg);color:var(--ink);}
@@ -17,13 +17,14 @@
   .wrap{display:grid;grid-template-columns:1fr 340px;gap:0;min-height:calc(100vh - 61px)}
   @media(max-width:980px){.wrap{grid-template-columns:1fr}}
   .stage{position:relative;padding:18px;overflow:auto}
-  .canvas{position:relative;width:1000px;height:660px;margin:0 auto}
-  svg{position:absolute;left:0;top:0;width:1000px;height:660px;pointer-events:none;z-index:1;overflow:visible}
+  .canvas{position:relative;width:1000px;height:760px;margin:0 auto}
+  svg{position:absolute;left:0;top:0;width:1000px;height:760px;pointer-events:none;z-index:1;overflow:visible}
   .zone{position:absolute;border:1px dashed var(--line);border-radius:14px;z-index:0}
   .zone .zlbl{position:absolute;top:-10px;left:14px;background:var(--bg);padding:0 8px;font-size:11px;color:var(--muted);letter-spacing:.08em;text-transform:uppercase}
   .zone.client{left:0;top:24px;width:470px;height:600px;background:rgba(59,130,246,.04)}
   .zone.server{left:600px;top:24px;width:400px;height:470px;background:rgba(34,197,94,.04)}
-  .zone.offline{left:600px;top:520px;width:400px;height:104px;background:rgba(168,85,247,.05)}
+  .zone.deploy{left:0;top:648px;width:470px;height:96px;background:rgba(244,114,182,.05)}
+  .zone.ops{left:600px;top:520px;width:400px;height:224px;background:rgba(168,85,247,.05)}
   .node{position:absolute;z-index:2;background:var(--panel);border:1px solid var(--line);border-radius:10px;
         padding:8px 10px;width:150px;transition:box-shadow .35s,border-color .35s,transform .35s;box-shadow:0 1px 0 rgba(0,0,0,.3)}
   .node .t{font-size:12.5px;font-weight:600}
@@ -33,13 +34,14 @@
   .node.warn.active{border-color:var(--warn);box-shadow:0 0 0 2px rgba(245,158,11,.4),0 0 22px rgba(245,158,11,.3)}
   .node.bad.active{border-color:var(--bad);box-shadow:0 0 0 2px rgba(239,68,68,.4),0 0 22px rgba(239,68,68,.3)}
   .node.rsa.active{border-color:var(--rsa);box-shadow:0 0 0 2px rgba(168,85,247,.4),0 0 22px rgba(168,85,247,.3)}
+  .node.log.active{border-color:var(--log);box-shadow:0 0 0 2px rgba(244,114,182,.4),0 0 22px rgba(244,114,182,.3)}
   .edge{stroke:var(--line);stroke-width:2;fill:none;transition:stroke .3s}
   .edge.lit{stroke-width:3}
   #dot{r:7;opacity:0}
   .side{border-left:1px solid var(--line);background:var(--panel);padding:18px;display:flex;flex-direction:column}
   .step-no{font-size:11px;color:var(--muted);letter-spacing:.1em}
   .step-title{font-size:17px;font-weight:700;margin:4px 0 8px}
-  .step-body{font-size:13.5px;line-height:1.5;color:#cdd6e0;min-height:140px}
+  .step-body{font-size:13.5px;line-height:1.5;color:#cdd6e0;min-height:150px}
   .step-body code{background:var(--panel2);padding:1px 5px;border-radius:4px;font-size:12px}
   .chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px}
   .chip{font-size:11px;border:1px solid var(--line);border-radius:20px;padding:3px 9px;color:var(--muted);cursor:pointer;min-width:26px;text-align:center}
@@ -49,67 +51,82 @@
   .btn.primary{border-color:var(--brand);background:var(--brand)}
   .progress{height:4px;background:var(--panel2);border-radius:3px;overflow:hidden;margin-top:12px}
   .progress > i{display:block;height:100%;background:var(--brand);width:0;transition:.35s}
-  .legend{display:flex;gap:14px;flex-wrap:wrap;font-size:11px;color:var(--muted);margin-left:auto}
+  .legend{display:flex;gap:14px;flex-wrap:wrap;font-size:11px;color:var(--muted)}
   .legend b{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:4px;vertical-align:middle}
+  .lang{margin-left:auto;display:flex;gap:6px}
+  .lang button{font:inherit;font-size:12px;padding:4px 10px;border:1px solid var(--line);background:var(--panel);color:var(--muted);border-radius:6px;cursor:pointer}
+  .lang button.on{border-color:var(--brand);color:var(--ink);background:rgba(59,130,246,.12)}
 </style>
 </head>
 <body>
 <header>
-  <h1>USB Guardian — jak to funguje</h1>
-  <span class="tag">monitoring paměťových médií (NIS2) · agent → API → DB → konzole</span>
+  <h1>USB Guardian — <span data-cs="jak to funguje" data-en="how it works"></span></h1>
+  <span class="tag" data-cs="monitoring paměťových médií (NIS2) · agent → API → DB → konzole → deník"
+                    data-en="removable-media monitoring (NIS2) · agent → API → DB → console → activity log"></span>
   <div class="legend">
-    <span><b style="background:var(--brand)"></b>data/flow</span>
-    <span><b style="background:var(--tls)"></b>TLS (pinning)</span>
-    <span><b style="background:var(--rsa)"></b>RSA podpis</span>
-    <span><b style="background:var(--ok)"></b>OK</span>
-    <span><b style="background:var(--warn)"></b>varování</span>
-    <span><b style="background:var(--bad)"></b>blok</span>
+    <span><b style="background:var(--brand)"></b><span data-cs="data/tok" data-en="data/flow"></span></span>
+    <span><b style="background:var(--tls)"></b><span data-cs="TLS (pinning)" data-en="TLS (pinning)"></span></span>
+    <span><b style="background:var(--rsa)"></b><span data-cs="RSA podpis" data-en="RSA signature"></span></span>
+    <span><b style="background:var(--log)"></b><span data-cs="deník" data-en="activity log"></span></span>
+    <span><b style="background:var(--ok)"></b><span data-cs="OK" data-en="OK"></span></span>
+    <span><b style="background:var(--warn)"></b><span data-cs="varování" data-en="warning"></span></span>
+    <span><b style="background:var(--bad)"></b><span data-cs="blok" data-en="block"></span></span>
+  </div>
+  <div class="lang">
+    <button id="lang-cs" class="on">Čeština</button>
+    <button id="lang-en">English</button>
   </div>
 </header>
 
 <div class="wrap">
   <div class="stage">
     <div class="canvas" id="canvas">
-      <div class="zone client"><span class="zlbl">Klientská stanice (Windows, agent = SYSTEM)</span></div>
-      <div class="zone server"><span class="zlbl">Server (.213 konzole · SQL-04 API+DB)</span></div>
-      <div class="zone offline"><span class="zlbl">Offline (privátní klíč)</span></div>
+      <div class="zone client"><span class="zlbl" data-cs="Klientská stanice (Windows, agent = SYSTEM)" data-en="Client workstation (Windows, agent = SYSTEM)"></span></div>
+      <div class="zone server"><span class="zlbl" data-cs="Server (.213 konzole · SQL-04 API+DB)" data-en="Server (.213 console · SQL-04 API+DB)"></span></div>
+      <div class="zone ops"><span class="zlbl" data-cs="Provoz a audit" data-en="Operations and audit"></span></div>
+      <div class="zone deploy"><span class="zlbl" data-cs="Nasazení (úlohy na .213 pod gMSA)" data-en="Deployment (scheduled tasks on .213 under gMSA)"></span></div>
 
-      <svg id="svg" viewBox="0 0 1000 660" preserveAspectRatio="none">
+      <svg id="svg" viewBox="0 0 1000 760" preserveAspectRatio="none">
         <g id="edges"></g>
         <circle id="dot" cx="0" cy="0" r="7"></circle>
       </svg>
 
-      <div class="node" id="n_usb"    style="left:20px;top:70px"><div class="t">🔌 USB / SD / disk</div><div class="d">uživatel připojí médium</div></div>
-      <div class="node" id="n_mon"    style="left:20px;top:150px"><div class="t">DeviceMonitor</div><div class="d">WMI watcher + startovní sken</div></div>
-      <div class="node" id="n_wl"     style="left:20px;top:235px"><div class="t">WhitelistChecker</div><div class="d">VID:PID:SN vs. lokální whitelist</div></div>
-      <div class="node" id="n_pol"    style="left:20px;top:320px"><div class="t">PolicyEnforcer</div><div class="d">warn / block dle politiky</div></div>
-      <div class="node" id="n_toast"  style="left:250px;top:320px"><div class="t">🔔 ToastHelper</div><div class="d">notifikace v user session</div></div>
-      <div class="node" id="n_block"  style="left:20px;top:405px"><div class="t">DeviceBlocker</div><div class="d">Disable-PnpDevice (block režim)</div></div>
-      <div class="node" id="n_log"    style="left:250px;top:405px"><div class="t">IncidentLogger</div><div class="d">JSON fronta + atribuce uživatele (WTS)</div></div>
-      <div class="node" id="n_sync"   style="left:250px;top:235px"><div class="t">Whitelist/IncidentSync</div><div class="d">heartbeat · stáhni WL · pošli incidenty</div></div>
-      <div class="node" id="n_wd"     style="left:250px;top:150px"><div class="t">🐕 Watchdog</div><div class="d">scheduled task à 3 min → sc start</div></div>
+      <div class="node" id="n_usb"    style="left:20px;top:70px"><div class="t">🔌 USB / SD / <span data-cs="disk" data-en="drive"></span></div><div class="d" data-cs="uživatel připojí médium" data-en="user plugs in a medium"></div></div>
+      <div class="node" id="n_mon"    style="left:20px;top:150px"><div class="t">DeviceMonitor</div><div class="d" data-cs="WMI watcher + startovní sken" data-en="WMI watcher + startup scan"></div></div>
+      <div class="node" id="n_wl"     style="left:20px;top:235px"><div class="t">WhitelistChecker</div><div class="d" data-cs="VID:PID:SN vs. lokální whitelist" data-en="VID:PID:SN vs. local whitelist"></div></div>
+      <div class="node" id="n_pol"    style="left:20px;top:320px"><div class="t">PolicyEnforcer</div><div class="d" data-cs="warn / block dle politiky" data-en="warn / block per policy"></div></div>
+      <div class="node" id="n_toast"  style="left:250px;top:320px"><div class="t">🔔 ToastHelper</div><div class="d" data-cs="notifikace v user session" data-en="notification in the user session"></div></div>
+      <div class="node" id="n_block"  style="left:20px;top:405px"><div class="t">DeviceBlocker</div><div class="d" data-cs="Disable-PnpDevice (režim block)" data-en="Disable-PnpDevice (block mode)"></div></div>
+      <div class="node" id="n_log"    style="left:250px;top:405px"><div class="t">IncidentLogger</div><div class="d" data-cs="JSON fronta + atribuce uživatele (WTS)" data-en="JSON queue + user attribution (WTS)"></div></div>
+      <div class="node" id="n_sync"   style="left:250px;top:235px"><div class="t">Whitelist/IncidentSync</div><div class="d" data-cs="heartbeat · stáhni WL · pošli incidenty" data-en="heartbeat · pull WL · push incidents"></div></div>
+      <div class="node" id="n_wd"     style="left:250px;top:150px"><div class="t">🐕 Watchdog</div><div class="d" data-cs="úloha à 3 min → sc start" data-en="task every 3 min → sc start"></div></div>
+      <div class="node" id="n_loc"    style="left:20px;top:490px"><div class="t">🩺 <span data-cs="Lokální konzole" data-en="Local console"></span></div><div class="d" data-cs="127.0.0.1:5080 · break-glass · jen lokální admin" data-en="127.0.0.1:5080 · break-glass · local admins only"></div></div>
 
-      <div class="node" id="n_api"    style="left:620px;top:70px"><div class="t">USB Guardian API</div><div class="d">Kestrel :5443 (TLS self-cert)</div></div>
-      <div class="node" id="n_queue"  style="left:620px;top:160px"><div class="t">IncidentQueue</div><div class="d">in-memory fronta (202 Accepted)</div></div>
-      <div class="node" id="n_worker" style="left:620px;top:250px"><div class="t">IncidentQueueWorker</div><div class="d">async zápis do DB</div></div>
-      <div class="node ok" id="n_sql" style="left:620px;top:340px"><div class="t">🗄️ SQL Server</div><div class="d">USBGuardian · Incidents…</div></div>
-      <div class="node" id="n_con"    style="left:820px;top:250px"><div class="t">🖥️ Konzole (Blazor)</div><div class="d">Přehled · Whitelist · export · retence</div></div>
+      <div class="node" id="n_api"    style="left:620px;top:70px"><div class="t">USB Guardian API</div><div class="d" data-cs="Kestrel :5443 (TLS self-cert)" data-en="Kestrel :5443 (TLS self-cert)"></div></div>
+      <div class="node" id="n_queue"  style="left:620px;top:160px"><div class="t">IncidentQueue</div><div class="d" data-cs="fronta v paměti (202 Accepted)" data-en="in-memory queue (202 Accepted)"></div></div>
+      <div class="node" id="n_worker" style="left:620px;top:250px"><div class="t">IncidentQueueWorker</div><div class="d" data-cs="asynchronní zápis do DB" data-en="asynchronous write to the DB"></div></div>
+      <div class="node ok" id="n_sql" style="left:620px;top:340px"><div class="t">🗄️ SQL Server</div><div class="d" data-cs="USBGuardian · Incidents · ActivityLog" data-en="USBGuardian · Incidents · ActivityLog"></div></div>
+      <div class="node" id="n_con"    style="left:820px;top:250px"><div class="t">🖥️ <span data-cs="Konzole (Blazor)" data-en="Console (Blazor)"></span></div><div class="d" data-cs="Přehled · Whitelist · export · retence" data-en="Overview · Whitelist · export · retention"></div></div>
 
-      <div class="node rsa" id="n_sign" style="left:620px;top:548px"><div class="t">🔑 WhitelistSigner</div><div class="d">RSA-4096 podpis katalogu (offline)</div></div>
-      <div class="node" id="n_admin"    style="left:820px;top:548px"><div class="t">👤 IT admin</div><div class="d">schválí médium → vydá verzi</div></div>
+      <div class="node log" id="n_act"  style="left:620px;top:548px"><div class="t">📓 <span data-cs="Deník provozu" data-en="Activity log"></span></div><div class="d" data-cs="ActivityLog: kdo s kým mluvil, kdo co změnil" data-en="ActivityLog: who talked to whom, who changed what"></div></div>
+      <div class="node" id="n_admin"    style="left:820px;top:548px"><div class="t">👤 <span data-cs="IT admin" data-en="IT admin"></span></div><div class="d" data-cs="schválí médium → vydá verzi" data-en="approves a medium → publishes a version"></div></div>
+      <div class="node rsa" id="n_sign" style="left:620px;top:648px"><div class="t">🔑 <span data-cs="Podpis whitelistu" data-en="Whitelist signing"></span></div><div class="d" data-cs="RSA podpis katalogu (klíč na .213)" data-en="RSA signature of the catalog (key on .213)"></div></div>
+
+      <div class="node" id="n_task"   style="left:20px;top:672px"><div class="t">⚙️ <span data-cs="Úlohy nasazení" data-en="Deployment tasks"></span></div><div class="d" data-cs="AutoDeploy · UpdateAgent · ApiDeploy" data-en="AutoDeploy · UpdateAgent · ApiDeploy"></div></div>
+      <div class="node" id="n_pkg"    style="left:250px;top:672px"><div class="t">📦 <span data-cs="Balíček agenta" data-en="Agent package"></span></div><div class="d" data-cs="kanál stable/beta + archiv verzí" data-en="stable/beta channel + version archive"></div></div>
     </div>
   </div>
 
   <div class="side">
-    <div class="step-no" id="stepNo">KROK 1 / 13</div>
+    <div class="step-no" id="stepNo">—</div>
     <div class="step-title" id="stepTitle">—</div>
     <div class="step-body" id="stepBody">—</div>
     <div class="chips" id="chips"></div>
     <div class="progress"><i id="bar"></i></div>
     <div class="controls">
-      <button class="btn" id="prev">‹ Zpět</button>
-      <button class="btn primary" id="play">⏸ Pauza</button>
-      <button class="btn" id="next">Další ›</button>
+      <button class="btn" id="prev">‹ <span data-cs="Zpět" data-en="Back"></span></button>
+      <button class="btn primary" id="play">⏸ <span id="playLabel"></span></button>
+      <button class="btn" id="next"><span data-cs="Další" data-en="Next"></span> ›</button>
     </div>
   </div>
 </div>
@@ -117,41 +134,88 @@
 <script>
 (function(){
   "use strict";
+  var LANG = 'cs';
+
   var steps = [
-    { t:"Připojení média", nodes:["n_usb","n_mon"], edge:["n_usb","n_mon"],
-      b:'Uživatel připojí USB/SD/disk. <b>DeviceMonitor</b> ho zachytí přes WMI watcher; už připojená média odhalí <b>startovní sken</b> při startu služby. Sériák se hned <code>trim</code>ne (WMI vrací koncové mezery).' },
-    { t:"Kontrola whitelistu", nodes:["n_mon","n_wl"], edge:["n_mon","n_wl"], color:"rsa",
-      b:'<b>WhitelistChecker</b> složí klíč <code>VID:PID:SÉRIÁK</code> a porovná s lokálním <code>whitelist.json</code>. U podepsaného whitelistu navíc ověří <b>RSA-4096</b> podpis (fail-secure).' },
-    { t:"Rozhodnutí politiky", nodes:["n_wl","n_pol"], edge:["n_wl","n_pol"], cls:{n_pol:"warn"},
-      b:'<b>PolicyEnforcer</b> rozhodne dle režimu: <code>warn</code> (médium funguje, jen varuje) nebo <code>block</code>. Schválené médium → jen tichý audit záznam (Allowed).' },
-    { t:"Blokace (režim block)", nodes:["n_pol","n_block"], edge:["n_pol","n_block"], color:"bad", cls:{n_block:"bad"},
-      b:'V režimu <code>block</code> <b>DeviceBlocker</b> deaktivuje zařízení (<code>Disable-PnpDevice</code> dle PNPDeviceID). V režimu warn se tento krok přeskočí.' },
-    { t:"Notifikace uživateli", nodes:["n_pol","n_toast"], edge:["n_pol","n_toast"], color:"warn", cls:{n_toast:"warn"},
-      b:'Agent běží jako SYSTEM a nemůže zobrazit Toast přímo → zapíše zprávu do fronty. <b>ToastHelper</b> (scheduled task v user session, trigger přihlášení/odemčení) ji zobrazí jako Windows notifikaci.' },
-    { t:"Záznam incidentu + atribuce", nodes:["n_pol","n_log"], edge:["n_pol","n_log"],
-      b:'<b>IncidentLogger</b> uloží incident do denní JSON fronty. Skutečného uživatele zjistí přes <b>WTS API</b> (aktivní session) → <code>DOMÉNA\\uživatel</code>, ne strojový účet (agent = SYSTEM).' },
-    { t:"Odeslání na API (TLS)", nodes:["n_log","n_sync","n_api"], edge:["n_sync","n_api"], color:"tls",
-      b:'<b>IncidentSync</b> pošle frontu na API přes HTTPS. Bez CA — agent ověří server <b>pinningem otisku</b> certifikátu. <b>Heartbeat</b> nese verzi/online; přibalené příkazy umí vyžádat data hned (<code>ReportNow</code>).' },
-    { t:"Příjem → fronta → DB", nodes:["n_api","n_queue","n_worker","n_sql"], edge:["n_queue","n_worker"],
-      b:'API vrátí <b>202 Accepted</b> a vloží do <b>IncidentQueue</b> (sám do DB nepíše → odolnost při náporech). <b>IncidentQueueWorker</b> asynchronně zapisuje do SQL tabulky <code>Incidents</code>.' },
-    { t:"Konzole, export, retence", nodes:["n_sql","n_con"], edge:["n_sql","n_con"], color:"ok", cls:{n_con:"ok"},
-      b:'<b>Blazor konzole</b> (.213) agreguje incidenty, drží AD inventář stanic, spravuje whitelist a nastavení. Umí <b>CSV/manažerský report s grafy</b>, <b>retenci</b> i řízení nasazení agentů. Footer hlásí živý commit = kontrola aktuálnosti.' },
-    { t:"Whitelist 1:1 (auto-podpis serverem)", nodes:["n_admin","n_sign","n_con","n_api","n_sync","n_wl"], edge:["n_sign","n_api"], color:"rsa", cls:{n_sign:"rsa"},
-      b:'Admin schválí médium → konzole <b>automaticky vydá a podepíše</b> novou verzi whitelistu <b>interním RSA klíčem na serveru</b> (.213). API ji servíruje <b>verbatim</b>, agent ji do ≤2 min stáhne, ověří (fail-secure) a uloží jako <b>1:1 kopii</b> (Dictionary O(1), škáluje na 10k).' },
-    { t:"Vynucování server→agent", nodes:["n_con","n_api","n_sync","n_pol"], edge:["n_api","n_sync"], color:"bad", cls:{n_pol:"bad"},
-      b:'Centrální politika <code>policy.enforce</code> (.213 = zdroj pravdy) jde k agentovi v <b>heartbeatu</b>. Když je zapnuté vynucování, agent neschválené médium <b>reálně zablokuje</b> (Disable-PnpDevice). Schválené médium se mezitím samo vrátí (reconciliace s whitelistem).' },
-    { t:"Break-glass (offline) + watchdog", nodes:["n_pol","n_wd"], edge:["n_pol","n_wd"], color:"warn", cls:{n_pol:"warn"},
-      b:'Lokální <b>admin</b> stanice může v lokální konzoli (127.0.0.1:5080) <b>dočasně vypnout blokování</b> pro práci mimo síť — <b>vrátí všechna zablokovaná média hned</b>, <b>logováno</b> + nahlášeno na .213, při příštím spojení se serverem se <b>zruší</b> (server = pravda). Službu hlídá <b>Watchdog</b> (à 3 min), lze ji i restartovat z lokální konzole.' },
-    { t:"Vrácení a re-blokace médií", nodes:["n_pol","n_block","n_wl"], edge:["n_pol","n_block"], color:"ok", cls:{n_block:"ok"},
-      b:'Symetrie vynucování: <b>vypnutí blokování</b> (break-glass/server) vrátí <b>všechna</b> média, která agent zakázal, <b>okamžitě</b> (přesný <code>Enable-PnpDevice -InstanceId</code>; odpojené médium se uklidí ze seznamu). <b>Zapnutí zpět</b> znovu zablokuje už připojená neschválená média. Médium <b>mezitím schválené na whitelistu</b> se vrátí i při zapnutém blokování — po stažení nové verze se zahodí 5min cache, takže platí <b>ihned</b>.' },
+    { nodes:["n_usb","n_mon"], edge:["n_usb","n_mon"],
+      t:{cs:"Připojení média", en:"A medium is plugged in"},
+      b:{cs:'Uživatel připojí USB/SD/disk. <b>DeviceMonitor</b> ho zachytí přes WMI watcher; už připojená média odhalí <b>startovní sken</b> při startu služby. Sériák se hned <code>trim</code>ne (WMI vrací koncové mezery).',
+         en:'A user plugs in a USB/SD/drive. <b>DeviceMonitor</b> catches it through a WMI watcher; media already attached are found by the <b>startup scan</b> when the service starts. The serial is <code>trim</code>med immediately (WMI returns trailing spaces).'} },
+    { nodes:["n_mon","n_wl"], edge:["n_mon","n_wl"], color:"rsa",
+      t:{cs:"Kontrola whitelistu", en:"Whitelist check"},
+      b:{cs:'<b>WhitelistChecker</b> složí klíč <code>VID:PID:SÉRIÁK</code> a porovná s lokálním <code>whitelist.json</code>. U podepsaného whitelistu navíc ověří <b>RSA</b> podpis (fail-secure: neověřený katalog se nepoužije).',
+         en:'<b>WhitelistChecker</b> builds the key <code>VID:PID:SERIAL</code> and compares it against the local <code>whitelist.json</code>. For a signed whitelist it also verifies the <b>RSA</b> signature (fail-secure: an unverified catalog is not used).'} },
+    { nodes:["n_wl","n_pol"], edge:["n_wl","n_pol"], cls:{n_pol:"warn"},
+      t:{cs:"Rozhodnutí politiky", en:"Policy decision"},
+      b:{cs:'<b>PolicyEnforcer</b> rozhodne dle režimu: <code>warn</code> (médium funguje, jen varuje) nebo <code>block</code>. Schválené médium → jen tichý audit záznam (Allowed).',
+         en:'<b>PolicyEnforcer</b> decides by mode: <code>warn</code> (the medium works, the user is only warned) or <code>block</code>. An approved medium → a silent audit record only (Allowed).'} },
+    { nodes:["n_pol","n_block"], edge:["n_pol","n_block"], color:"bad", cls:{n_block:"bad"},
+      t:{cs:"Blokace (režim block)", en:"Blocking (block mode)"},
+      b:{cs:'V režimu <code>block</code> <b>DeviceBlocker</b> deaktivuje zařízení (<code>Disable-PnpDevice</code> dle PNPDeviceID). V režimu warn se tento krok přeskočí.',
+         en:'In <code>block</code> mode <b>DeviceBlocker</b> disables the device (<code>Disable-PnpDevice</code> by PNPDeviceID). In warn mode this step is skipped.'} },
+    { nodes:["n_pol","n_toast"], edge:["n_pol","n_toast"], color:"warn", cls:{n_toast:"warn"},
+      t:{cs:"Notifikace uživateli", en:"Notifying the user"},
+      b:{cs:'Agent běží jako SYSTEM a nemůže zobrazit Toast přímo → zapíše zprávu do fronty. <b>ToastHelper</b> (úloha v user session) ji zobrazí jako Windows notifikaci.',
+         en:'The agent runs as SYSTEM and cannot show a toast directly → it writes the message into a queue. <b>ToastHelper</b> (a task in the user session) shows it as a Windows notification.'} },
+    { nodes:["n_pol","n_log"], edge:["n_pol","n_log"],
+      t:{cs:"Záznam incidentu + atribuce", en:"Incident record + attribution"},
+      b:{cs:'<b>IncidentLogger</b> uloží incident do denní JSON fronty. Skutečného uživatele zjistí přes <b>WTS API</b> (aktivní session) → <code>DOMÉNA\\uživatel</code>, ne strojový účet (agent = SYSTEM).',
+         en:'<b>IncidentLogger</b> stores the incident in a daily JSON queue. The real user is resolved through the <b>WTS API</b> (active session) → <code>DOMAIN\\user</code>, not the machine account (the agent is SYSTEM).'} },
+    { nodes:["n_log","n_sync","n_api"], edge:["n_sync","n_api"], color:"tls",
+      t:{cs:"Odeslání na API (TLS)", en:"Sending to the API (TLS)"},
+      b:{cs:'<b>IncidentSync</b> pošle frontu na API přes HTTPS. Bez CA — agent ověří server <b>pinningem otisku</b> certifikátu. <b>Heartbeat</b> nese verzi a stav; přibalené příkazy umí vyžádat data hned (<code>ReportNow</code>).',
+         en:'<b>IncidentSync</b> pushes the queue to the API over HTTPS. No CA — the agent verifies the server by <b>certificate thumbprint pinning</b>. The <b>heartbeat</b> carries version and state; piggy-backed commands can request data immediately (<code>ReportNow</code>).'} },
+    { nodes:["n_api","n_queue","n_worker","n_sql"], edge:["n_queue","n_worker"],
+      t:{cs:"Příjem → fronta → DB", en:"Receive → queue → DB"},
+      b:{cs:'API vrátí <b>202 Accepted</b> a vloží dávku do <b>IncidentQueue</b> (samo do DB nepíše → odolnost při náporech). <b>IncidentQueueWorker</b> asynchronně zapisuje do tabulky <code>Incidents</code>.',
+         en:'The API returns <b>202 Accepted</b> and puts the batch into <b>IncidentQueue</b> (it does not write to the DB itself → resilience under bursts). <b>IncidentQueueWorker</b> writes asynchronously into the <code>Incidents</code> table.'} },
+    { nodes:["n_sql","n_con"], edge:["n_sql","n_con"], color:"ok", cls:{n_con:"ok"},
+      t:{cs:"Konzole, export, retence", en:"Console, export, retention"},
+      b:{cs:'<b>Blazor konzole</b> (.213) agreguje incidenty, drží AD inventář stanic, spravuje whitelist a nastavení. Umí <b>CSV i manažerský report s grafy</b>, <b>retenci</b> i řízení nasazení agentů. Patička hlásí živý commit = kontrola aktuálnosti.',
+         en:'The <b>Blazor console</b> (.213) aggregates incidents, keeps the AD station inventory, and manages the whitelist and settings. It exports <b>CSV and a management report with charts</b>, handles <b>retention</b> and drives agent deployment. The footer reports the live commit = a check that what runs is what was built.'} },
+    { nodes:["n_admin","n_sign","n_con","n_api","n_sync","n_wl"], edge:["n_sign","n_api"], color:"rsa", cls:{n_sign:"rsa"},
+      t:{cs:"Whitelist 1:1 (auto-podpis serverem)", en:"Whitelist 1:1 (server-side auto-signing)"},
+      b:{cs:'Admin schválí médium → konzole <b>automaticky vydá a podepíše</b> novou verzi whitelistu <b>interním RSA klíčem na serveru</b> (.213). API ji servíruje <b>verbatim</b>, agent ji do ≤2 min stáhne, ověří (fail-secure) a uloží jako <b>1:1 kopii</b> serveru (Dictionary O(1), škáluje na 10k položek).',
+         en:'An admin approves a medium → the console <b>publishes and signs</b> a new whitelist version automatically with an <b>internal RSA key held on the server</b> (.213). The API serves it <b>verbatim</b>, the agent pulls it within ≤2 min, verifies it (fail-secure) and stores it as a <b>1:1 copy</b> of the server (Dictionary O(1), scales to 10k entries).'} },
+    { nodes:["n_con","n_api","n_sync","n_pol"], edge:["n_api","n_sync"], color:"bad", cls:{n_pol:"bad"},
+      t:{cs:"Vynucování server→agent", en:"Enforcement server→agent"},
+      b:{cs:'Centrální politika <code>policy.enforce</code> (.213 = zdroj pravdy) jde k agentovi v <b>heartbeatu</b>. Když je vynucování zapnuté, agent neschválené médium <b>reálně zablokuje</b>. Schválené médium se mezitím samo vrátí (reconciliace s whitelistem).',
+         en:'The central policy <code>policy.enforce</code> (.213 = source of truth) reaches the agent in the <b>heartbeat</b>. With enforcement on, the agent <b>actually blocks</b> an unapproved medium. A medium approved in the meantime comes back on its own (reconciliation against the whitelist).'} },
+    { nodes:["n_pol","n_loc","n_wd"], edge:["n_pol","n_loc"], color:"warn", cls:{n_pol:"warn",n_loc:"warn"},
+      t:{cs:"Break-glass (offline) + watchdog", en:"Break-glass (offline) + watchdog"},
+      b:{cs:'Lokální <b>admin</b> stanice může v lokální konzoli (127.0.0.1:5080) <b>dočasně vypnout blokování</b> pro práci mimo síť — <b>vrátí všechna zablokovaná média hned</b>, je to <b>logované</b> a nahlášené na .213 a při příštím spojení se serverem se <b>zruší</b> (server = pravda). Službu hlídá <b>Watchdog</b> (à 3 min), restartovat ji jde z téže konzole.',
+         en:'A local <b>admin</b> of the station can <b>temporarily switch blocking off</b> in the local console (127.0.0.1:5080) to work off-network — it <b>returns every blocked medium at once</b>, it is <b>logged</b> and reported to .213, and it is <b>cleared</b> on the next successful sync (the server is the truth). The service is watched by the <b>Watchdog</b> (every 3 min) and can be restarted from the same console.'} },
+    { nodes:["n_pol","n_block","n_wl"], edge:["n_pol","n_block"], color:"ok", cls:{n_block:"ok"},
+      t:{cs:"Vrácení a re-blokace médií", en:"Returning and re-blocking media"},
+      b:{cs:'Symetrie vynucování: <b>vypnutí blokování</b> vrátí <b>všechna</b> média, která agent zakázal, <b>okamžitě</b> (přesný <code>Enable-PnpDevice -InstanceId</code>; odpojené médium se uklidí ze seznamu). <b>Zapnutí zpět</b> znovu zablokuje už připojená neschválená média. Médium <b>mezitím schválené</b> platí ihned po stažení verze (zahodí se 5min cache).',
+         en:'Enforcement is symmetric: <b>switching blocking off</b> returns <b>every</b> medium the agent disabled, <b>immediately</b> (an exact <code>Enable-PnpDevice -InstanceId</code>; a medium already unplugged is cleaned out of the list). <b>Switching it back on</b> re-blocks unapproved media that are already attached. A medium <b>approved in the meantime</b> works the moment the new version is pulled (the 5-min cache is dropped).'} },
+    { nodes:["n_api","n_con","n_act","n_sql"], edge:["n_api","n_act"], color:"log", cls:{n_act:"log"},
+      t:{cs:"Deník provozu (kdo s kým mluvil)", en:"Activity log (who talked to whom)"},
+      b:{cs:'Do incidentů se dostane jen to, co skončí incidentem. <b>Deník</b> (<code>ActivityLog</code>) zaznamená i zbytek provozu: heartbeaty a co na ně server odpověděl, příjem dávek incidentů, publikace whitelistu, ruční nasazení, vyřazení stanice. <b>API i konzole píšou do téže tabulky</b>, takže se to čte jako jeden příběh. Zápis je fire-and-forget — deník nesmí zdržet ani shodit to, co pozoruje.',
+         en:'Only what ends as an incident lands in Incidents. The <b>activity log</b> (<code>ActivityLog</code>) records the rest of the traffic too: heartbeats and what the server answered, incident batches received, whitelist publications, manual deployments, stations excluded. <b>The API and the console write into the same table</b>, so it reads as one story. The write is fire-and-forget — the log must never slow down or break what it observes.'} },
+    { nodes:["n_task","n_pkg","n_wd"], edge:["n_task","n_pkg"], color:"tls",
+      t:{cs:"Nasazení a aktualizace", en:"Deployment and updates"},
+      b:{cs:'Agenta rozváží <b>úlohy na .213</b> pod deploy gMSA: <code>AutoDeploy</code> (čistá instalace na stanice bez agenta), <code>UpdateAgent</code> (aktualizace už nasazeného — zastaví službu, počká na STOPPED, zkopíruje, ověří RUNNING) a <code>ApiDeploy</code> (nasazení API na jeho server). Balíček má <b>kanál stable/beta</b> a <b>archiv verzí</b>, takže jde vrátit předchozí verzi.',
+         en:'The agent is distributed by <b>scheduled tasks on .213</b> under the deploy gMSA: <code>AutoDeploy</code> (clean install on stations without an agent), <code>UpdateAgent</code> (updating an existing one — stop the service, wait for STOPPED, copy, verify RUNNING) and <code>ApiDeploy</code> (deploying the API to its server). The package has a <b>stable/beta channel</b> and a <b>version archive</b>, so a previous version can be rolled back.'} },
   ];
-  var COLORS = { brand:'#3b82f6', tls:'#22d3ee', rsa:'#a855f7', ok:'#22c55e', warn:'#f59e0b', bad:'#ef4444' };
+  var COLORS = { brand:'#3b82f6', tls:'#22d3ee', rsa:'#a855f7', ok:'#22c55e', warn:'#f59e0b', bad:'#ef4444', log:'#f472b6' };
+  var UI = {
+    step:{cs:'KROK', en:'STEP'}, of:{cs:'/', en:'/'},
+    pause:{cs:'Pauza', en:'Pause'}, play:{cs:'Přehrát', en:'Play'}
+  };
 
   var SVGNS='http://www.w3.org/2000/svg';
   var cur=0, playing=true, timer=null, raf=null;
   var $ = function(id){ return document.getElementById(id); };
 
-  // střed uzlu v souřadnicích canvasu (0..1000 / 0..660 díky viewBoxu 1:1 k 1000x660)
+  function applyLang(){
+    var els=document.querySelectorAll('[data-cs]');
+    for(var i=0;i<els.length;i++){ els[i].textContent = els[i].getAttribute('data-'+LANG); }
+    document.documentElement.lang = LANG;
+    $('lang-cs').classList.toggle('on', LANG==='cs');
+    $('lang-en').classList.toggle('on', LANG==='en');
+  }
+
   function center(id){
     var n=$(id), c=$('canvas');
     var r=n.getBoundingClientRect(), b=c.getBoundingClientRect();
@@ -173,17 +237,19 @@
 
   function clearActive(){
     var ns=document.querySelectorAll('.node');
-    for(var i=0;i<ns.length;i++){ ns[i].classList.remove('active','warn','bad','ok','rsa'); }
+    for(var i=0;i<ns.length;i++){ ns[i].classList.remove('active','warn','bad','ok','rsa','log'); }
     $('n_sql').classList.add('ok');     // SQL má trvalou ok barvu
-    $('n_sign').classList.add('rsa');   // signer trvale rsa
+    $('n_sign').classList.add('rsa');   // podpis trvale rsa
+    $('n_act').classList.add('log');    // deník trvale růžový
   }
 
   function render(){
     var s=steps[cur];
-    $('stepNo').textContent='KROK '+(cur+1)+' / '+steps.length;
-    $('stepTitle').textContent=s.t;
-    $('stepBody').innerHTML=s.b;
+    $('stepNo').textContent = UI.step[LANG]+' '+(cur+1)+' / '+steps.length;
+    $('stepTitle').textContent = s.t[LANG];
+    $('stepBody').innerHTML = s.b[LANG];
     $('bar').style.width=((cur+1)/steps.length*100)+'%';
+    $('playLabel').textContent = playing ? UI.pause[LANG] : UI.play[LANG];
 
     clearActive();
     (s.nodes||[]).forEach(function(id){ $(id).classList.add('active'); });
@@ -195,12 +261,11 @@
     var e=$('edge'+cur);
     if(e){ e.classList.add('lit'); e.setAttribute('stroke',col); }
 
-    // chips
     var chips=$('chips'); chips.innerHTML='';
     for(var j=0;j<steps.length;j++){
       (function(idx){
         var c=document.createElement('span');
-        c.className='chip'+(idx===cur?' on':''); c.textContent=String(idx+1); c.title=steps[idx].t;
+        c.className='chip'+(idx===cur?' on':''); c.textContent=String(idx+1); c.title=steps[idx].t[LANG];
         c.onclick=function(){ go(idx); };
         chips.appendChild(c);
       })(j);
@@ -211,19 +276,17 @@
     dot.style.filter='drop-shadow(0 0 6px '+col+')';
   }
 
-  // plynulý pohyb tečky ve smyčce po aktivní hraně
   var t0=null;
   function loop(ts){
     var s=steps[cur], dot=$('dot');
     if(!s.edge){ dot.style.opacity=0; raf=requestAnimationFrame(loop); return; }
     if(t0===null) t0=ts;
     var DUR=1500;
-    var k=((ts-t0)%DUR)/DUR;                 // 0..1 ve smyčce
-    var ease = k;                            // lineární – stálý pohyb
+    var k=((ts-t0)%DUR)/DUR;
     var a=center(s.edge[0]), b=center(s.edge[1]);
     dot.style.opacity=1;
-    dot.setAttribute('cx', a.x+(b.x-a.x)*ease);
-    dot.setAttribute('cy', a.y+(b.y-a.y)*ease);
+    dot.setAttribute('cx', a.x+(b.x-a.x)*k);
+    dot.setAttribute('cy', a.y+(b.y-a.y)*k);
     raf=requestAnimationFrame(loop);
   }
 
@@ -232,12 +295,16 @@
   function prev(){ go(cur-1); }
 
   function setPlay(on){
-    playing=on; $('play').textContent = playing ? '⏸ Pauza' : '▶ Přehrát';
+    playing=on; $('playLabel').textContent = playing ? UI.pause[LANG] : UI.play[LANG];
+    $('play').firstChild.nodeValue = playing ? '⏸ ' : '▶ ';
     if(timer){ clearInterval(timer); timer=null; }
     if(playing){ timer=setInterval(function(){ next(); }, 3000); }
   }
 
+  function setLang(l){ LANG=l; applyLang(); render(); setPlay(playing); }
+
   function init(){
+    applyLang();
     buildEdges();
     render();
     raf=requestAnimationFrame(loop);
@@ -245,6 +312,8 @@
     $('next').onclick=function(){ setPlay(false); next(); };
     $('prev').onclick=function(){ setPlay(false); prev(); };
     $('play').onclick=function(){ setPlay(!playing); };
+    $('lang-cs').onclick=function(){ setLang('cs'); };
+    $('lang-en').onclick=function(){ setLang('en'); };
     window.addEventListener('resize', function(){ buildEdges(); render(); });
     window.addEventListener('keydown', function(e){
       if(e.key==='ArrowRight'){ setPlay(false); next(); }

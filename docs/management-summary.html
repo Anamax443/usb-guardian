@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>USB Guardian — shrnutí pro vedení</title>
+<style>
+  :root{
+    --ink:#14181f; --muted:#5b6675; --line:#d7dce3; --soft:#f4f6f9;
+    --brand:#1f5fbf; --ok:#1f8a4c; --warn:#b3730b; --bad:#b3261e;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:#8a8f98;color:var(--ink);
+       font-family:"Segoe UI",Arial,sans-serif;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .bar{position:sticky;top:0;z-index:5;background:#20242c;color:#e6edf3;padding:10px 18px;display:flex;gap:10px;align-items:center;font-size:13px}
+  .bar .sp{margin-left:auto;display:flex;gap:6px}
+  .bar button{font:inherit;font-size:12px;padding:5px 11px;border:1px solid #3a4150;background:#2a2f39;color:#c8d0da;border-radius:6px;cursor:pointer}
+  .bar button.on{border-color:#5b9dff;color:#fff;background:#1f3a63}
+
+  .page{width:210mm;min-height:297mm;margin:16px auto;background:#fff;padding:14mm 15mm 12mm;
+        box-shadow:0 4px 24px rgba(0,0,0,.35);display:flex;flex-direction:column}
+
+  h1{font-size:21pt;margin:0 0 1mm;letter-spacing:-.2px}
+  .sub{font-size:10pt;color:var(--muted);margin:0 0 5mm}
+  h2{font-size:11.5pt;margin:5mm 0 2mm;padding-bottom:1mm;border-bottom:1.5px solid var(--line)}
+  p{font-size:9.7pt;line-height:1.45;margin:0 0 2.5mm}
+  ul{margin:0 0 2.5mm;padding-left:5mm}
+  li{font-size:9.7pt;line-height:1.45;margin-bottom:1mm}
+  .lead{font-size:11pt;line-height:1.5;background:var(--soft);border-left:3px solid var(--brand);padding:3.5mm 4mm;margin:0 0 4mm}
+
+  .kpi{display:grid;grid-template-columns:repeat(5,1fr);gap:2.5mm;margin:0 0 3mm}
+  .kpi div{border:1px solid var(--line);border-radius:2mm;padding:2.5mm 2mm;text-align:center}
+  .kpi b{display:block;font-size:16pt;line-height:1.1}
+  .kpi span{font-size:7.6pt;color:var(--muted);display:block;margin-top:.8mm;line-height:1.2}
+
+  .flow{display:grid;grid-template-columns:repeat(4,1fr);gap:0;margin:1mm 0 3mm}
+  .flow div{border:1px solid var(--line);padding:2.5mm 2mm;font-size:8.6pt;line-height:1.3;position:relative}
+  .flow div:not(:last-child){border-right:none}
+  .flow b{display:block;font-size:9.2pt;margin-bottom:.8mm}
+  .flow i{font-style:normal;color:var(--muted)}
+
+  .two{display:grid;grid-template-columns:1fr 1fr;gap:6mm}
+  table{width:100%;border-collapse:collapse;font-size:9.2pt}
+  th,td{text-align:left;padding:1.6mm 2mm;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--muted);font-weight:600;font-size:8.4pt;text-transform:uppercase;letter-spacing:.04em}
+  .tag{display:inline-block;font-size:8pt;padding:.4mm 2mm;border-radius:3mm;border:1px solid var(--line)}
+  .tag.ok{color:var(--ok);border-color:#bfe3cd;background:#f0faf4}
+  .tag.wip{color:var(--warn);border-color:#f0dcb4;background:#fdf7ec}
+  .foot{margin-top:auto;padding-top:3mm;border-top:1px solid var(--line);font-size:8pt;color:var(--muted);display:flex;justify-content:space-between;gap:4mm}
+
+  @media print{
+    html,body{background:#fff}
+    .bar{display:none}
+    .page{margin:0;box-shadow:none;width:auto;min-height:0;padding:0}
+    @page{size:A4 portrait;margin:14mm 15mm}
+  }
+</style>
+</head>
+<body>
+<div class="bar">
+  <span data-cs="Shrnutí pro vedení — jedna strana A4, připravená k tisku"
+        data-en="Management summary — one A4 page, ready to print"></span>
+  <span class="sp">
+    <button id="lang-cs" class="on">Čeština</button>
+    <button id="lang-en">English</button>
+    <button onclick="window.print()" data-cs="Tisk" data-en="Print"></button>
+  </span>
+</div>
+
+<div class="page">
+  <h1>USB Guardian</h1>
+  <p class="sub" data-cs="Kontrola paměťových médií na firemních počítačích · shrnutí pro vedení · stav k 4. 9. 2026"
+                 data-en="Control of removable media on company computers · management summary · status as of 4 Sep 2026"></p>
+
+  <p class="lead" data-cs="Cizí USB flash disk zapojený do firemního počítače je nejjednodušší cesta, jak z firmy odejdou data — a zároveň jak se do ní dostane škodlivý kód. USB Guardian dává IT přehled o tom, jaká média se ve firmě používají, umožní schválit jen ta vlastní a ostatní zablokovat. Vše je doložitelné: kdo, kdy, jaké médium a co se s ním stalo."
+                    data-en="A foreign USB stick plugged into a company computer is the easiest way for data to leave the company — and for malicious code to enter it. USB Guardian gives IT a picture of which media are in use, lets it approve only company-owned ones and block the rest. Everything is evidenced: who, when, which medium and what happened."></p>
+
+  <h2 data-cs="Kde jsme dnes" data-en="Where we are today"></h2>
+  <div class="kpi">
+    <div><b>227</b><span data-cs="počítačů v evidenci" data-en="computers on record"></span></div>
+    <div><b>4</b><span data-cs="s nainstalovaným agentem" data-en="with the agent installed"></span></div>
+    <div><b>29</b><span data-cs="událostí za 30 dní" data-en="events in 30 days"></span></div>
+    <div><b>20</b><span data-cs="z toho neschválené médium" data-en="of them an unapproved medium"></span></div>
+    <div><b>3</b><span data-cs="schválená média" data-en="approved media"></span></div>
+  </div>
+  <p data-cs="Systém je hotový a v provozu: server, databáze i konzole běží, čtyři pilotní stanice hlásí data spolehlivě. Zbývá plošné rozvezení agenta na zbývající počítače — technicky je připravené a probíhá bez zásahu uživatele."
+     data-en="The system is finished and running: server, database and console are live and four pilot workstations report reliably. What remains is the fleet-wide rollout of the agent to the rest of the computers — it is technically ready and runs without user involvement."></p>
+
+  <h2 data-cs="Jak to funguje" data-en="How it works"></h2>
+  <div class="flow">
+    <div><b data-cs="1 · Zjistí" data-en="1 · Detect"></b><i data-cs="Program na počítači pozná každé připojené médium podle výrobního čísla." data-en="A program on the computer identifies every attached medium by its serial number."></i></div>
+    <div><b data-cs="2 · Porovná" data-en="2 · Compare"></b><i data-cs="Porovná ho se seznamem médií schválených IT. Seznam je elektronicky podepsaný, nejde podvrhnout." data-en="It compares it against the list of media approved by IT. The list is digitally signed and cannot be forged."></i></div>
+    <div><b data-cs="3 · Rozhodne" data-en="3 · Decide"></b><i data-cs="Neschválené médium buď jen ohlásí, nebo rovnou zablokuje — podle nastavení, které mění IT centrálně." data-en="An unapproved medium is either only reported or blocked outright — per a setting IT changes centrally."></i></div>
+    <div><b data-cs="4 · Doloží" data-en="4 · Evidence"></b><i data-cs="Událost se uloží na server. IT má přehled, export do Excelu i report pro audit." data-en="The event is stored on the server. IT has an overview, an Excel export and a report for audits."></i></div>
+  </div>
+  <p data-cs="Zaměstnance to nezdržuje: schválené firemní médium funguje bez jakéhokoli kroku navíc. Kdo je na svém notebooku správcem a je mimo firemní síť, může blokování dočasně vypnout — takový zásah se ale zaznamená a po připojení do sítě se sám zruší."
+     data-en="It does not slow employees down: an approved company medium works with no extra step. Anyone who is an administrator of their own laptop and is off the corporate network can switch blocking off temporarily — but the action is recorded and cancels itself once the machine is back on the network."></p>
+
+  <div class="two">
+    <div>
+      <h2 data-cs="Proč to potřebujeme" data-en="Why we need it"></h2>
+      <ul>
+        <li data-cs="<b>NIS2 a zákon o kybernetické bezpečnosti</b> — kontrola výměnných médií je požadované technické opatření, které musíme umět doložit." data-en="<b>NIS2 and the cybersecurity act</b> — control of removable media is a required technical measure we must be able to evidence."></li>
+        <li data-cs="<b>ISO 27001</b> — stejný požadavek v jazyce normy; auditor se ptá na důkaz, ne na tvrzení." data-en="<b>ISO 27001</b> — the same requirement in the standard's language; an auditor asks for evidence, not for a claim."></li>
+        <li data-cs="<b>Únik dat</b> — bez evidence nezjistíme ani zpětně, co z firmy odešlo a přes jaké médium." data-en="<b>Data leakage</b> — without records we cannot tell even afterwards what left the company and on what medium."></li>
+        <li data-cs="<b>Vlastní řešení</b> — bez licencí za koncové stanice a bez závislosti na cizí cloudové službě." data-en="<b>In-house solution</b> — no per-endpoint licences and no dependency on a third-party cloud service."></li>
+      </ul>
+    </div>
+    <div>
+      <h2 data-cs="Co dál" data-en="What is next"></h2>
+      <table>
+        <tr><td data-cs="Rozvezení agenta na zbytek počítačů" data-en="Roll the agent out to the remaining computers"></td><td><span class="tag wip" data-cs="připraveno" data-en="ready"></span></td></tr>
+        <tr><td data-cs="Zapnutí blokování (dnes režim varování)" data-en="Switch blocking on (today: warning mode)"></td><td><span class="tag wip" data-cs="rozhodnutí" data-en="decision"></span></td></tr>
+        <tr><td data-cs="Seznam schválených firemních médií" data-en="List of approved company media"></td><td><span class="tag wip" data-cs="doplnit" data-en="to complete"></span></td></tr>
+        <tr><td data-cs="Přehled provozu a auditní deník" data-en="Operations overview and audit log"></td><td><span class="tag ok" data-cs="hotovo" data-en="done"></span></td></tr>
+        <tr><td data-cs="Šifrovaná komunikace a podepsaný seznam" data-en="Encrypted communication and signed list"></td><td><span class="tag ok" data-cs="hotovo" data-en="done"></span></td></tr>
+      </table>
+    </div>
+  </div>
+
+  <h2 data-cs="Co to stojí a co to nese" data-en="Cost and benefit"></h2>
+  <p data-cs="Provoz stojí čas IT a nic navíc: běží na serverech, které už máme, bez licencí na koncové stanice a bez placených služeb. Přínos je dvojí — snížíme reálné riziko úniku dat přes média, která nikdo neeviduje, a máme po ruce důkaz pro audit i pro případ incidentu. Riziko projektu je řízené: blokování se zapíná centrálně a dá se kdykoli vypnout, agent se sám hlídá a při výpadku serveru pracuje dál a data pošle později."
+     data-en="Running it costs IT time and nothing else: it runs on servers we already own, with no endpoint licences and no paid services. The benefit is twofold — we cut the real risk of data leaving on media nobody tracks, and we hold the evidence for an audit or an incident. Project risk is controlled: blocking is switched on centrally and can be switched off at any time, the agent watches itself, and during a server outage it keeps working and sends the data later."></p>
+
+  <div class="foot">
+    <span data-cs="USB Guardian · vlastní vývoj AXIMA · Milan Trnka" data-en="USB Guardian · developed in-house at AXIMA · Milan Trnka"></span>
+    <span data-cs="Podrobnosti: technická dokumentace v konzoli nástroje" data-en="Details: technical documentation inside the tool's console"></span>
+  </div>
+</div>
+
+<script>
+(function(){
+  "use strict";
+  var LANG='cs';
+  function apply(){
+    document.querySelectorAll('[data-cs]').forEach(function(e){ e.innerHTML=e.getAttribute('data-'+LANG); });
+    document.documentElement.lang=LANG;
+    document.title = LANG==='cs' ? 'USB Guardian — shrnutí pro vedení' : 'USB Guardian — management summary';
+    document.getElementById('lang-cs').classList.toggle('on', LANG==='cs');
+    document.getElementById('lang-en').classList.toggle('on', LANG==='en');
+  }
+  document.getElementById('lang-cs').onclick=function(){ LANG='cs'; apply(); };
+  document.getElementById('lang-en').onclick=function(){ LANG='en'; apply(); };
+  apply();
+})();
+</script>
+</body>
+</html>

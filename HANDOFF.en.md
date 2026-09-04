@@ -18,7 +18,7 @@ The server console aggregates data, keeps a station inventory from AD and shows 
 | | |
 |---|---|
 | **Domain** | `axinetwork.loc` |
-| **DB** | SQL Server `B-S-W-SQL-04` (= `10.8.2.225`), database `USBGuardian`, scripts `database/01–07` applied; **+ `GRANT DELETE ON dbo.WhitelistDevices` to the console account** (catalog deletion – applied manually) |
+| **DB** | SQL Server `B-S-W-SQL-04` (= `10.8.2.225`), database `USBGuardian`, scripts `database/01–07` applied, **`08_deploy_ignored.sql`**, **`09_activity_log.sql` = activity log (2026-09-04)**; **+ `GRANT DELETE ON dbo.WhitelistDevices` to the console account** (catalog deletion – applied manually) **+ `ActivityLog` grants**: `SELECT,INSERT` for `B-S-W-MIKOS$` and `gmsa-SQL$`, `EXECUTE ON sp_PurgeActivityLog` for `gmsa-SQL$` |
 | **API** | `B-S-W-SQL-04`, Windows service "USB Guardian API", install `C:\USBGuardian.Api`, gMSA `AXINETWORK\gmsa-SQL$`; **HTTPS `:5443`** (self-signed, **PIN `E6F6B4FCE0BB627F564E85D6509DE7C4B82CF2F0`**) + HTTP `:5050`. **Live version via `GET /api/version`** |
 | **Version/commit (check)** | console footer + `:4200/api/version`; API `:5050/api/version`; agent reports commit → console "Agent version". All stamped by `git rev-parse` (MSBuild) |
 | **Admin console** | **live** `http://10.8.2.213:4200/` (`B-S-W-MIKOS`), service `USBGuardianConsole`, `C:\Apps\USBGuardianConsole`, self-contained |
@@ -26,7 +26,7 @@ The server console aggregates data, keeps a station inventory from AD and shows 
 | **Console authorization** | AD `AXINETWORK\SQL Admins2` + whitelist `AXINETWORK\trnkam` (+ DB list from Settings) |
 | **Agent↔API encryption** | HTTPS + **thumbprint pinning** (no CA) — verified end-to-end (heartbeat OK from .181) |
 | **AD sync** | enabled 60 min + on-demand; **213 in AD, ~212 without agent** |
-| **Live commit** | **console `fa127ea`** (footer / `/api/version`; staged `cbc7a0a` = unwrapped error message – pending .213 redeploy) · **API live `6f48153`** · **agent `f2bb194`** on .181 (reliable unblock + re-block of connected media – verified from Event Log; **staged `8b2dcaa`** = whitelist cache invalidation – pending agent redeploy). Repo HEAD = `8b2dcaa`/`cbc7a0a`. Reliable stamp = footer = git HEAD |
+| **Live commit** (2026-09-04 8:17) | **console `5431dce`** · **API `5431dce`** · **agent `b0e1a0d`** — all at repo HEAD. Activity log verified end-to-end: heartbeats from four stations (TRNKAMW11, TRNKAMW11N, CERNYSW11, BARTKOVAJW11) land in `ActivityLog` and show on the Activity page. Reliable stamp = footer = git HEAD |
 | **Console – pages** | Overview (filter+aggregation+sort, capacity, **CSV export + manager report with charts**), Stations (AD inventory + "Agents gone silent" + "Request data" + **Deployment / bulk exclude-include**), Whitelist (**capacity + catalog filter + auto-published signed version**), Settings (enforcement/access/email/alerts/monitoring/auto-enrollment+default PC/retention/**Maintenance: reload settings**), **Database**, **Health checks**, Documentation (+HTML animation) |
 | **Enforcement (P1-3)** | **whitelist 1:1** (server-side auto-sign, internal RSA key on .213) → **enforcement** server→agent (`policy.enforce` in heartbeat) → **break-glass** (local console 5080, offline, logged, cleared on sync) + **auto-re-enable** + whitelist reconciliation. Local console: service restart, break-glass, whitelist list |
 | **Deploy account (auto-enroll)** | **gMSA `AXINETWORK\gmsa-USBGdep$`** – in `PC Admins` (admin on clients) **and local admin on SQL-04** (API deploy); installed on `.213`; deploy task `USBGuardian-AutoDeploy` (under gMSA, via CIM) |
@@ -257,11 +257,40 @@ re-signing on every change.
 > `sc sdset` (one ACE, not an account holding the keys to the server), or let the server gMSA do the restart the
 > same way it does the deploy.
 
+### 5.10 Activity log — deployment and what does not add up (2026-09-04)
+`dbo.ActivityLog` + `sp_PurgeActivityLog` are in the DB, grants issued (see Live State), console and API both run
+`5431dce`, and the log is filling up: at 8:16 the **Activity** page showed heartbeats from four stations
+(`tep OK (whitelist 2026-06-19-v7, agent b0e1a0d)`). Communication rows come from the API, operator actions
+(deploy, update, excluding a station) from the console — both into the same table.
+
+**The `USBGuardian-ApiDeploy` task on `.213` was missing** and was created only on 2026-09-04 (UTF-16 XML,
+`LogonType=Password`, principal `gmsa-USBGsrv$` given as a SID). First run: Last Result `0`, robocopy rc 3, service
+came up, `/api/version` reports `5431dce`. The API deploy channel therefore exists only as of now — the earlier
+text in 5.8 described the intent, not the state.
+
+**Nothing calls the purge.** `sp_PurgeActivityLog` exists in the DB but there is not a single reference to it in
+the code — Settings only carries `retention.incidentDays`. With 213 stations and a 2-minute heartbeat that is
+roughly **150k rows per day**; until retention is wired up the table grows unbounded.
+
+**Local console inconsistency on the fleet.** Commit `3c8ba3f` states the package and archive have
+`localConsole.enabled=false`, but on `.213` the **deploy source and all three archived versions
+(`f2bb194`, `560722b`, `b0e1a0d`) say `true`** — the last package build put it back. The next `AutoDeploy` /
+`UpdateAgent` run will therefore re-enable the local console on workstations. The comment in
+`Build-AgentPackage.ps1` says the opposite of the commit (the console **should** be on — it is the break-glass for
+someone in the field). **This is a decision to make, not a typo** — and since fix `b0e1a0d` the argument against it
+is weaker: a rejected login now explains what the person is looking at instead of a bare 403.
+
+**Guard from `3c8ba3f` fixed:** `Build-AgentPackage.ps1` held a real BEL byte instead of `\a` in the config path
+(`Config␇gent.config.local.json`), so `Test-Path` was always `false` and the content check never ran — the script
+only ever reported "package has no config". After the fix the check passes on a real package.
+
 ### 5.5 Roadmap (pending)
 - **Monitoring of signing cert expiry** – `CN=powershell.axinetwork.loc` valid until 2028-06-17; alert via e-mail from the console.
 - **"Everything on the server .213":** move the API runtime from SQL-04 to .213 (console+API on .213, DB on SQL-04, agent repoint to
   `https://10.8.2.213:5443`) → .181 really not needed. **Build/deploy artifacts are on D:\deploy (locally), not on .181.**
 - **Close HTTP 5050** on SQL-04 (HTTPS only) – NIS2.
+- **Activity log retention** – nothing calls `sp_PurgeActivityLog`; add `activity.retentionDays` to Settings and the call to the API.
+- **`Microsoft.AspNetCore.Authentication.Negotiate` 8.0.0** – the build reports NU1903 (known high-severity advisory); bump to current 8.0.x.
 - **Per-serial blocklist** + **blocking already-connected media** (the startup scan is half the way there).
 - **Hardening:** dedicated `USB-Guardian-Admins` instead of `SQL Admins2`, HTTPS console.
 - **Cleanup:** stray (untracked) `server/USBGuardianAPI/` (to be deleted).
@@ -277,5 +306,9 @@ re-signing on every change.
 |--------|-------|
 | `README.md` / `.en.md` | Functional overview, components, configuration, deployment |
 | `HANDOFF.md` / `.en.md` | This document – handoff + live state |
-| `docs/architecture.md` | Technical architecture, data flow, security layers |
-| `docs/auto-deploy-setup.md` | Setup of the deploy gMSA + GPO + scheduled task for auto-enrollment |
+| `docs/architecture.md` / `.en.md` | Technical architecture, data flow, security layers, activity log |
+| `docs/auto-deploy-setup.md` / `.en.md` | Setup of the deploy gMSAs (client and server) + GPO + tasks |
+| `docs/how-it-works.html` | Animation of the information flow (15 steps), CS/EN toggle |
+| `docs/mind-map.html` | Mind map of the system, CS/EN |
+| `docs/flowchart.html` | Flowchart of one medium's path (decision points), CS/EN |
+| `docs/management-summary.html` | **Management summary — one A4 portrait page**, print-ready, CS/EN |

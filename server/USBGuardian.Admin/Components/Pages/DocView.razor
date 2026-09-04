@@ -21,11 +21,14 @@ else
     // whitelist názvů → soubor (žádný path traversal)
     private static readonly Dictionary<string, string> Map = new(StringComparer.OrdinalIgnoreCase)
     {
-        ["architektura"] = "architecture.md",
-        ["handoff"]      = "HANDOFF.md",
-        ["handoff-en"]   = "HANDOFF.en.md",
-        ["readme"]       = "README.md",
-        ["readme-en"]    = "README.en.md",
+        ["architektura"]    = "architecture.md",
+        ["architektura-en"] = "architecture.en.md",
+        ["handoff"]         = "HANDOFF.md",
+        ["handoff-en"]      = "HANDOFF.en.md",
+        ["readme"]          = "README.md",
+        ["readme-en"]       = "README.en.md",
+        ["auto-deploy"]     = "auto-deploy-setup.md",
+        ["auto-deploy-en"]  = "auto-deploy-setup.en.md",
     };
 
     private string? _html;

@@ -40,9 +40,16 @@ Unapproved media are warned or blocked. Designed as a technical control for
 | 30 | **Auto-re-enable + reconciliation** – on blocking off / break-glass the agent restores previously blocked media; a now-approved medium is restored even while blocking is on | ✅ |
 | 31 | **Client service restart** (local console, agent self-restart) + **settings reload** (server console, AccessCache) | ✅ |
 | 32 | **Reliable enforcement (symmetry)** – disable blocking = return **everything at once** (exact `Enable-PnpDevice`, unplugged-media cleanup); re-enable = re-block **already-connected** unauthorized media; a newly approved medium applies **immediately after download** (whitelist cache invalidation); ✕ delete from catalog (DELETE grant); console error message unwrapped | ✅ |
+| 33 | **Health checks** – a checklist of checks (server and client) ticked off with running results and **CSV / HTML / PDF / TXT export**; **scheduled restart** of services (server and agent) | ✅ |
+| 34 | **Bank UI look** – switchable in Settings, dark/light without FOUC, survives navigation between pages | ✅ |
+| 35 | **Separate deploy accounts** – `gmsa-USBGdep$` (stations only) × `gmsa-USBGsrv$` (API server only) × console (admin nowhere); one identity no longer holds both the fleet and the server | ✅ |
+| 36 | **Updating a deployed agent** – `Update-Agent.cmd` (stop → wait for `STOPPED` → copy → verify `RUNNING`), **offline installer** in the package, **stable/beta channels**, **version archive** + rollback | ✅ |
+| 37 | **Activity log** – `ActivityLog`: heartbeats and the server's answers, incident batches received, whitelist publications, manual operator actions; API and console write into the same table, page with filters, live mode and CSV export | ✅ |
+| 38 | **Local console: local admin login** – a loopback token is a *network* token and for a local account Windows strips Administrators from it (`LocalAccountTokenFilterPolicy`) → the check now accepts a filtered token as well, and a refusal shows **who** the person was seen as | ✅ |
 | – | Close unencrypted HTTP 5050 (HTTPS only) | 🔜 NIS2 |
 | – | Per-serial **blocklist** + blocking of an already-connected device | 🔜 |
 | – | Signing certificate expiry monitoring | 🔜 |
+| – | **Activity-log retention** – `sp_PurgeActivityLog` exists but nothing calls it | 🔜 |
 
 ## Architecture
 
@@ -50,21 +57,29 @@ Three components, push model (agent → API), two-tier server (logic on the app 
 
 ```
 [Client station]                     [App server .213]            [DB server SQL-04]
-┌────────────────────┐               ┌────────────────────┐       ┌──────────────────┐
-│ Agent (.NET8 svc)  │               │ Admin console       │       │ SQL Server       │
-│  WMI detection     │  push  HTTPS  │ (Blazor :4200)      │ read/ │ DB USBGuardian   │
-│  whitelist check   ├──────────────►│  Overview/Stations  │ write │  Incidents       │
-│  warn / block      │   ┌───────────┤  AD sync ◄── AD     ├──────►│  Computers       │
-│  local console     │   │  push     │  Settings / Docs    │       │  WhitelistDevices│
-│  (loopback :5080)  │   │           └────────────────────┘       │  WhitelistVersions│
-└────────────────────┘   │           ┌────────────────────┐       └──────────────────┘
-                         └──────────►│ API (:5050/:5443)   ├──read/write──────▲
-                                     │  incident ingestion  │                  │
-                                     │  whitelist delivery   │──────────────────┘
-                                     └────────────────────┘
+┌────────────────────┐               ┌─────────────────────┐      ┌───────────────────┐
+│ Agent (.NET8 svc)  │               │ Admin console       │      │ SQL Server        │
+│  WMI detection     │  push  HTTPS  │ (Blazor :4200)      │ read/│ DB USBGuardian    │
+│  whitelist check   ├──────────────►│  Overview/Stations  │ write│  Incidents        │
+│  warn / block      │   ┌───────────┤  Activity (log)     ├─────►│  Computers        │
+│  local console     │   │  push     │  AD sync ◄── AD     │      │  WhitelistDevices │
+│  (loopback :5080)  │   │           │  Settings / Docs    │      │  WhitelistVersions│
+└─────────▲──────────┘   │           └─────────────────────┘      │  AppSettings      │
+          │              │           ┌─────────────────────┐      │  ActivityLog      │
+   install / update      └──────────►│ API (:5050/:5443)   ├─read/─└───────────────────┘
+   (tasks under gMSA)                │  incident ingestion │ write            ▲
+          │                          │  heartbeat + policy │                  │
+          └──────────────────────────┤  whitelist delivery │──────────────────┘
+                                     │  activity logging   │
+                                     └─────────────────────┘
 ```
 
-Details: [docs/architecture.md](docs/architecture.md). Handoff & live state: [HANDOFF.en.md](HANDOFF.en.md).
+The activity log (`ActivityLog`) is written by **both the API and the console into the same table** —
+agent traffic from one side, operator actions from the other, so the operation reads as one story.
+
+Details: [docs/architecture.en.md](docs/architecture.en.md). Handoff & live state: [HANDOFF.en.md](HANDOFF.en.md).
+Visually: [data-flow animation](docs/how-it-works.html) · [mind map](docs/mind-map.html) ·
+[flowchart](docs/flowchart.html) · [management summary (A4)](docs/management-summary.html).
 
 ## Components
 
@@ -101,10 +116,18 @@ dark/light toggle `axima.theme` without FOUC, print = light, status traffic-ligh
   = lockout-safe bootstrap), **e-mail** (SMTP relay/Direct Send + test) and **incident alerts**
   (interval), **agent auto-enrollment** (master switch + dry-run + **default for new PCs** + targets),
   **data retention** (how many days to keep incidents), AD sync / DB / build info.
+- **Health checks** – checks of the server and the clients: **the list of checks up front** and ticking them
+  off with running results (so it is visible that it works), **scheduled restart** of services,
+  **export** to CSV / HTML / PDF (print) / TXT.
+- **Activity** – the **operations log**: heartbeats (including what the server answered), incident batches
+  received, whitelist publications, manual deployments and station exclusions. Filters (period, level,
+  source, search), a **live** mode (3 s refresh) and CSV export. The source list comes from the data,
+  not from a fixed list.
 - **Database** – read-only overview of the DB content (table row counts, incident date range for checking
   retention, `AppSettings` dump, the last 20 incidents).
-- **Documentation** – hub + **printable HTML** pages (render `.md` via Markdig) +
-  **interactive animation** "How it works" (`/how-it-works.html`).
+- **Documentation** – hub + **printable HTML** pages (render `.md` via Markdig) + graphical outputs:
+  the **animation** "How it works", a **mind map**, a **flowchart** and a **management summary (A4)** —
+  all four bilingual (CS/EN toggle).
 
 Footer (service line per standard): **live clock + clickable commit hash + DB health + © Milan Trnka**.
 Contract **`GET /api/version`**.
@@ -133,11 +156,19 @@ automatically from the server (`new DirectoryEntry()`, nothing hardcoded). Recon
 
 ## Agent local admin console
 
-Optional (off by default), `localConsole.enabled` in `agent.config.local.json`. `HttpListener`
-on `127.0.0.1:5080`, **admin-only, read-only** – live agent state: **the list of approved devices (whitelist)**,
+Optional (`localConsole.enabled` in `agent.config.local.json`, off in the template). `HttpListener`
+on `127.0.0.1:5080`, **local admins only** – live agent state: **the list of approved devices (whitelist)**,
 whitelist status+version, **agent version (commit)**, WMI watchdog, queue, connected media and recent events.
-For functional verification and offline diagnostics. Uses `HttpListener` (not Kestrel) so the
-agent needs no ASP.NET Core runtime. No password needed (loopback + Windows auth + local admin only + read-only).
+Besides reading it offers three actions: **break-glass** (switch blocking off temporarily while offline),
+**return all media now** and **restart the service**. Uses `HttpListener` (not Kestrel) so the agent needs no
+ASP.NET Core runtime. No password needed (loopback + Windows auth + Administrators membership).
+
+> **Local admin login (gotcha):** a request to `127.0.0.1` is a **network** logon as far as Windows is
+> concerned, and for a local account `LocalAccountTokenFilterPolicy` strips the Administrators group from
+> that token (it stays deny-only) → `IsInRole` says NO even though the person *is* an admin. The check
+> therefore accepts a **filtered token** as well: membership serves as **authorization**, not as the source
+> of rights — the action itself is performed by the service running as SYSTEM. A refusal is not a bare 403
+> but a page showing **who** the person was seen as and what is required.
 
 ## Encrypted agent ↔ API comms (self-contained TLS)
 
@@ -167,7 +198,27 @@ Stations without an agent are visible under **Stations** (the "Missing agent" ti
 - **Auto-enrollment (the console deploys on its own):** `AgentDeployService`, after AD sync, finds stations without an agent,
   applies the **default `deploy.defaultEnroll` + exceptions** (`includeHosts`/`excludeHosts` managed in Stations) and
   (in live mode) writes the targets into `deploy.targetsFile`; the install is performed by a **scheduled task on .213 under a
-  dedicated gMSA** (least-privilege). **Default OFF + dry-run.** Account setup: [docs/auto-deploy-setup.md](docs/auto-deploy-setup.md).
+  dedicated gMSA** (least-privilege). **Default OFF + dry-run.** Account setup: [docs/auto-deploy-setup.en.md](docs/auto-deploy-setup.en.md).
+- **Updating a deployed agent:** `scripts\Update-Agent.cmd <SOURCE> <HOST|FILE> [SERVICE]` – stops the service,
+  **waits for `STOPPED`**, copies, and **verifies `RUNNING`**. Without that the running `.exe` is locked, only part
+  of the files is overwritten and the station is left with a **mix of versions** while the deploy reports success.
+  A station without the service is skipped.
+- **API deployment:** `scripts\Deploy-Api.cmd <SOURCE> <HOST> <TARGET> [SERVICE]` – the same pattern (stop → wait →
+  copy → verify), run as a task under the **server** gMSA. The client deploy account never touches the server.
+- **Channels and rollback:** the package is archived per version (`stable` / `beta`), so a previous version can be
+  deployed. The package also carries an **offline installer** (`Install-Agent.cmd` / `Uninstall-Agent.cmd`) for a
+  station the deploy channel cannot reach — including cleaning up after itself.
+
+> **Batch files (.cmd), not PowerShell:** the deployment steps are `.cmd` because they are not subject to
+> `AllSigned` from GPO — changing a deploy step therefore does not require re-signing.
+
+**Separate deploy identities (since 09/2026):** one account must not hold both the fleet and the server.
+
+| Role | Account | Where it is an admin |
+|---|---|---|
+| Clients (auto-enrollment, update) | `gmsa-USBGdep$` | stations only |
+| Server (API deployment) | `gmsa-USBGsrv$` | the API server only |
+| Console (the running app) | app server machine account | **nowhere** |
 
 > **AXIMA environment:** PS scripts running on machines **must be signed** (execution policy AllSigned via GPO)
 > with the prod cert `CN=powershell.axinetwork.loc`, and the publisher must be in `LocalMachine\TrustedPublisher`
@@ -213,6 +264,12 @@ SQL scripts in `database/` (run in order):
 | `05_adpath.sql` | AdPath (AD path) |
 | `06_appsettings.sql` | AppSettings (central settings: enforcement, access, e-mail, retention, deploy) + grant; `Value` = `NVARCHAR(MAX)` (long lists) |
 | `07_whitelist_publish.sql` | WhitelistVersions: `Json` (signed blob) + `Signature` → `NVARCHAR(MAX)` (publishing workflow) |
+| `08_deploy_ignored.sql` | permanent exclusion of a station from deployment (bulk actions do not override it) |
+| `09_activity_log.sql` | `ActivityLog` (operations log) + indexes + `sp_PurgeActivityLog` (cleanup in batches of 5000) |
+
+Grants are deliberately **not** in the scripts (portability – no company accounts in the repo). The activity
+log needs `SELECT, INSERT ON dbo.ActivityLog` for both the console and the API accounts, and
+`EXECUTE ON dbo.sp_PurgeActivityLog` for the API.
 
 ## Quick start (development)
 
@@ -260,13 +317,18 @@ GRANT INSERT, UPDATE ON dbo.WhitelistVersions TO [DOMENA\B-S-W-MIKOS$];         
 
 ## Security
 
-- RSA-4096 signed whitelist – the agent rejects a forged whitelist (private key **never on the server**).
-- TLS validation of the server certificate (can be disabled for development).
+- RSA-signed whitelist – the agent rejects a forged catalog (fail-secure: what it cannot verify, it does not use).
+  **A deliberate trade-off:** the signing key **is on the app server**, because publishing has to be automatic —
+  signing offline by hand after every catalog change proved operationally unworkable. It is the tool's own
+  internal key, not a company CA, and agents hold only the public part.
+- TLS with **thumbprint pinning** – encrypted and authenticated without a certificate authority
+  (can be disabled for development only).
 - Windows Auth (Kerberos) – agents via machine account; console via admin group / whitelist.
 - gMSA for SQL – no password in configuration.
-- Least-privilege SQL grant for the console (read everything, write only Computers + whitelist).
+- Least-privilege SQL grant for the console (read everything, write only where it actually writes).
+- **Separate deploy identities** – compromising one does not reach both tiers (fleet × server).
 - `*.local.json` gitignored.
-- Agent local console and the server one: loopback / admin-only / read-only per role.
+- Agent local console: loopback, local admins only, writes limited to break-glass and a service restart.
 
 ## Repo structure
 
@@ -287,10 +349,13 @@ usb-guardian/
 │       ├── Notifications/     # IncidentAlertService + EmailSender
 │       └── appsettings.local.json.example
 ├── tools/WhitelistSigner/    # offline RSA whitelist signing (generate/sign/verify)
-├── database/                 # 01–07 SQL scripts
+├── database/                 # 01–09 SQL scripts
 ├── scripts/                  # certificates, Build-AgentPackage, watchdog, ToastHelper,
-│                             #   Install/Uninstall-Agent, Deploy-AgentFleet, New-DeployGmsa, tasks/
-├── docs/architecture.md, docs/auto-deploy-setup.md, docs/how-it-works.html (animation)
+│                             #   Install/Uninstall-Agent, Deploy-AgentFleet, Update-Agent.cmd,
+│                             #   Deploy-Api.cmd, Set/Archive-AgentVersion, New-DeployGmsa, tasks/
+├── docs/                     # architecture(.en).md, auto-deploy-setup(.en).md, oponentura(.en).md,
+│                             #   how-it-works.html (animation), mind-map.html, flowchart.html,
+│                             #   management-summary.html (A4 one-pager)
 ├── README.md / README.en.md
 └── HANDOFF.md / HANDOFF.en.md
 ```

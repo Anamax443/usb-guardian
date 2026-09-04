@@ -44,8 +44,15 @@
     <None Include="..\..\HANDOFF.md"           Link="docs\HANDOFF.md"><CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory></None>
     <None Include="..\..\HANDOFF.en.md"        Link="docs\HANDOFF.en.md"><CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory></None>
     <None Include="..\..\docs\architecture.md" Link="docs\architecture.md"><CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory></None>
-    <!-- Interaktivní animace fungování systému – servírovaná jako statický soubor na /how-it-works.html -->
+    <None Include="..\..\docs\architecture.en.md" Link="docs\architecture.en.md"><CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory></None>
+    <None Include="..\..\docs\auto-deploy-setup.md" Link="docs\auto-deploy-setup.md"><CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory></None>
+    <None Include="..\..\docs\auto-deploy-setup.en.md" Link="docs\auto-deploy-setup.en.md"><CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory></None>
+    <!-- Grafické výstupy – statické soubory servírované z kořene konzole.
+         Každý má v hlavičce přepínač CS/EN, takže se nebundlují dvě jazykové varianty. -->
     <None Include="..\..\docs\how-it-works.html" Link="wwwroot\how-it-works.html"><CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory></None>
+    <None Include="..\..\docs\mind-map.html" Link="wwwroot\mind-map.html"><CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory></None>
+    <None Include="..\..\docs\flowchart.html" Link="wwwroot\flowchart.html"><CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory></None>
+    <None Include="..\..\docs\management-summary.html" Link="wwwroot\management-summary.html"><CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory></None>
   </ItemGroup>
 
   <!-- Spolehlivé zaražení git commitu do assembly (patička konzole = kontrola aktuálnosti nasazení).

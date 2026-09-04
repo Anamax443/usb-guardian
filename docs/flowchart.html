@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>USB Guardian — vývojový diagram</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#161b22; --line:#30363d; --ink:#e6edf3; --muted:#8b949e;
+    --brand:#3b82f6; --ok:#22c55e; --warn:#f59e0b; --bad:#ef4444; --log:#f472b6;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:Segoe UI,Arial,sans-serif;background:var(--bg);color:var(--ink)}
+  header{padding:16px 24px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+  header h1{font-size:18px;margin:0}
+  header .tag{font-size:12px;color:var(--muted)}
+  .lang{margin-left:auto;display:flex;gap:6px}
+  .lang button{font:inherit;font-size:12px;padding:4px 10px;border:1px solid var(--line);background:var(--panel);color:var(--muted);border-radius:6px;cursor:pointer}
+  .lang button.on{border-color:var(--brand);color:var(--ink);background:rgba(59,130,246,.12)}
+  .stage{padding:24px;overflow:auto}
+  svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .box{fill:var(--panel);stroke:var(--line);stroke-width:1.5}
+  .box.start{fill:#11213a;stroke:var(--brand)}
+  .box.end{fill:#0f2a1b;stroke:var(--ok)}
+  .box.bad{fill:#2a1416;stroke:var(--bad)}
+  .box.warn{fill:#2a2110;stroke:var(--warn)}
+  .box.log{fill:#2a1524;stroke:var(--log)}
+  .dec{fill:#1b2333;stroke:var(--brand);stroke-width:1.5}
+  .t{fill:var(--ink);font-size:13px;font-weight:600;text-anchor:middle;dominant-baseline:middle}
+  .s{fill:var(--muted);font-size:11px;text-anchor:middle;dominant-baseline:middle}
+  .lbl{fill:var(--muted);font-size:11px;text-anchor:middle}
+  .ln{stroke:var(--line);stroke-width:1.8;fill:none;marker-end:url(#arw)}
+  .ln.no{stroke:#8b6b3a}
+  .ln.yes{stroke:#3a7a52}
+  .ln.dash{stroke-dasharray:5 4}
+  @media print{
+    body{background:#fff;color:#111}
+    header,.lang{display:none}
+    .box{fill:#fff;stroke:#666}
+    .box.start,.box.end,.box.bad,.box.warn,.box.log,.dec{fill:#f4f4f4;stroke:#666}
+    .t{fill:#111} .s,.lbl{fill:#555}
+    .stage{padding:0}
+    @page{size:A3 portrait;margin:10mm}
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>USB Guardian — <span data-cs="vývojový diagram" data-en="flowchart"></span></h1>
+  <span class="tag" data-cs="cesta jednoho média od zapojení po auditní stopu" data-en="the path of one medium from plug-in to audit trail"></span>
+  <div class="lang"><button id="lang-cs" class="on">Čeština</button><button id="lang-en">English</button></div>
+</header>
+
+<div class="stage">
+<svg viewBox="0 0 900 1330" role="img">
+  <defs>
+    <marker id="arw" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#6b7684"></path>
+    </marker>
+  </defs>
+
+  <!-- 1. start -->
+  <rect class="box start" x="330" y="20" width="240" height="52" rx="26"></rect>
+  <text class="t" x="450" y="40" data-cs="Uživatel připojí médium" data-en="A user plugs in a medium"></text>
+  <text class="s" x="450" y="58" data-cs="USB flash · SD karta · externí disk" data-en="USB flash · SD card · external drive"></text>
+  <path class="ln" d="M450 72 L450 108"></path>
+
+  <!-- 2. identifikace -->
+  <rect class="box" x="310" y="110" width="280" height="56" rx="8"></rect>
+  <text class="t" x="450" y="130" data-cs="Agent zjistí identitu média" data-en="The agent reads the medium's identity"></text>
+  <text class="s" x="450" y="149" data-cs="VID : PID : sériové číslo (WMI)" data-en="VID : PID : serial number (WMI)"></text>
+  <path class="ln" d="M450 166 L450 200"></path>
+
+  <!-- 3. rozhodnutí whitelist -->
+  <path class="dec" d="M450 200 L640 260 L450 320 L260 260 Z"></path>
+  <text class="t" x="450" y="253" data-cs="Je médium na whitelistu?" data-en="Is the medium whitelisted?"></text>
+  <text class="s" x="450" y="272" data-cs="podepsaný katalog, kopie serveru" data-en="signed catalog, a copy of the server's"></text>
+
+  <!-- ANO doprava -->
+  <path class="ln yes" d="M640 260 L742 260"></path>
+  <text class="lbl" x="690" y="250" data-cs="ANO" data-en="YES"></text>
+  <rect class="box end" x="744" y="232" width="140" height="56" rx="8"></rect>
+  <text class="t" x="814" y="252" data-cs="Médium funguje" data-en="The medium works"></text>
+  <text class="s" x="814" y="270" data-cs="tichý audit záznam" data-en="silent audit record"></text>
+
+  <!-- NE dolů -->
+  <path class="ln no" d="M450 320 L450 356"></path>
+  <text class="lbl" x="470" y="342" data-cs="NE" data-en="NO"></text>
+
+  <!-- 4. rozhodnutí vynucování -->
+  <path class="dec" d="M450 356 L640 416 L450 476 L260 416 Z"></path>
+  <text class="t" x="450" y="409" data-cs="Je zapnuté vynucování?" data-en="Is enforcement switched on?"></text>
+  <text class="s" x="450" y="428" data-cs="politika ze serveru (heartbeat)" data-en="policy from the server (heartbeat)"></text>
+
+  <!-- NE = jen varování -->
+  <path class="ln no" d="M260 416 L158 416"></path>
+  <text class="lbl" x="210" y="406" data-cs="NE" data-en="NO"></text>
+  <rect class="box warn" x="16" y="388" width="142" height="56" rx="8"></rect>
+  <text class="t" x="87" y="408" data-cs="Jen varování" data-en="Warning only"></text>
+  <text class="s" x="87" y="426" data-cs="toast uživateli, médium jede" data-en="toast to the user, medium runs"></text>
+
+  <!-- ANO dolů -->
+  <path class="ln yes" d="M450 476 L450 512"></path>
+  <text class="lbl" x="470" y="498" data-cs="ANO" data-en="YES"></text>
+
+  <!-- 5. rozhodnutí break-glass -->
+  <path class="dec" d="M450 512 L640 572 L450 632 L260 572 Z"></path>
+  <text class="t" x="450" y="565" data-cs="Běží break-glass?" data-en="Is break-glass active?"></text>
+  <text class="s" x="450" y="584" data-cs="lokální admin, dočasně, max 72 h" data-en="local admin, temporary, max 72 h"></text>
+
+  <!-- ANO = nechat běžet -->
+  <path class="ln yes" d="M640 572 L742 572"></path>
+  <text class="lbl" x="690" y="562" data-cs="ANO" data-en="YES"></text>
+  <rect class="box warn" x="744" y="544" width="140" height="56" rx="8"></rect>
+  <text class="t" x="814" y="564" data-cs="Neblokovat" data-en="Do not block"></text>
+  <text class="s" x="814" y="582" data-cs="zruší se při spojení se serverem" data-en="cleared on the next server sync"></text>
+
+  <!-- NE = blok -->
+  <path class="ln no" d="M450 632 L450 668"></path>
+  <text class="lbl" x="470" y="654" data-cs="NE" data-en="NO"></text>
+  <rect class="box bad" x="330" y="668" width="240" height="56" rx="8"></rect>
+  <text class="t" x="450" y="688" data-cs="Zablokovat médium" data-en="Block the medium"></text>
+  <text class="s" x="450" y="706" data-cs="Disable-PnpDevice + toast uživateli" data-en="Disable-PnpDevice + toast to the user"></text>
+
+  <!-- sběr do incidentu -->
+  <path class="ln" d="M450 724 L450 760"></path>
+  <path class="ln dash" d="M87 444 L87 742 L446 742"></path>
+  <path class="ln dash" d="M814 600 L814 742 L454 742"></path>
+  <path class="ln dash" d="M814 288 L814 220 L890 220 L890 742 L456 742"></path>
+
+  <rect class="box" x="310" y="760" width="280" height="56" rx="8"></rect>
+  <text class="t" x="450" y="780" data-cs="Zápis události do fronty" data-en="The event is written to a queue"></text>
+  <text class="s" x="450" y="798" data-cs="na disk stanice + skutečný uživatel (WTS)" data-en="to the station's disk + the real user (WTS)"></text>
+  <path class="ln" d="M450 816 L450 852"></path>
+
+  <!-- odeslání -->
+  <path class="dec" d="M450 852 L660 912 L450 972 L240 912 Z"></path>
+  <text class="t" x="450" y="905" data-cs="Je server dostupný?" data-en="Is the server reachable?"></text>
+  <text class="s" x="450" y="924" data-cs="HTTPS s pinningem otisku" data-en="HTTPS with thumbprint pinning"></text>
+
+  <!-- NE = fronta čeká, smyčka -->
+  <path class="ln no" d="M240 912 L138 912"></path>
+  <text class="lbl" x="190" y="902" data-cs="NE" data-en="NO"></text>
+  <rect class="box" x="16" y="884" width="122" height="56" rx="8"></rect>
+  <text class="t" x="77" y="904" data-cs="Fronta čeká" data-en="The queue waits"></text>
+  <text class="s" x="77" y="922" data-cs="nic se neztratí" data-en="nothing is lost"></text>
+  <path class="ln dash" d="M77 884 L77 788 L306 788"></path>
+
+  <!-- ANO -->
+  <path class="ln yes" d="M450 972 L450 1008"></path>
+  <text class="lbl" x="470" y="994" data-cs="ANO" data-en="YES"></text>
+
+  <rect class="box" x="290" y="1008" width="320" height="56" rx="8"></rect>
+  <text class="t" x="450" y="1028" data-cs="API přijme dávku a uloží ji do databáze" data-en="The API accepts the batch and stores it in the DB"></text>
+  <text class="s" x="450" y="1046" data-cs="202 Accepted → fronta v API → SQL" data-en="202 Accepted → in-API queue → SQL"></text>
+  <path class="ln" d="M450 1064 L450 1100"></path>
+
+  <!-- deník -->
+  <rect class="box log" x="640" y="1008" width="244" height="56" rx="8"></rect>
+  <text class="t" x="762" y="1028" data-cs="Deník provozu" data-en="Activity log"></text>
+  <text class="s" x="762" y="1046" data-cs="heartbeat, příjem dávky, zásah operátora" data-en="heartbeat, batch received, operator action"></text>
+  <path class="ln dash" d="M610 1036 L636 1036"></path>
+
+  <!-- konzole -->
+  <rect class="box" x="290" y="1100" width="320" height="56" rx="8"></rect>
+  <text class="t" x="450" y="1120" data-cs="Konzole: Přehled · Aktivita · exporty" data-en="Console: Overview · Activity · exports"></text>
+  <text class="s" x="450" y="1138" data-cs="filtry, kumulace, CSV a report pro vedení" data-en="filters, grouping, CSV and a management report"></text>
+  <path class="ln" d="M450 1156 L450 1192"></path>
+
+  <!-- konec -->
+  <rect class="box end" x="310" y="1192" width="280" height="56" rx="28"></rect>
+  <text class="t" x="450" y="1212" data-cs="Doložitelná auditní stopa" data-en="A defensible audit trail"></text>
+  <text class="s" x="450" y="1230" data-cs="kdo, kdy, jaké médium, co se stalo" data-en="who, when, which medium, what happened"></text>
+
+  <!-- postranní tok whitelistu -->
+  <rect class="box" x="16" y="150" width="200" height="70" rx="8"></rect>
+  <text class="t" x="116" y="172" data-cs="Admin schválí médium" data-en="An admin approves a medium"></text>
+  <text class="s" x="116" y="191" data-cs="konzole vydá a podepíše verzi" data-en="the console publishes and signs a version"></text>
+  <text class="s" x="116" y="208" data-cs="agent ji stáhne do 2 minut" data-en="the agent pulls it within 2 minutes"></text>
+  <path class="ln dash" d="M216 185 L250 185 L250 245 L256 245"></path>
+
+  <text class="s" x="450" y="1290" data-cs="Přerušovaná čára = souběžný nebo zpětný tok. Tisk: Ctrl+P (A3 na výšku)."
+                                  data-en="Dashed line = a parallel or feedback flow. Print: Ctrl+P (A3 portrait)."></text>
+</svg>
+</div>
+
+<script>
+(function(){
+  "use strict";
+  var LANG='cs';
+  function apply(){
+    document.querySelectorAll('[data-cs]').forEach(function(e){ e.textContent=e.getAttribute('data-'+LANG); });
+    document.documentElement.lang=LANG;
+    document.getElementById('lang-cs').classList.toggle('on', LANG==='cs');
+    document.getElementById('lang-en').classList.toggle('on', LANG==='en');
+  }
+  document.getElementById('lang-cs').onclick=function(){ LANG='cs'; apply(); };
+  document.getElementById('lang-en').onclick=function(){ LANG='en'; apply(); };
+  apply();
+})();
+</script>
+</body>
+</html>
