@@ -26,7 +26,7 @@ Serverová konzole agreguje data, drží inventář stanic z AD a ukazuje, kam c
 | **Autorizace konzole** | AD `DOMENA\IT-Admins` + whitelist `DOMENA\it-admin` (+ DB seznam z Nastavení) |
 | **Šifrování agent↔API** | HTTPS + **pinning otisku** (bez CA) — ověřeno end-to-end (heartbeat OK z PC-01) |
 | **AD sync** | zapnutý 60 min + on-demand; **213 v AD, ~212 bez agenta** |
-| **Live commit** (04.09.2026 10:00) | **konzole `329a2a5`** · **API `5431dce`** · **agent `cb8ef1d` na všech 4 stanicích** (kanál beta i stable = `cb8ef1d`; archiv drží `b0e1a0d`, `560722b`, `f2bb194` pro návrat). Deník ověřen end-to-end: heartbeaty čtyř stanic padají do `ActivityLog` a jsou vidět na stránce Aktivita. Stamp spolehlivý = footer = git HEAD |
+| **Live commit** (04.09.2026 13:08) | **konzole `06b67e9`** · **API `5431dce`** (nezměněno) · **agent beta `924b9b8`** (BARTKOVAJW11, CERNYSW11, TRNKAMW11N) · **agent stable `cb8ef1d`** (PC-01/TRNKAMW11, zbytek fleetu). Lokální konzole ověřena end-to-end na CERNYSW11 (admin i běžný uživatel) — viz 5.11. Archiv drží i `3473a69`, `625329c`, `b0e1a0d`, `560722b`, `f2bb194` pro návrat |
 | **Rozvoz agenta – osvědčený postup** | balíček → archiv `…\USBGuardianAgentVersions\<commit>` → **beta na jednu stanici** (dočasně přepsaný `update-beta.txt`) → ověřit → beta na zbytek → teprve pak **stable**. Log `…\deploy\update-agent.log`; „Agent verze" v konzoli se projeví až dalším heartbeatem (≤2 min), takže hned po rozvozu tam ještě chvíli svítí stará verze |
 | **Konzole – stránky** | Přehled (filtr+kumulace+řazení, kapacita, **export CSV + manažerský report s grafy**), Stanice (AD inventář + „Zmlklo agentů" + „Vyžádat data" + **Nasazení / hromadné vyřadit-zařadit**), Whitelist (**kapacita + filtr katalogu + auto-publish podepsané verze**), Nastavení (vynucování/přístup/email/alerty/dohled/auto-enrollment+default PC/retence/**Údržba: reload nastavení**), **Databáze**, **Kontroly** (health checks), Dokumentace (+HTML animace) |
 | **Enforcement (F1-3)** | **whitelist 1:1** (auto-podpis serverem, interní RSA klíč na APP_SERVER) → **vynucování** server→agent (`policy.enforce` v heartbeatu) → **break-glass** (lokální konzole 5080, offline, logováno, zruší se při sync) + **auto-re-enable** + reconciliace s whitelistem. Lokální konzole: restart služby, break-glass, seznam whitelistu |
@@ -304,6 +304,40 @@ už uživateli vysvětlí, na co kouká, místo holé 403.
 **Opravena pojistka z `3c8ba3f`:** v `Build-AgentPackage.ps1` byl v cestě ke konfiguraci místo `\a` uložený
 skutečný bajt BEL (`Config␇gent.config.local.json`), takže `Test-Path` byl vždy `false` a kontrola obsahu se
 nikdy nespustila — skript jen hlásil „balíček nemá config". Po opravě kontrola na reálném balíčku projde.
+
+### 5.11 Lokální konzole: zaseklý port po restartu → chybné rozpoznání admina (04.09.2026)
+Kolega na CERNYSW11 hlásil, že se lokální konzole (`127.0.0.1:5080`) donekonečna načítá (bílá stránka,
+točící se kolečko). Vyšetření odhalilo řetěz nezávislých problémů, opravených postupně:
+
+1. **Agent nepsal do Event Logu vůbec** — `ClearProviders()` v `Program.cs` smazal i `EventLog` provider,
+   takže služba pod SYSTEM po sobě nenechávala žádnou stopu. Přidán `AddEventLog` (`logging.eventLogLevel`,
+   default `Warning`, ať minutový sync log nezaplaví) + hlášky lokální konzole vždy na Information.
+2. **Instalace nechávala běžet starý proces.** `Install-Agent.ps1` čekal na `Stopped` v `try/catch`, takže se
+   timeout tiše polkl a kopírovalo se i s běžícím procesem — nová instance pak nezabrala port a lokální
+   konzole zůstala mrtvá do dalšího restartu. Oprava: skutečné ověření zastavení, v krajním případě tvrdé
+   ukončení procesu, ověření `RUNNING` po startu + založení Event Log zdroje.
+3. **Lokální konzole se po obsazeném portu vzdávala napoprvé** — přidán retry (6× po 5 s), ať přežije
+   krátké okno, kdy port ještě drží dobíhající starý proces.
+4. **`Archive-AgentVersion.cmd` / `Set-AgentVersion.cmd` psaly log do `C:\ProgramData\USBGuardian\deploy`**
+   — adresář ACL zamčený na `SYSTEM`/`Administrators` (drží ho běžící agent). `mkdir` tiše selhal, přesměrování
+   do neexistující cesty spadlo na obrazovku, ale skript i tak vypsal „HOTOVO", i když se nezkopírovalo nic.
+   Log přesunut vedle archivu (`%ARCH%\_logs`), přidána tvrdá kontrola po kopii.
+5. **Rozvoz bety byl jen ruční (RDP + `schtasks /Run`).** Přidáno tlačítko „⇪ Rozvézt betu na vzorek"
+   v Nastavení (`DeployTrigger.SpustBetuAsync`) a pojistka `BetaRolloutService` — hlídá `VERSION.txt` v
+   beta kanálu, a když se operátor nestihne, po intervalu (default 30 min, nastavitelné) rozveze sám.
+6. **Provozní past (ne bug):** `schtasks /Run` spuštěné dřív, než `Set-AgentVersion.cmd` dopíše `VERSION.txt`,
+   rozveze ještě PŘEDCHOZÍ commit — beze slova o chybě. Zjištěno porovnáním časů v logu (`Last Run Time` tasku
+   vs. časové razítko `VERSION.txt`). Pořadí: archivovat → nastavit kanál → **teprve pak** spustit rozvoz.
+7. **Skutečný nález u cernyse:** i po ověřeném restartu (interaktivní token správně nesl `Administrators`
+   jako `Enabled`) konzole pořád odmítala. Nová diagnostika na stránce odmítnutí (syrový výpis skupin
+   z tokenu) ukázala, že **síťový NTLM token přes loopback `Administrators` nenesl vůbec** — ne jen jako
+   deny-only (to řešila starší oprava `b0e1a0d`), skupina tam chyběla úplně. `IsLocalAdmin` má proto třetí,
+   spolehlivý krok: přímý dotaz na místní SAM (`System.DirectoryServices.AccountManagement`,
+   `GroupPrincipal.GetMembers(recursive: true)`), nezávislý na tom, co si zrovna nese konkrétní typ přihlášení.
+
+**Ověřeno živě:** CERNYSW11 na `924b9b8` ukazuje cernysovi plnou admin konzoli (WHITELIST, WMI MONITORING,
+VYNUCOVÁNÍ, SLUŽBA, PLÁNOVANÝ RESTART) — dřív viděl jen věčné načítání, pak (po dřívější opravě `cb8ef1d`)
+alespoň zjednodušenou uživatelskou stránku, teď správně plný přístup podle skutečného členství ve skupině.
 
 ### 5.5 Roadmapa (pending)
 - **Monitoring expirace podpisového certu** – `CN=powershell.domena.loc` platí do 2028-06-17; alert e-mailem z konzole.

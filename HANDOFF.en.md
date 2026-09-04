@@ -26,7 +26,7 @@ The server console aggregates data, keeps a station inventory from AD and shows 
 | **Console authorization** | AD `DOMENA\IT-Admins` + whitelist `DOMENA\it-admin` (+ DB list from Settings) |
 | **Agent↔API encryption** | HTTPS + **thumbprint pinning** (no CA) — verified end-to-end (heartbeat OK from PC-01) |
 | **AD sync** | enabled 60 min + on-demand; **213 in AD, ~212 without agent** |
-| **Live commit** (2026-09-04 10:00) | **console `329a2a5`** · **API `5431dce`** · **agent `cb8ef1d` on all 4 stations** (both the beta and stable channels = `cb8ef1d`; the archive keeps `b0e1a0d`, `560722b`, `f2bb194` for a rollback). Activity log verified end-to-end: heartbeats from four stations land in `ActivityLog` and show on the Activity page. Reliable stamp = footer = git HEAD |
+| **Live commit** (2026-09-04 13:08) | **console `06b67e9`** · **API `5431dce`** (unchanged) · **agent beta `924b9b8`** (BARTKOVAJW11, CERNYSW11, TRNKAMW11N) · **agent stable `cb8ef1d`** (PC-01/TRNKAMW11, rest of the fleet). Local console verified end-to-end on CERNYSW11 (admin and regular user) — see 5.11. Archive also keeps `3473a69`, `625329c`, `b0e1a0d`, `560722b`, `f2bb194` for a rollback |
 | **Agent rollout – the routine that works** | package → archive `…\USBGuardianAgentVersions\<commit>` → **beta to a single station** (temporarily overwritten `update-beta.txt`) → verify → beta to the rest → only then **stable**. Log `…\deploy\update-agent.log`; the console's "Agent version" only catches up on the next heartbeat (≤2 min), so right after a rollout it still shows the old one |
 | **Console – pages** | Overview (filter+aggregation+sort, capacity, **CSV export + manager report with charts**), Stations (AD inventory + "Agents gone silent" + "Request data" + **Deployment / bulk exclude-include**), Whitelist (**capacity + catalog filter + auto-published signed version**), Settings (enforcement/access/email/alerts/monitoring/auto-enrollment+default PC/retention/**Maintenance: reload settings**), **Database**, **Health checks**, Documentation (+HTML animation) |
 | **Enforcement (P1-3)** | **whitelist 1:1** (server-side auto-sign, internal RSA key on APP_SERVER) → **enforcement** server→agent (`policy.enforce` in heartbeat) → **break-glass** (local console 5080, offline, logged, cleared on sync) + **auto-re-enable** + whitelist reconciliation. Local console: service restart, break-glass, whitelist list |
@@ -284,6 +284,46 @@ is weaker: a rejected login now explains what the person is looking at instead o
 **Guard from `3c8ba3f` fixed:** `Build-AgentPackage.ps1` held a real BEL byte instead of `\a` in the config path
 (`Config␇gent.config.local.json`), so `Test-Path` was always `false` and the content check never ran — the script
 only ever reported "package has no config". After the fix the check passes on a real package.
+
+### 5.11 Local console: port stuck after restart → wrong admin detection (2026-09-04)
+A colleague on CERNYSW11 reported the local console (`127.0.0.1:5080`) loading forever (white page, spinner).
+Investigation uncovered a chain of independent problems, fixed one by one:
+
+1. **The agent wrote nothing to the Event Log at all** — `ClearProviders()` in `Program.cs` also removed the
+   `EventLog` provider, so the SYSTEM-run service left no trace of itself anywhere. Added `AddEventLog`
+   (`logging.eventLogLevel`, default `Warning` so the per-minute sync doesn't flood it) + local-console
+   messages always at Information.
+2. **The install left the old process running.** `Install-Agent.ps1` waited for `Stopped` inside a
+   `try/catch`, so the timeout was silently swallowed and the copy proceeded with the old process still
+   alive — the new instance then couldn't bind the port and the local console stayed dead until the next
+   restart. Fix: a real stop-status check, a hard process kill as a last resort, a `RUNNING` check after
+   start, and registering the Event Log source.
+3. **The local console gave up on the first busy-port attempt** — added a retry (6× at 5 s) so it survives
+   the brief window where a dying old process still holds the port.
+4. **`Archive-AgentVersion.cmd` / `Set-AgentVersion.cmd` wrote their log into `C:\ProgramData\USBGuardian\deploy`**
+   — a folder ACL-locked to `SYSTEM`/`Administrators` (owned by the running agent). `mkdir` silently failed,
+   the redirect into the missing path spilled an error onto the screen, yet the script still printed "DONE"
+   even though nothing was actually copied. Log moved next to the archive (`%ARCH%\_logs`), added a hard
+   post-copy check.
+5. **Rolling out a beta build was manual only (RDP + `schtasks /Run`).** Added a "⇪ Roll out beta to the
+   sample" button in Settings (`DeployTrigger.SpustBetuAsync`) plus a `BetaRolloutService` safety net —
+   watches the beta channel's `VERSION.txt` and, if the operator doesn't get to it, rolls it out itself
+   after an interval (default 30 min, configurable).
+6. **An operational trap (not a bug):** running `schtasks /Run` before `Set-AgentVersion.cmd` finishes
+   writing `VERSION.txt` rolls out the PREVIOUS commit — silently, no error. Found by comparing the task's
+   `Last Run Time` against the `VERSION.txt` timestamp in the log. Correct order: archive → set the channel
+   → **only then** trigger the rollout.
+7. **The real finding for cernys:** even after a confirmed restart (his interactive token correctly carried
+   `Administrators` as `Enabled`), the console still refused him. New diagnostics on the refusal page (a raw
+   dump of the token's groups) showed the **network NTLM token over loopback didn't carry `Administrators`
+   at all** — not just deny-only (which the earlier `b0e1a0d` fix already covered), the group was completely
+   absent. `IsLocalAdmin` now has a third, reliable step: a direct query against the local SAM
+   (`System.DirectoryServices.AccountManagement`, `GroupPrincipal.GetMembers(recursive: true)`), independent
+   of whatever a particular logon type's token happens to carry.
+
+**Verified live:** CERNYSW11 on `924b9b8` now shows cernys the full admin console (WHITELIST, WMI MONITORING,
+ENFORCEMENT, SERVICE, PLANNED RESTART) — previously he saw only an endless load, then (after the earlier
+`cb8ef1d` fix) at best the simplified user page; now correct full access matching his real group membership.
 
 ### 5.5 Roadmap (pending)
 - **Monitoring of signing cert expiry** – `CN=powershell.domena.loc` valid until 2028-06-17; alert via e-mail from the console.
