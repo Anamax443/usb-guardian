@@ -173,8 +173,8 @@ incidenty si ukládal do fronty (7 souborů, nejstarší 02.07.), ale na server 
 nikde neřekla nahlas — dlaždice „Zmlklo agentů" ukazovala `1` a nikdo se nekoukl. Po ručním startu služby se fronta
 sama dosypala.
 
-**Kontroly stavu (nová stránka `/kontroly`, `Health/HealthService.cs`):** 14 read-only kontrol ve třech skupinách —
-*Sběr dat* (databáze, **dostupnost API**, **stáří nejnovějšího incidentu**, zmlklí agenti, pokrytí stanic),
+**Kontroly stavu (nová stránka `/kontroly`, `Health/HealthService.cs`):** 15 read-only kontrol ve třech skupinách —
+*Sběr dat* (databáze, **dostupnost API**, **fronta incidentů (spool)**, **stáří nejnovějšího incidentu**, zmlklí agenti, pokrytí stanic),
 *Whitelist a politika* (aktivní verze / podpis / expirace, katalog vs. publikace, podpisový klíč, vynucování),
 *Provoz a údržba* (e-mail, retence, AD sync, auto-enrollment, plánovaný restart, shoda verzí konzole/API/agentů).
 Každá kontrola vrací **co naměřila + proč na tom záleží + co s tím**. Stavy jsou schválně čtyři, aby šlo poznat
@@ -379,6 +379,13 @@ bez kontroly. Opraveno dnes, každá věc samostatný commit (kvůli izolovateln
   jako první – existující dedup v `ProcessBatch` dělá případné opakované přehrání neškodným.
   Nový testovací projekt `tests/USBGuardian.Api.Tests` (dosud API nemělo žádné testy), 4 testy.
   **Zatím jen v gitu, na fleet nenasazeno** (vyžaduje redeploy API na `SQL_SERVER`).
+- **`2766344`** – spool žil jen na disku API serveru (`SQL_SERVER`), konzole běží na jiném stroji
+  (`APP_SERVER`) a k tomu adresáři nemá přístup – uvíznutý batch by tak Kontroly stavu vůbec
+  nezaznamenaly. Nový anonymní endpoint `GET /api/incidents/queue/status` (stejný vzor jako už
+  veřejné `/api/version`) vrací počet čekajících batchů + stáří nejstaršího; nová kontrola
+  „Fronta incidentů (spool)" ve skupině *Sběr dat* (viz Živý stav → Konzole – stránky) ho čte
+  stejně jako ostatní API kontroly. 3 nové testy na `IncidentSpool.GetStatus()`.
+  **Zatím jen v gitu, na fleet nenasazeno** (vyžaduje redeploy API i konzole).
 
 **Zatím neřešeno z auditu** (priorita pro příště): ACL na TLS PFX a RSA signing klíč, `EventId` GUID
 pro spolehlivou deduplikaci incidentů (dnešní klíč `timestamp-na-sekundu|serial|vendor` chybí

@@ -177,8 +177,8 @@ running and queued incidents locally (7 files, oldest 2026-07-02), but **nothing
 The console never said so out loud — the "Agents gone silent" tile showed `1` and nobody looked. After starting the
 service manually the queue drained on its own.
 
-**Health checks (new page `/kontroly`, `Health/HealthService.cs`):** 14 read-only checks in three groups —
-*Data collection* (database, **API reachability**, **age of the newest incident**, silent agents, station coverage),
+**Health checks (new page `/kontroly`, `Health/HealthService.cs`):** 15 read-only checks in three groups —
+*Data collection* (database, **API reachability**, **incident queue (spool)**, **age of the newest incident**, silent agents, station coverage),
 *Whitelist and policy* (active version / signature / expiry, catalog vs. publication, signing key, enforcement),
 *Operations* (email, retention, AD sync, auto-enrollment, scheduled restart, console/API/agent version match).
 Every check reports **what it measured + why it matters + what to do**. Four deliberate states so "broken" is never
@@ -366,6 +366,13 @@ on faith. Fixed today, each item its own commit (for isolation if something brea
   next start – the existing dedup in `ProcessBatch` makes a repeated replay harmless. New test project
   `tests/USBGuardian.Api.Tests` (the API had no tests before), 4 tests. **Git-only so far, not deployed
   to the fleet** (needs an API redeploy on `SQL_SERVER`).
+- **`2766344`** – the spool only lived on the API server's disk (`SQL_SERVER`); the console runs on a
+  different box (`APP_SERVER`) and has no access to that directory, so a stuck batch would never show up
+  in the health checks. A new anonymous endpoint `GET /api/incidents/queue/status` (same pattern as the
+  already-public `/api/version`) returns the pending count plus the age of the oldest one; a new check
+  "Incident queue (spool)" in the *Data collection* group reads it the same way the other API checks do.
+  3 new tests for `IncidentSpool.GetStatus()`. **Git-only so far, not deployed to the fleet** (needs an
+  API and console redeploy).
 
 **Still open from the audit** (priority for next time): ACL on the TLS PFX and the RSA signing key, an
 `EventId` GUID for reliable incident deduplication (today's key `timestamp-to-the-second|serial|vendor`
