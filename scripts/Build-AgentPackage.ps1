@@ -59,7 +59,7 @@ if (Test-Path $tasksSrc) {
 # s NTB v terenu si pres ni (jako lokalni admin) docasne vypne blokovani
 # a muze pracovat, i kdyz na server nedosahne. Bez ni by mu blok zablokoval
 # praci a jedina cesta by byla volat IT.
-$cfgPath = Join-Path $Output "Configgent.config.local.json"
+$cfgPath = Join-Path $Output "Config\agent.config.local.json"
 if (Test-Path $cfgPath) {
     $cfg = Get-Content $cfgPath -Raw
     if ($cfg -notmatch '"localConsole"') {
@@ -71,7 +71,7 @@ if (Test-Path $cfgPath) {
         Write-Host "VAROVANI: sablonovy syncUrl (YOUR_API_SERVER) - agent se nepripoji." -ForegroundColor Yellow
     }
 } else {
-    Write-Host "VAROVANI: balicek nema Configgent.config.local.json - agent nebude vedet, kam se hlasit." -ForegroundColor Yellow
+    Write-Host "VAROVANI: balicek nema Config\agent.config.local.json - agent nebude vedet, kam se hlasit." -ForegroundColor Yellow
 }
 
 # ── Offline instalator ───────────────────────────────────────
