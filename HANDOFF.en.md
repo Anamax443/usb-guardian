@@ -374,11 +374,28 @@ on faith. Fixed today, each item its own commit (for isolation if something brea
   "Incident queue (spool)" in the *Data collection* group reads it the same way the other API checks do.
   3 new tests for `IncidentSpool.GetStatus()`. **Deployed and verified 2026-09-04 15:21** – both API
   and console (`/api/health` on `APP_SERVER` returns 16 checks, the new one reports `ok`/`empty`).
+- **`e8d702c`** – the dedup key `timestamp-to-the-second|serial|vendor` was missing `ProductId`/
+  `PnpDeviceId`: two different devices from the same vendor sharing a (often generic, shared across
+  a batch of cheap USB sticks) serial number, connected in the same second, would collide – the
+  second incident would get silently dropped as a duplicate of the first instead of being written.
+  `MakeKey` now takes both fields too; a genuine resend (retry after an outage) and a later
+  `DisconnectedAt` update still pair up correctly (byte-identical record, `PnpDeviceId` doesn't
+  change). Exposed to tests via `InternalsVisibleTo`, 3 new tests. **Git-only so far, not deployed
+  to the fleet** (needs an API redeploy).
+- **`0bc6709`** – found while auditing every API endpoint and its authorization today (outside the
+  original audit list): unlike the console, the API's security relied entirely on individual
+  `[Authorize]` attributes with no default policy – a new controller/action with no attribute would
+  be silently public under ASP.NET Core's default behavior (exactly the kind of mistake the audit
+  already caught once, `033af8a`). A new `FallbackPolicy = USBGuardianClients` makes the API
+  fail-closed like the console: everything is protected by default, public only where explicitly
+  marked `[AllowAnonymous]`/`.AllowAnonymous()` (`/api/version`, `/api/cert-info`,
+  `IncidentsController.QueueStatus` – those still take precedence over the fallback, so they stay
+  public unchanged). No existing endpoint had a gap today – this is a safety net for the future.
+  **Git-only so far, not deployed to the fleet** (needs an API redeploy).
 
-**Still open from the audit** (priority for next time): ACL on the TLS PFX and the RSA signing key, an
-`EventId` GUID for reliable incident deduplication (today's key `timestamp-to-the-second|serial|vendor`
-is missing `ProductId`/`PnpDeviceId`), verifying the payload's hostname against the authenticated
-Windows identity, more tests, CI (`.github/workflows` is entirely absent from the repo).
+**Still open from the audit** (priority for next time): ACL on the TLS PFX and the RSA signing key,
+verifying the payload's hostname against the authenticated Windows identity, more tests, CI
+(`.github/workflows` is entirely absent from the repo).
 
 ### 5.5 Roadmap (pending)
 - **Monitoring of signing cert expiry** – `CN=powershell.domena.loc` valid until 2028-06-17; alert via e-mail from the console.

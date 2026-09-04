@@ -388,11 +388,26 @@ bez kontroly. Opraveno dnes, každá věc samostatný commit (kvůli izolovateln
   stejně jako ostatní API kontroly. 3 nové testy na `IncidentSpool.GetStatus()`.
   **Nasazeno a ověřeno 04.09.2026 15:21** – API i konzole (`/api/health` na `APP_SERVER` vrací
   16 kontrol, nová hlásí `ok`/`prázdná`).
+- **`e8d702c`** – dedup klíč `timestamp-na-sekundu|serial|vendor` chyběl `ProductId`/`PnpDeviceId`:
+  dvě různá zařízení stejného vendoru se stejným (u levných USB kusů často sdíleným, generickým)
+  sériovým číslem, připojená ve stejné sekundě, by kolidovala – druhý incident by dedup tiše zahodil
+  jako duplikát prvního. `MakeKey` teď bere navíc oba údaje; skutečný resend (retry po výpadku) i
+  pozdější doplnění `DisconnectedAt` zůstávají správně spárované (bajtově stejný záznam, `PnpDeviceId`
+  se nemění). Zpřístupněno testům přes `InternalsVisibleTo`, 3 nové testy. **Zatím jen v gitu, na
+  fleet nenasazeno** (vyžaduje redeploy API).
+- **`0bc6709`** – nalezeno při dnešní kontrole všech používaných API endpointů a jejich oprávnění
+  (mimo původní seznam z auditu): API mělo na rozdíl od konzole zabezpečení jen po jednotlivých
+  `[Authorize]` atributech, žádnou výchozí politiku – nový controller/akce bez atributu by byl podle
+  výchozího chování ASP.NET Core tiše veřejný (přesně tenhle typ chyby už jednou našel audit,
+  `033af8a`). Nová `FallbackPolicy = USBGuardianClients` dělá z API fail-closed jako konzoli:
+  chráněno je defaultně vše, veřejné jen to, co má explicitní `[AllowAnonymous]`/`.AllowAnonymous()`
+  (`/api/version`, `/api/cert-info`, `IncidentsController.QueueStatus`). Žádný existující endpoint
+  dnes díru neměl – jde o pojistku pro budoucnost. **Zatím jen v gitu, na fleet nenasazeno**
+  (vyžaduje redeploy API).
 
-**Zatím neřešeno z auditu** (priorita pro příště): ACL na TLS PFX a RSA signing klíč, `EventId` GUID
-pro spolehlivou deduplikaci incidentů (dnešní klíč `timestamp-na-sekundu|serial|vendor` chybí
-`ProductId`/`PnpDeviceId`), ověření hostname z payloadu proti autentizované Windows identitě,
-víc testů, CI (`.github/workflows` v repu chybí úplně).
+**Zatím neřešeno z auditu** (priorita pro příště): ACL na TLS PFX a RSA signing klíč,
+ověření hostname z payloadu proti autentizované Windows identitě, víc testů,
+CI (`.github/workflows` v repu chybí úplně).
 
 ### 5.5 Roadmapa (pending)
 - **Monitoring expirace podpisového certu** – `CN=powershell.domena.loc` platí do 2028-06-17; alert e-mailem z konzole.
