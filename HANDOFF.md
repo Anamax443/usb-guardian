@@ -26,7 +26,7 @@ Serverová konzole agreguje data, drží inventář stanic z AD a ukazuje, kam c
 | **Autorizace konzole** | AD `DOMENA\IT-Admins` + whitelist `DOMENA\it-admin` (+ DB seznam z Nastavení) |
 | **Šifrování agent↔API** | HTTPS + **pinning otisku** (bez CA) — ověřeno end-to-end (heartbeat OK z PC-01) |
 | **AD sync** | zapnutý 60 min + on-demand; **213 v AD, ~212 bez agenta** |
-| **Live commit** (04.09.2026 14:16) | **konzole `06b67e9`** (nezměněno) · **API `297ac7a`** (redeploy 2×: HTTP 5050 fix + fail-closed AllowedGroups) · **agent beta `924b9b8`** (BARTKOVAJW11, CERNYSW11, TRNKAMW11N) · **agent stable `cb8ef1d`** (PC-01/TRNKAMW11, zbytek fleetu — `56b4235`/expirace whitelistu je zatím jen v gitu, na fleet nenasazeno). Lokální konzole ověřena end-to-end na CERNYSW11 — viz 5.11. Bezpečnostní audit + náprava — viz 5.12 |
+| **Live commit** (04.09.2026 15:08) | **konzole `06b67e9`** (redeploy zatím neproběhl – kontrola „Fronta incidentů (spool)" na `/kontroly` se tedy ještě neukazuje, i když API endpoint pod ní už jede) · **API `a6bcfaf`** (redeploy: durabilní spool fronta incidentů `8fbfa6d` + monitoring spoolu `2766344`, plus dřívější `297ac7a`) · **agent beta `924b9b8`** (BARTKOVAJW11, CERNYSW11, TRNKAMW11N) · **agent stable `cb8ef1d`** (PC-01/TRNKAMW11, zbytek fleetu — `56b4235`/expirace whitelistu je zatím jen v gitu, na fleet nenasazeno). Lokální konzole ověřena end-to-end na CERNYSW11 — viz 5.11. Bezpečnostní audit + náprava — viz 5.12 |
 | **Rozvoz agenta – osvědčený postup** | balíček → archiv `…\USBGuardianAgentVersions\<commit>` → **beta na jednu stanici** (dočasně přepsaný `update-beta.txt`) → ověřit → beta na zbytek → teprve pak **stable**. Log `…\deploy\update-agent.log`; „Agent verze" v konzoli se projeví až dalším heartbeatem (≤2 min), takže hned po rozvozu tam ještě chvíli svítí stará verze |
 | **Konzole – stránky** | Přehled (filtr+kumulace+řazení, kapacita, **export CSV + manažerský report s grafy**), Stanice (AD inventář + „Zmlklo agentů" + „Vyžádat data" + **Nasazení / hromadné vyřadit-zařadit**), Whitelist (**kapacita + filtr katalogu + auto-publish podepsané verze**), Nastavení (vynucování/přístup/email/alerty/dohled/auto-enrollment+default PC/retence/**Údržba: reload nastavení**), **Databáze**, **Kontroly** (health checks), Dokumentace (+HTML animace) |
 | **Enforcement (F1-3)** | **whitelist 1:1** (auto-podpis serverem, interní RSA klíč na APP_SERVER) → **vynucování** server→agent (`policy.enforce` v heartbeatu) → **break-glass** (lokální konzole 5080, offline, logováno, zruší se při sync) + **auto-re-enable** + reconciliace s whitelistem. Lokální konzole: restart služby, break-glass, seznam whitelistu |
@@ -378,14 +378,17 @@ bez kontroly. Opraveno dnes, každá věc samostatný commit (kvůli izolovateln
   DB. Cokoliv zůstane na disku (pád, i běžný restart služby) se při příštím startu přehraje
   jako první – existující dedup v `ProcessBatch` dělá případné opakované přehrání neškodným.
   Nový testovací projekt `tests/USBGuardian.Api.Tests` (dosud API nemělo žádné testy), 4 testy.
-  **Zatím jen v gitu, na fleet nenasazeno** (vyžaduje redeploy API na `SQL_SERVER`).
+  **Nasazeno a ověřeno 04.09.2026 15:08** (`/api/version` → `a6bcfaf`, `/api/incidents/queue/status`
+  vrací prázdný stav na `SQL_SERVER`).
 - **`2766344`** – spool žil jen na disku API serveru (`SQL_SERVER`), konzole běží na jiném stroji
   (`APP_SERVER`) a k tomu adresáři nemá přístup – uvíznutý batch by tak Kontroly stavu vůbec
   nezaznamenaly. Nový anonymní endpoint `GET /api/incidents/queue/status` (stejný vzor jako už
   veřejné `/api/version`) vrací počet čekajících batchů + stáří nejstaršího; nová kontrola
   „Fronta incidentů (spool)" ve skupině *Sběr dat* (viz Živý stav → Konzole – stránky) ho čte
   stejně jako ostatní API kontroly. 3 nové testy na `IncidentSpool.GetStatus()`.
-  **Zatím jen v gitu, na fleet nenasazeno** (vyžaduje redeploy API i konzole).
+  **API endpoint nasazen a ověřen 04.09.2026 15:08** (`GET /api/incidents/queue/status` na
+  `SQL_SERVER` odpovídá). **Konzole na `APP_SERVER` zatím na `06b67e9`** – samotná kontrola na
+  stránce `/kontroly` se tedy ještě neobjeví, dokud neproběhne redeploy konzole (viz kapitola 4).
 
 **Zatím neřešeno z auditu** (priorita pro příště): ACL na TLS PFX a RSA signing klíč, `EventId` GUID
 pro spolehlivou deduplikaci incidentů (dnešní klíč `timestamp-na-sekundu|serial|vendor` chybí
