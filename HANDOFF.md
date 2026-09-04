@@ -26,7 +26,7 @@ Serverová konzole agreguje data, drží inventář stanic z AD a ukazuje, kam c
 | **Autorizace konzole** | AD `DOMENA\IT-Admins` + whitelist `DOMENA\it-admin` (+ DB seznam z Nastavení) |
 | **Šifrování agent↔API** | HTTPS + **pinning otisku** (bez CA) — ověřeno end-to-end (heartbeat OK z PC-01) |
 | **AD sync** | zapnutý 60 min + on-demand; **213 v AD, ~212 bez agenta** |
-| **Live commit** (04.09.2026 15:21) | **konzole `3a6a2b2`** (redeploy: kontrola „Fronta incidentů (spool)" ověřena naživo přes `/api/health` – 16 kontrol, nová hlásí `ok`/`prázdná`) · **API `a6bcfaf`** (redeploy: durabilní spool fronta incidentů `8fbfa6d` + monitoring spoolu `2766344`, plus dřívější `297ac7a`) · **agent beta `924b9b8`** (BARTKOVAJW11, CERNYSW11, TRNKAMW11N) · **agent stable `cb8ef1d`** (PC-01/TRNKAMW11, zbytek fleetu — `56b4235`/expirace whitelistu je zatím jen v gitu, na fleet nenasazeno). Lokální konzole ověřena end-to-end na CERNYSW11 — viz 5.11. Bezpečnostní audit + náprava — viz 5.12 |
+| **Live commit** (04.09.2026 15:43) | **konzole `3a6a2b2`** (redeploy: kontrola „Fronta incidentů (spool)" ověřena naživo přes `/api/health` – 16 kontrol, nová hlásí `ok`/`prázdná`) · **API `2c8108d`** (redeploy: durabilní spool fronta incidentů `8fbfa6d` + monitoring spoolu `2766344` + dedup fix `e8d702c` + FallbackPolicy `0bc6709`, plus dřívější `297ac7a`) · **agent beta `924b9b8`** (BARTKOVAJW11, CERNYSW11, TRNKAMW11N) · **agent stable `cb8ef1d`** (PC-01/TRNKAMW11, zbytek fleetu — `56b4235`/expirace whitelistu je zatím jen v gitu, na fleet nenasazeno). Lokální konzole ověřena end-to-end na CERNYSW11 — viz 5.11. Bezpečnostní audit + náprava — viz 5.12 |
 | **Rozvoz agenta – osvědčený postup** | balíček → archiv `…\USBGuardianAgentVersions\<commit>` → **beta na jednu stanici** (dočasně přepsaný `update-beta.txt`) → ověřit → beta na zbytek → teprve pak **stable**. Log `…\deploy\update-agent.log`; „Agent verze" v konzoli se projeví až dalším heartbeatem (≤2 min), takže hned po rozvozu tam ještě chvíli svítí stará verze |
 | **Konzole – stránky** | Přehled (filtr+kumulace+řazení, kapacita, **export CSV + manažerský report s grafy**), Stanice (AD inventář + „Zmlklo agentů" + „Vyžádat data" + **Nasazení / hromadné vyřadit-zařadit**), Whitelist (**kapacita + filtr katalogu + auto-publish podepsané verze**), Nastavení (vynucování/přístup/email/alerty/dohled/auto-enrollment+default PC/retence/**Údržba: reload nastavení**), **Databáze**, **Kontroly** (health checks), Dokumentace (+HTML animace) |
 | **Enforcement (F1-3)** | **whitelist 1:1** (auto-podpis serverem, interní RSA klíč na APP_SERVER) → **vynucování** server→agent (`policy.enforce` v heartbeatu) → **break-glass** (lokální konzole 5080, offline, logováno, zruší se při sync) + **auto-re-enable** + reconciliace s whitelistem. Lokální konzole: restart služby, break-glass, seznam whitelistu |
@@ -393,8 +393,8 @@ bez kontroly. Opraveno dnes, každá věc samostatný commit (kvůli izolovateln
   sériovým číslem, připojená ve stejné sekundě, by kolidovala – druhý incident by dedup tiše zahodil
   jako duplikát prvního. `MakeKey` teď bere navíc oba údaje; skutečný resend (retry po výpadku) i
   pozdější doplnění `DisconnectedAt` zůstávají správně spárované (bajtově stejný záznam, `PnpDeviceId`
-  se nemění). Zpřístupněno testům přes `InternalsVisibleTo`, 3 nové testy. **Zatím jen v gitu, na
-  fleet nenasazeno** (vyžaduje redeploy API).
+  se nemění). Zpřístupněno testům přes `InternalsVisibleTo`, 3 nové testy. **Nasazeno a ověřeno
+  04.09.2026 15:43** (`/api/version` → `2c8108d`).
 - **`0bc6709`** – nalezeno při dnešní kontrole všech používaných API endpointů a jejich oprávnění
   (mimo původní seznam z auditu): API mělo na rozdíl od konzole zabezpečení jen po jednotlivých
   `[Authorize]` atributech, žádnou výchozí politiku – nový controller/akce bez atributu by byl podle
@@ -402,8 +402,9 @@ bez kontroly. Opraveno dnes, každá věc samostatný commit (kvůli izolovateln
   `033af8a`). Nová `FallbackPolicy = USBGuardianClients` dělá z API fail-closed jako konzoli:
   chráněno je defaultně vše, veřejné jen to, co má explicitní `[AllowAnonymous]`/`.AllowAnonymous()`
   (`/api/version`, `/api/cert-info`, `IncidentsController.QueueStatus`). Žádný existující endpoint
-  dnes díru neměl – jde o pojistku pro budoucnost. **Zatím jen v gitu, na fleet nenasazeno**
-  (vyžaduje redeploy API).
+  dnes díru neměl – jde o pojistku pro budoucnost. **Nasazeno a ověřeno 04.09.2026 15:43** –
+  chráněné endpointy (`/api/incidents`) dál vrací `401`, veřejné (`/api/incidents/queue/status`)
+  dál odpovídají beze změny.
 
 **Zatím neřešeno z auditu** (priorita pro příště): ACL na TLS PFX a RSA signing klíč,
 ověření hostname z payloadu proti autentizované Windows identitě, víc testů,
