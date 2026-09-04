@@ -459,7 +459,11 @@ public class DeviceMonitor : BackgroundService
                 if (!IsRemovableMedia(wmi)) continue;
 
                 var device = ParseDeviceFromWmi(wmi);
-                if (_whitelistChecker.IsAllowed(device)) continue;        // schválené nech být
+                // Vypršelý whitelist neschvaluje nic - i "je na (starem) seznamu" musi projit
+                // stejnym rozhodnutim jako nove pripojene medium (viz PolicyEnforcer.HandleDevice),
+                // jinak uz pripojene medium prezije re-enforcement jen diky stare kopii whitelistu.
+                if (_whitelistChecker.IsAllowed(device)
+                    && _whitelistChecker.GetStatus() != WhitelistStatus.Expired) continue;        // schválené nech být
                 if (!string.IsNullOrEmpty(device.PnpDeviceId) && blocked.ContainsKey(device.PnpDeviceId))
                     continue;                                             // už blokované – neřešit znovu
 

@@ -49,7 +49,11 @@ public class PolicyEnforcer
     public void HandleDevice(DeviceInfo device, string whitelistVersion,
         bool isAllowed, WhitelistStatus whitelistStatus = WhitelistStatus.Valid)
     {
-        if (isAllowed)
+        // Vypršelý whitelist není zdroj pravdy o povolení: "je na (starém) seznamu" nesmí
+        // obejít politiku onExpired. Bez tohohle IsAllowed()==true zkratovalo rozhodnutí
+        // dřív, než se DetermineAction() vůbec podíval na whitelistStatus - reálně tedy
+        // onExpired nikdy neplatilo pro zařízení, které v expirovaném whitelistu zůstalo.
+        if (isAllowed && whitelistStatus != WhitelistStatus.Expired)
         {
             var allowedIncident = new Incident
             {
