@@ -1,4 +1,5 @@
 @page "/stanice"
+@using USBGuardian.Admin.Deploy
 @inject IDbContextFactory<AppDbContext> DbFactory
 @inject USBGuardian.Admin.AdSync.AdSyncRunner AdSync
 @inject USBGuardian.Admin.Deploy.DeployTrigger Deploy
@@ -38,6 +39,9 @@ else
         </EditForm>
         <EditForm FormName="incl-all" Model="_form" OnValidSubmit="IncludeAll">
             <button class="btn" type="submit" title="Zrušit všechna vyřazení – zařadit vše zpět do auto-nasazení">✓ Zařadit vše</button>
+        </EditForm>
+        <EditForm FormName="ping-filtered" Model="_form" OnValidSubmit="PingFiltered">
+            <button class="btn" type="submit" title="Ping (síťová dostupnost) u právě zobrazených řádků – nezávisle na tom, jestli tam běží agent">📶 Ověřit dostupnost</button>
         </EditForm>
         <span class="muted">AD sync: @AdSync.LastSummary@(AdSync.LastRunUtc is { } t ? $" ({t.ToLocalTime():HH:mm:ss})" : "")</span>
     </div>
@@ -86,10 +90,11 @@ else
     <table>
         <thead>
             <tr>
-                <th>Kom.</th><th>Hostname</th><th>Cesta v AD</th><th>OS</th><th>Doména</th>
+                <th>Kom.</th><th title="Síťová dostupnost (ping) – odděleno od komunikace agenta">Ping</th><th>Hostname</th><th>Cesta v AD</th><th>OS</th><th>Doména</th>
                 <th>Stav</th><th>Agent verze</th><th>Poslední kontakt</th><th data-no-print title="Trvalé vyřazení – hromadné akce se ho nedotknou">Ignorovat</th><th data-no-print>Nasazení</th><th data-no-print>Data</th>
             </tr>
             <tr class="filtry" data-no-print>
+                <td></td>
                 <td></td>
                 <td><input class="f" form="fstanice" name="h" value="@FHost" placeholder="hostname" /></td>
                 <td><input class="f" form="fstanice" name="ou" value="@FOu" placeholder="OU" /></td>
@@ -132,6 +137,7 @@ else
             {
                 <tr>
                     <td><span class="dot @CommClass(c)" title="@CommTitle(c)"></span></td>
+                    <td><span class="dot @PingDotClass(c)" title="@PingDotTitle(c)"></span></td>
                     <td>@c.Hostname</td>
                     <td class="muted">@(string.IsNullOrEmpty(c.AdPath) ? "—" : c.AdPath)</td>
                     <td>@c.OperatingSystem</td>
@@ -212,8 +218,10 @@ else
             }
         </tbody>
     </table>
-    <p class="muted" data-no-print>Komunikace: <span class="dot ok"></span> komunikuje (≤ @_silentAfterMin min) ·
+    <p class="muted" data-no-print>Komunikace (agent): <span class="dot ok"></span> komunikuje (≤ @_silentAfterMin min) ·
         <span class="dot warn"></span> zmlkl (starší) · <span class="dot off"></span> žádný kontakt</p>
+    <p class="muted" data-no-print>Ping (síť, nezávisle na agentovi): <span class="dot ok"></span> odpovídá ·
+        <span class="dot bad"></span> neodpovídá · <span class="dot off"></span> zatím neověřeno – tlačítko „Ověřit dostupnost“ výše</p>
 }
 
 @code {
@@ -253,6 +261,29 @@ else
     private Dictionary<string, DateTime> _reqMap = new(StringComparer.OrdinalIgnoreCase);
     private string? _reqError;
     private string? _deployMsg;   // chyba zápisu vyžádání (Load() ho nevynuluje)
+
+    // Ping "Ověřit dostupnost": bodová kontrola sítě, ne stav agenta. Drží se jen
+    // v paměti téhle instance komponenty (na rozdíl od _reqMap) – je to okamžitá
+    // odpověď na klik, ne stav, který musí přežít do dalšího heartbeatu.
+    private Dictionary<string, (bool Ok, DateTime CheckedAtLocal)> _pingMap = new(StringComparer.OrdinalIgnoreCase);
+
+    private (bool? Ok, DateTime? At) PingResult(Computer c) =>
+        _pingMap.TryGetValue(c.Hostname, out var r) ? (r.Ok, r.CheckedAtLocal) : (null, null);
+
+    private string PingDotClass(Computer c) => Reachability.DotClass(PingResult(c).Ok);
+    private string PingDotTitle(Computer c) { var (ok, at) = PingResult(c); return Reachability.DotTitle(ok, at); }
+
+    private async Task PingFiltered()
+    {
+        var hosts = Filtered().Select(c => c.Hostname).ToList();
+        if (hosts.Count > 0)
+        {
+            var results = await Reachability.PingManyAsync(hosts);
+            var now = DateTime.Now;
+            foreach (var (host, ok) in results) _pingMap[host] = (ok, now);
+        }
+        await Load();
+    }
 
     // Nasazování: default (deploy.defaultEnroll – pro nové PC, nastavuje se v Nastavení) + výjimky.
     // Efektivní stav = include ? ON : exclude ? OFF : default. Výjimky jdou jen ty, co se liší od defaultu.

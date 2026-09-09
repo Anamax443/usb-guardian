@@ -16,7 +16,6 @@
 //   - Souhrn posledního běhu → AppSettings deploy.lastRun (pro UI).
 // ============================================================
 
-using System.Net.NetworkInformation;
 using Microsoft.EntityFrameworkCore;
 using USBGuardian.Api.Data;
 using USBGuardian.Api.Models;
@@ -94,12 +93,8 @@ public class AgentDeployService : BackgroundService
     // Dry-run: jen reachability (ping), nic nepíše – bezpečné jako read-only.
     private async Task<string> DryRunAsync(List<string> targets, CancellationToken ct)
     {
-        var reachable = 0;
-        foreach (var h in targets)
-        {
-            ct.ThrowIfCancellationRequested();
-            if (await PingAsync(h)) reachable++;
-        }
+        var pinged = await Reachability.PingManyAsync(targets);
+        var reachable = pinged.Values.Count(ok => ok);
         var msg = $"{Stamp()} DRY-RUN – {targets.Count} stanic bez agenta, {reachable} dostupných (nasadilo by se). " +
                   "Zapni deploy.dryRun=false pro ostrý běh.";
         _logger.LogInformation("Auto-deploy {Msg}", msg);
@@ -124,12 +119,6 @@ public class AgentDeployService : BackgroundService
         {
             return $"{Stamp()} CHYBA zápisu targets souboru: {ex.Message}";
         }
-    }
-
-    private static async Task<bool> PingAsync(string host)
-    {
-        try { using var p = new Ping(); return (await p.SendPingAsync(host, 1500)).Status == IPStatus.Success; }
-        catch { return false; }
     }
 
     private static string Stamp() => DateTime.Now.ToString("HH:mm:ss");
