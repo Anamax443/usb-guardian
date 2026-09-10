@@ -45,10 +45,12 @@ builder.Logging
 builder.Services.AddWindowsService(o => o.ServiceName = "USB Guardian API");
 
 // ── SQL Server – Windows Authentication přes gMSA ────────────
+// EnableRetryOnFailure: prechodne chyby (SSL pre-login handshake timeout apod., typicky hned
+// po restartu sluzby s vychladlym connection poolem) se zkusi tise zopakovat samy.
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseSqlServer(
         builder.Configuration.GetConnectionString("DefaultConnection"),
-        sql => sql.CommandTimeout(30)));
+        sql => sql.CommandTimeout(30).EnableRetryOnFailure()));
 
 // ── Fronta incidentů (controller zařadí batch → worker zapisuje do DB async) ──
 // BEZ TÉTO REGISTRACE: IncidentsController nejde postavit (DI) → 500 na /api/incidents.
@@ -56,7 +58,8 @@ builder.Services.AddDbContext<AppDbContext>(options =>
 // MIMO požadavek (fire-and-forget), takže si nesmí půjčovat scoped kontext,
 // který mu pod rukama zmizí, až požadavek skončí.
 builder.Services.AddDbContextFactory<AppDbContext>(options =>
-    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")),
+    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection"),
+        sql => sql.EnableRetryOnFailure()),
     lifetime: ServiceLifetime.Singleton);
 builder.Services.AddSingleton<ActivityLogger>();
 

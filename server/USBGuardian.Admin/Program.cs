@@ -33,10 +33,13 @@ builder.Configuration
 builder.Services.AddWindowsService(o => o.ServiceName = "USB Guardian Console");
 
 // ── SQL Server (read-only pohled), DbContextFactory pro Blazor ─
+// EnableRetryOnFailure: prechodne SQL chyby (napr. SSL pre-login handshake timeout hned po
+// restartu sluzby, kdy je connection pool studeny) se sami tise zopakuji, misto aby vylitly
+// jako chyba az na stranku - presne tohle EF sam navrhl v Event Logu 10.09.2026.
 builder.Services.AddDbContextFactory<AppDbContext>(options =>
     options.UseSqlServer(
         builder.Configuration.GetConnectionString("DefaultConnection"),
-        sql => sql.CommandTimeout(30)));
+        sql => sql.CommandTimeout(30).EnableRetryOnFailure()));
 
 // ── Windows Authentication ────────────────────────────────────
 builder.Services.AddAuthentication(NegotiateDefaults.AuthenticationScheme)
