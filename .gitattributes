@@ -2,3 +2,8 @@
 *.cs text eol=crlf
 *.json text eol=crlf
 *.md text eol=crlf
+
+# .ps1 skripty nesou Authenticode podpis (binarni blok pripojeny za text) -
+# git NESMI normalizovat konce radku, jinak se zmeni bajty a podpis
+# zneplatni (incident 10.09.2026: commit rozbil podpis u 9 z 10 skriptu).
+*.ps1 binary

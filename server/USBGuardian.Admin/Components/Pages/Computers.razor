@@ -46,6 +46,21 @@ else
         <span class="muted">AD sync: @AdSync.LastSummary@(AdSync.LastRunUtc is { } t ? $" ({t.ToLocalTime():HH:mm:ss})" : "")</span>
     </div>
 
+    @* Hromadné zařazení/vyřazení vybraných řádků - zaškrtneš checkboxy postupně (i po
+       ověření dostupnosti), pak JEDNÍM uložením zavedeš/vyřadíš všechny naráz - žádný
+       reload po každém jednotlivém kliknutí jako u řádkového Zařadit/Vyřadit.
+       Obě tlačítka patří do JEDNOHO EditForm (checkboxy mají form="fbulk", HTML dovoluje
+       input mířit jen na jedno id) - rozlišeno hodnotou stisknutého submit tlačítka. *@
+    <div class="toolbar">
+        <EditForm id="fbulk" FormName="bulk-deploy" Model="_form" OnValidSubmit="UlozitVybrane">
+            <button class="btn" type="submit" name="BulkAkce" value="zaradit"
+                    title="Zařadit do auto-nasazení všechny zaškrtnuté stanice najednou">✓ Zařadit vybrané</button>
+            <button class="btn" type="submit" name="BulkAkce" value="vyradit"
+                    title="Vyřadit z auto-nasazení všechny zaškrtnuté stanice najednou">⊘ Vyřadit vybrané</button>
+        </EditForm>
+        <span class="muted">Zaškrtni stanice ve sloupci „Vybrat", pak ulož jedním z tlačítek výše.</span>
+    </div>
+
     @* Bez tohohle řádku není poznat, jestli se něco nasadí samo, nebo ne.
        Pilulka "nasadí se" u stanice říká JEN "byla by mezi cíli". *@
     <div class="banner @(_autoDeploy ? "ok" : "")" style="margin:10px 0">
@@ -90,10 +105,12 @@ else
     <table>
         <thead>
             <tr>
+                <th data-no-print title="Zaškrtni stanice pro hromadné Zařadit/Vyřadit vybrané výše">Vybrat</th>
                 <th>Kom.</th><th title="Síťová dostupnost (ping) – odděleno od komunikace agenta">Ping</th><th>Hostname</th><th>Cesta v AD</th><th>OS</th><th>Doména</th>
                 <th>Stav</th><th>Agent verze</th><th>Poslední kontakt</th><th data-no-print title="Trvalé vyřazení – hromadné akce se ho nedotknou">Ignorovat</th><th data-no-print>Nasazení</th><th data-no-print>Data</th>
             </tr>
             <tr class="filtry" data-no-print>
+                <td></td>
                 <td></td>
                 <td></td>
                 <td><input class="f" form="fstanice" name="h" value="@FHost" placeholder="hostname" /></td>
@@ -136,6 +153,10 @@ else
             @foreach (var c in Filtered())
             {
                 <tr>
+                    <td data-no-print>
+                        <input type="checkbox" name="Vybrane" value="@c.Hostname" form="fbulk"
+                               title="Zaškrtnout pro hromadné Zařadit/Vyřadit vybrané" />
+                    </td>
                     <td><span class="dot @CommClass(c)" title="@CommTitle(c)"></span></td>
                     <td><span class="dot @PingDotClass(c)" title="@PingDotTitle(c)"></span></td>
                     <td>@c.Hostname</td>
@@ -245,6 +266,10 @@ else
     [SupplyParameterFromForm]                 public string? IgnHost { get; set; }
     [SupplyParameterFromForm]                 public string? NowHost { get; set; }
     [SupplyParameterFromForm]                 public string? UpdHost { get; set; }
+    // Hromadné zařazení/vyřazení: checkboxy v tabulce ukazují na form="fbulk" (leží mimo
+    // <table>, HTML nedovolí <form> obalit <tr>) - stejný trik jako "fstanice" u filtrů.
+    [SupplyParameterFromForm]                 public List<string>? Vybrane { get; set; }
+    [SupplyParameterFromForm]                 public string? BulkAkce { get; set; }
 
     private const int DefaultSilentAfterMinutes = 180;
 
@@ -475,6 +500,12 @@ else
         var host = ExclHost?.Trim();
         if (!string.IsNullOrEmpty(host)) await SetHostsDeploy(new[] { host }, !EffectiveDeploy(host));
         else await Load();
+    }
+
+    private async Task UlozitVybrane()
+    {
+        if (Vybrane is not { Count: > 0 }) { _reqError = "Nic nezaškrtnuto."; await Load(); return; }
+        await SetHostsDeploy(Vybrane, target: BulkAkce == "zaradit");
     }
 
     // Přepnutí trvalého vyřazení. Zapisuje se na řádek stanice, ne do seznamu

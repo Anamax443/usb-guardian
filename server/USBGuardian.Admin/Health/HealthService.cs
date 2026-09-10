@@ -635,13 +635,18 @@ public sealed class HealthService
         if (ps1Count == 0)
             return new CheckOutcome(HealthState.Off, "ve složce scripts nejsou žádné .ps1");
 
-        string checkerPath = Path.Combine(Path.GetTempPath(), "usbguardian-ps1check.ps1");
+        // Trvaly, podepsany soubor vedle ostatnich - NE docasny skript psany za behu.
+        // AllSigned pod GPO blokuje nepodepsany skript bez ohledu na -ExecutionPolicy Bypass
+        // (incident 10.09.2026: kontrola sama sebe neuspela presne na tomhle).
+        var checkerPath = Path.Combine(dir, "Check-Ps1Scripts.ps1");
+        if (!File.Exists(checkerPath))
+            return new CheckOutcome(HealthState.Bad, "Check-Ps1Scripts.ps1 chybi ve slozce scripts",
+                "Zkopiruj scripts/Check-Ps1Scripts.ps1 z repa na server a podepis ho stejne jako ostatni.");
+
         string stdout, stderr;
         int exitCode;
         try
         {
-            await File.WriteAllTextAsync(checkerPath, Ps1CheckerScript, ct);
-
             var psi = new ProcessStartInfo
             {
                 FileName = "powershell.exe",
@@ -699,30 +704,6 @@ public sealed class HealthService
     }
 
     private sealed record Ps1CheckResult(string Name, bool Signed, bool Parses, string Detail);
-
-    private const string Ps1CheckerScript = @"
-param([Parameter(Mandatory=$true)][string]$Dir)
-`$out = @()
-Get-ChildItem -Path `$Dir -Filter *.ps1 -File | ForEach-Object {
-    `$p = `$_.FullName
-    `$signed = `$false
-    `$parses = `$false
-    `$detail = @()
-    try {
-        `$sig = Get-AuthenticodeSignature -FilePath `$p
-        `$signed = (`$sig.Status -eq 'Valid')
-        if (-not `$signed) { `$detail += ('podpis: ' + `$sig.Status) }
-    } catch { `$detail += ('podpis: chyba ' + `$_.Exception.Message) }
-    try {
-        `$errs = `$null
-        [System.Management.Automation.Language.Parser]::ParseFile(`$p, [ref]`$null, [ref]`$errs) | Out-Null
-        `$parses = (`$errs.Count -eq 0)
-        if (`$errs.Count -gt 0) { `$detail += ('syntax: ' + `$errs[0].Message) }
-    } catch { `$detail += ('syntax: chyba ' + `$_.Exception.Message) }
-    `$out += [pscustomobject]@{ Name = `$_.Name; Signed = `$signed; Parses = `$parses; Detail = (`$detail -join '; ') }
-}
-`$out | ConvertTo-Json -Depth 3
-";
 
     private static async Task<CheckOutcome> CheckVersionsAsync(Ctx c, CancellationToken ct)
     {
