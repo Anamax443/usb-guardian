@@ -26,26 +26,32 @@ public static class DeployResultIngestor
 {
     public const string DefaultCsvPath = @"C:\ProgramData\USBGuardian\deploy\last.csv";
     public const string DefaultLogPath = @"C:\ProgramData\USBGuardian\deploy\last.log";
+    public const string ManualCsvPath = @"C:\ProgramData\USBGuardian\deploy\manual-last.csv";
+    public const string ManualLogPath = @"C:\ProgramData\USBGuardian\deploy\manual-last.log";
 
-    private const string CsvIngestedKey = "deploy.lastIngestedCsvUtc";
-    private const string LogIngestedKey = "deploy.lastIngestedLogUtc";
     private const string Source = "deploy-run";
 
+    // "kind" odlišuje sledovací klíče (kam se doteklo naposled) mezi auto-enrollmentem
+    // a ruční instalací - mají VLASTNÍ soubory (last.csv vs. manual-last.csv), takže
+    // sdílet stejné "deploy.lastIngestedCsvUtc" by znamenalo, že druhý běh přeskočí
+    // čtení, protože si myslí, že už ten soubor zpracoval.
     public static async Task RunAsync(AppDbContext db, ActivityLogger dennik,
-                                       string csvPath = DefaultCsvPath, string logPath = DefaultLogPath)
+                                       string csvPath = DefaultCsvPath, string logPath = DefaultLogPath,
+                                       string kind = "auto")
     {
-        var csvUtc = await IngestCsvAsync(db, dennik, csvPath);
+        var csvUtc = await IngestCsvAsync(db, dennik, csvPath, kind);
         // Log se hlásí, jen když je novější než poslední zpracovaný CSV o víc než pár
         // vteřin (a než sám sebe) - jinak by stejný "THROW" naskakoval do Aktivity znovu
         // po každém dalším cyklu, dokud ho někdo neopraví.
-        await IngestLogFailureAsync(db, dennik, logPath, csvUtc);
+        await IngestLogFailureAsync(db, dennik, logPath, csvUtc, kind);
     }
 
-    private static async Task<DateTime?> IngestCsvAsync(AppDbContext db, ActivityLogger dennik, string csvPath)
+    private static async Task<DateTime?> IngestCsvAsync(AppDbContext db, ActivityLogger dennik, string csvPath, string kind)
     {
+        var csvIngestedKey = $"deploy.lastIngestedCsvUtc.{kind}";
         if (!File.Exists(csvPath)) return null;
         var writtenUtc = File.GetLastWriteTimeUtc(csvPath);
-        var lastIngested = await GetTimestamp(db, CsvIngestedKey);
+        var lastIngested = await GetTimestamp(db, csvIngestedKey);
         if (lastIngested is { } t && writtenUtc <= t) return writtenUtc;
 
         List<DeployCsvRow> rows;
@@ -53,22 +59,24 @@ public static class DeployResultIngestor
         catch (Exception ex)
         {
             dennik.Log(Source, $"Nelze přečíst {csvPath}: {ex.Message}", ActivityLevel.Error);
-            await SetTimestamp(db, CsvIngestedKey, writtenUtc);
+            await SetTimestamp(db, csvIngestedKey, writtenUtc);
             return writtenUtc;
         }
 
         foreach (var row in rows)
             dennik.Log(Source, $"{row.Status}: {row.Detail}", LevelForStatus(row.Status), row.Host);
 
-        await SetTimestamp(db, CsvIngestedKey, writtenUtc);
+        await SetTimestamp(db, csvIngestedKey, writtenUtc);
         return writtenUtc;
     }
 
-    private static async Task IngestLogFailureAsync(AppDbContext db, ActivityLogger dennik, string logPath, DateTime? justIngestedCsvUtc)
+    private static async Task IngestLogFailureAsync(AppDbContext db, ActivityLogger dennik, string logPath,
+                                                     DateTime? justIngestedCsvUtc, string kind)
     {
+        var logIngestedKey = $"deploy.lastIngestedLogUtc.{kind}";
         if (!File.Exists(logPath)) return;
         var writtenUtc = File.GetLastWriteTimeUtc(logPath);
-        var lastIngested = await GetTimestamp(db, LogIngestedKey);
+        var lastIngested = await GetTimestamp(db, logIngestedKey);
         if (lastIngested is { } t && writtenUtc <= t) return;
 
         // last.csv a last.log ze STEJNÉHO úspěšného běhu vznikají v rychlém sledu (Export-Csv
@@ -77,7 +85,7 @@ public static class DeployResultIngestor
         // spadl dřív, než se dostal k instalaci (typicky AllSigned na neopodepsaný soubor).
         if (justIngestedCsvUtc is { } csvUtc && (writtenUtc - csvUtc).Duration() < TimeSpan.FromSeconds(5))
         {
-            await SetTimestamp(db, LogIngestedKey, writtenUtc);
+            await SetTimestamp(db, logIngestedKey, writtenUtc);
             return;
         }
 
@@ -85,7 +93,7 @@ public static class DeployResultIngestor
         if (throwLine is not null)
             dennik.Log(Source, $"Deploy skript selhal, žádný cíl z tohoto běhu se nenainstaloval: {throwLine}", ActivityLevel.Error);
 
-        await SetTimestamp(db, LogIngestedKey, writtenUtc);
+        await SetTimestamp(db, logIngestedKey, writtenUtc);
     }
 
     // ── čisté, testovatelné ──────────────────────────────────────

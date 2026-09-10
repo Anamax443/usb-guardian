@@ -43,8 +43,15 @@ public sealed class DeployTrigger
         _dennik = dennik;
     }
 
-    public const string DefaultTargetsFile = @"C:\ProgramData\USBGuardian\deploy\targets.txt";
-    public const string DefaultTaskName = @"\USBGuardian\USBGuardian-AutoDeploy";
+    // POZOR: DefaultTargetsFile/DefaultTaskName níž jsou historické názvy, ale MÍŘÍ na
+    // ruční instalaci (Akce.Instalace) - proto mají VLASTNÍ AppSettings klíče
+    // (deploy.manualTargetsFile/deploy.manualTaskName), oddělené od auto-enrollmentu
+    // (AgentDeployService čte deploy.targetsFile/deploy.taskName). Dřív sdílely STEJNÝ
+    // klíč deploy.targetsFile/deploy.taskName jako auto-enrollment - ruční klik a
+    // automatický cyklus si tak uměly navzájem přepsat cíle uprostřed běhu
+    // (incident 10.09.2026: klik na PARLW11, výsledek přišel pro CERNYSW11 z auto-enrollmentu).
+    public const string DefaultTargetsFile = @"C:\ProgramData\USBGuardian\deploy\manual-targets.txt";
+    public const string DefaultTaskName = @"\USBGuardian\USBGuardian-ManualInstall";
     public const string DefaultUpdateTargetsFile = @"C:\ProgramData\USBGuardian\deploy\update.txt";
     public const string DefaultUpdateTaskName = @"\USBGuardian\USBGuardian-UpdateAgent";
 
@@ -77,10 +84,10 @@ public sealed class DeployTrigger
             }
 
             targetsFile = akce == Akce.Instalace
-                ? await Get("deploy.targetsFile", DefaultTargetsFile)
+                ? await Get("deploy.manualTargetsFile", DefaultTargetsFile)
                 : await Get("deploy.updateTargetsFile", DefaultUpdateTargetsFile);
             taskName = akce == Akce.Instalace
-                ? await Get("deploy.taskName", DefaultTaskName)
+                ? await Get("deploy.manualTaskName", DefaultTaskName)
                 : await Get("deploy.updateTaskName", DefaultUpdateTaskName);
         }
         catch (Exception ex)
@@ -135,7 +142,16 @@ public sealed class DeployTrigger
                 + $" – spuštěna úloha {taskName}",
                 ActivityLevel.Warn, hostname, kdo);
 
-            // Úloha běží na pozadí – výsledek přijde do jejího logu, ne sem.
+            // Ruční kliknutí má dát rychlou zpětnou vazbu, ne čekat na dalsi tik
+            // AgentDeployService (ten běží nezávisle, řádově v minutách) - proto
+            // se na pozadí (nesvázané s životem tohoto HTTP/circuit volání) hlídá,
+            // až úloha doběhne, a hned se natáhne manual-last.csv/log do Aktivity.
+            // Jen pro Instalaci - Aktualizace/beta nejedou přes Deploy-AgentFleet.ps1,
+            // takže nemají co v těchhle souborech hledat (signál je sloupec Agent verze).
+            if (akce == Akce.Instalace)
+                _ = SledujADoplnAktivituAsync(taskName, DeployResultIngestor.ManualCsvPath,
+                    DeployResultIngestor.ManualLogPath, "manual");
+
             return (true, akce == Akce.Instalace
                 ? $"Instalace na {hostname} spuštěna. Průběh: log úlohy na serveru, výsledek se projeví v Posledním kontaktu (do ~2 min po startu agenta)."
                 : $"Aktualizace {hostname} spuštěna. Až doběhne, ukáže se nová verze ve sloupci Agent verze.");
@@ -195,6 +211,9 @@ public sealed class DeployTrigger
             _dennik.Log("deploy", $"ruční rozvoz beta kanálu na vzorek – spuštěna úloha {taskName}",
                 ActivityLevel.Warn, null, kdo);
 
+            // Beta jede přes Update-Agent.cmd, ne Deploy-AgentFleet.ps1 - nemá last.csv/log
+            // ke čtení (signál je sloupec Agent verze u vzorkových stanic, viz zpráva níž).
+
             return (true,
                 "Rozvoz na vzorek beta spuštěn. Výsledek se ukáže ve sloupci Agent verze u vzorkových stanic (do pár minut).");
         }
@@ -202,6 +221,54 @@ public sealed class DeployTrigger
         {
             return (false, "Spuštění úlohy selhalo: " + Kratce(ex.Message));
         }
+    }
+
+    // Hlídá běžící úlohu (polling schtasks /Query po 3s, max 3 min) a jakmile doběhne
+    // (nebo vyprší čas), natáhne last.csv/last.log do Aktivity přes DeployResultIngestor -
+    // stejný soubor a stejná logika jako u automatického běhu, jen bez čekání na jeho tik.
+    // Běží nesvázaně s HTTP/circuit voláním, které nasazení spustilo - proto CancellationToken.None
+    // a vlastní try/catch (nic z tohohle nesmí shodit appku, viz ActivityLogger).
+    private async Task SledujADoplnAktivituAsync(string taskName, string csvPath, string logPath, string kind)
+    {
+        try
+        {
+            var deadline = DateTime.UtcNow.AddMinutes(3);
+            while (DateTime.UtcNow < deadline)
+            {
+                await Task.Delay(TimeSpan.FromSeconds(3));
+                if (!await UlohaBeziAsync(taskName)) break;
+            }
+
+            await using var db = await _dbFactory.CreateDbContextAsync();
+            await DeployResultIngestor.RunAsync(db, _dennik, csvPath, logPath, kind);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Sledování výsledku ručního nasazení ({Task}) selhalo", taskName);
+        }
+    }
+
+    private static async Task<bool> UlohaBeziAsync(string taskName)
+    {
+        try
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName = "schtasks.exe",
+                Arguments = $"/Query /TN \"{taskName}\" /FO LIST",
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true,
+            };
+            using var p = Process.Start(psi);
+            if (p is null) return false;
+
+            var vystup = await p.StandardOutput.ReadToEndAsync();
+            await p.WaitForExitAsync();
+            return vystup.Contains("Running", StringComparison.OrdinalIgnoreCase);
+        }
+        catch { return false; }
     }
 
     private static string Kratce(string s, int max = 160)

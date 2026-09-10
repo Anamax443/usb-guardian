@@ -190,6 +190,12 @@ public sealed class HealthService
             "Automatické nasazování agenta na stanice bez agenta.",
             true, CheckAutoDeployAsync),
 
+        new(GOps, "Deploy skripty (podpis/syntaxe)",
+            "Deploy-AgentFleet.ps1 a spol. spouští scheduled task pod deploy účtem bez dozoru. "
+          + "Neplatný podpis nebo syntax chyba (typicky chybějící UTF-8 BOM pod Windows PowerShell 5.1) "
+          + "shodí nasazení potichu – incident 10.09.2026, kdy se to zjistilo až ručním klikem.",
+            false, CheckDeployScriptsAsync),
+
         new(GOps, "Plánovaný restart služeb",
             "Denní restart hlídaných služeb. Zastavenou službu i nastartuje — pojistka proti "
           + "výpadku typu služba spadla a nikdo si nevšiml.",
@@ -612,6 +618,111 @@ public sealed class HealthService
                 : enabled && string.IsNullOrEmpty(last)
                     ? "Zatím neproběhl. Otestuj tlačítkem Restartovat teď v Nastavení." : "");
     }
+
+    /// <summary>
+    /// Kontroluje VŠECHNY .ps1 ve složce scripts vedle konzole (sourcepath scheduled tasků na
+    /// tomhle serveru) – Authenticode podpis a syntaktickou platnost. Shell-out na powershell.exe
+    /// (ne balíček System.Management.Automation navíc jen kvůli health checku) – stejný vzor jako
+    /// DeployTrigger (schtasks.exe/sc.exe).
+    /// </summary>
+    private static async Task<CheckOutcome> CheckDeployScriptsAsync(Ctx c, CancellationToken ct)
+    {
+        var dir = Path.Combine(AppContext.BaseDirectory, "scripts");
+        if (!Directory.Exists(dir))
+            return new CheckOutcome(HealthState.Off, "složka scripts nenalezena – deploy skripty se tu nepoužívají");
+
+        var ps1Count = Directory.GetFiles(dir, "*.ps1", SearchOption.TopDirectoryOnly).Length;
+        if (ps1Count == 0)
+            return new CheckOutcome(HealthState.Off, "ve složce scripts nejsou žádné .ps1");
+
+        string checkerPath = Path.Combine(Path.GetTempPath(), "usbguardian-ps1check.ps1");
+        string stdout, stderr;
+        int exitCode;
+        try
+        {
+            await File.WriteAllTextAsync(checkerPath, Ps1CheckerScript, ct);
+
+            var psi = new ProcessStartInfo
+            {
+                FileName = "powershell.exe",
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true,
+            };
+            psi.ArgumentList.Add("-NoProfile");
+            psi.ArgumentList.Add("-NonInteractive");
+            psi.ArgumentList.Add("-ExecutionPolicy");
+            psi.ArgumentList.Add("Bypass");
+            psi.ArgumentList.Add("-File");
+            psi.ArgumentList.Add(checkerPath);
+            psi.ArgumentList.Add(dir);
+
+            using var p = Process.Start(psi);
+            if (p is null) return new CheckOutcome(HealthState.Bad, "kontrolní proces nevznikl");
+
+            stdout = await p.StandardOutput.ReadToEndAsync(ct);
+            stderr = await p.StandardError.ReadToEndAsync(ct);
+            await p.WaitForExitAsync(ct);
+            exitCode = p.ExitCode;
+        }
+        catch (Exception ex)
+        {
+            return new CheckOutcome(HealthState.Bad, "nelze spustit kontrolu podpisu/syntaxe", Short(ex.Message));
+        }
+
+        if (exitCode != 0 || string.IsNullOrWhiteSpace(stdout))
+            return new CheckOutcome(HealthState.Bad, "kontrolní skript selhal", Short(stderr));
+
+        List<Ps1CheckResult> results;
+        try
+        {
+            var opts = new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+            // ConvertTo-Json v PS 5.1 serializuje kolekci s JEDNÍM prvkem jako holý objekt,
+            // ne jako pole se jedním prvkem - proto zkusit obojí.
+            results = stdout.TrimStart().StartsWith('[')
+                ? System.Text.Json.JsonSerializer.Deserialize<List<Ps1CheckResult>>(stdout, opts) ?? new()
+                : new() { System.Text.Json.JsonSerializer.Deserialize<Ps1CheckResult>(stdout, opts)! };
+        }
+        catch (Exception ex)
+        {
+            return new CheckOutcome(HealthState.Bad, "výstup kontroly nejde přečíst", Short(ex.Message));
+        }
+
+        var bad = results.Where(r => !r.Signed || !r.Parses).ToList();
+        if (bad.Count == 0)
+            return new CheckOutcome(HealthState.Ok, $"{results.Count} skriptů – všechny podepsané a bez syntax chyb");
+
+        return new CheckOutcome(HealthState.Bad,
+            $"{bad.Count}/{results.Count} skriptů má problém",
+            string.Join("; ", bad.Select(b => $"{b.Name}: {b.Detail}")));
+    }
+
+    private sealed record Ps1CheckResult(string Name, bool Signed, bool Parses, string Detail);
+
+    private const string Ps1CheckerScript = @"
+param([Parameter(Mandatory=$true)][string]$Dir)
+`$out = @()
+Get-ChildItem -Path `$Dir -Filter *.ps1 -File | ForEach-Object {
+    `$p = `$_.FullName
+    `$signed = `$false
+    `$parses = `$false
+    `$detail = @()
+    try {
+        `$sig = Get-AuthenticodeSignature -FilePath `$p
+        `$signed = (`$sig.Status -eq 'Valid')
+        if (-not `$signed) { `$detail += ('podpis: ' + `$sig.Status) }
+    } catch { `$detail += ('podpis: chyba ' + `$_.Exception.Message) }
+    try {
+        `$errs = `$null
+        [System.Management.Automation.Language.Parser]::ParseFile(`$p, [ref]`$null, [ref]`$errs) | Out-Null
+        `$parses = (`$errs.Count -eq 0)
+        if (`$errs.Count -gt 0) { `$detail += ('syntax: ' + `$errs[0].Message) }
+    } catch { `$detail += ('syntax: chyba ' + `$_.Exception.Message) }
+    `$out += [pscustomobject]@{ Name = `$_.Name; Signed = `$signed; Parses = `$parses; Detail = (`$detail -join '; ') }
+}
+`$out | ConvertTo-Json -Depth 3
+";
 
     private static async Task<CheckOutcome> CheckVersionsAsync(Ctx c, CancellationToken ct)
     {

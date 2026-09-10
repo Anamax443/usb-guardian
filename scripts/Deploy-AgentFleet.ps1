@@ -1,4 +1,4 @@
-# ============================================================
+﻿# ============================================================
 # Deploy-AgentFleet.ps1
 # Hromadné vzdálené nasazení USB Guardian agenta na stanice.
 # Kompatibilní s Windows PowerShell 5.1 i PowerShell 7 (runspace pool).

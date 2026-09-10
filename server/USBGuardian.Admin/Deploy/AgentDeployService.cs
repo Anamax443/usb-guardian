@@ -54,10 +54,14 @@ public class AgentDeployService : BackgroundService
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
 
-        // Nezávisle na "auto-nasazení zapnuto/vypnuto" - stejný scheduled task a stejné
-        // soubory používá i ruční "Nasadit teď", takže výsledek se má promítnout vždycky.
-        try { await DeployResultIngestor.RunAsync(db, _dennik); }
-        catch (Exception ex) { _logger.LogWarning(ex, "Načtení výsledku posledního nasazení selhalo"); }
+        // Nezávisle na "auto-nasazení zapnuto/vypnuto" - výsledek se má promítnout vždycky.
+        // Auto-enrollment (tenhle běh) a ruční "Nasadit teď" (DeployTrigger) mají OD SEBE
+        // oddělené targets soubory i scheduled tasky (viz DeployTrigger.cs) - proto se
+        // natahují oba páry zvlášť, jinak by si ruční klik a automatický cyklus přepisovaly cíle.
+        try { await DeployResultIngestor.RunAsync(db, _dennik, kind: "auto"); }
+        catch (Exception ex) { _logger.LogWarning(ex, "Načtení výsledku posledního auto-nasazení selhalo"); }
+        try { await DeployResultIngestor.RunAsync(db, _dennik, DeployResultIngestor.ManualCsvPath, DeployResultIngestor.ManualLogPath, "manual"); }
+        catch (Exception ex) { _logger.LogWarning(ex, "Načtení výsledku posledního ručního nasazení selhalo"); }
 
         var cfg = await DeployConfig.LoadAsync(db);
 
