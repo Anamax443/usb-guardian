@@ -19,9 +19,13 @@ using USBGuardian.Api.Security;
 
 namespace USBGuardian.Api.Controllers;
 
+// Autorizace je záměrně PO AKCI, ne na controlleru (stejný vzor jako WhitelistController):
+// [Authorize] na třídě + jiný [Authorize(Policy=...)] na akci se v ASP.NET Core NEPŘEPISUJE,
+// ale KOMBINUJE logickým AND - třídní USBGuardianClients by tak GetIncidents ve skutečnosti
+// vyžadoval členství v OBOU skupinách zároveň a vyřadil by tím administrátory bez strojového
+// účtu stanice. Proto má každá akce vlastní policy.
 [ApiController]
 [Route("api/[controller]")]
-[Microsoft.AspNetCore.Authorization.Authorize(Policy = "USBGuardianClients")]
 public class IncidentsController : ControllerBase
 {
     private readonly IncidentQueue _queue;
@@ -50,6 +54,7 @@ public class IncidentsController : ControllerBase
     // Worker zpracuje batch asynchronně vlastním tempem.
     // --------------------------------------------------------
     [HttpPost]
+    [Microsoft.AspNetCore.Authorization.Authorize(Policy = "USBGuardianClients")]
     public IActionResult SubmitBatch([FromBody] IncidentBatchRequest request)
     {
         if (request.Incidents.Count == 0)
@@ -139,8 +144,12 @@ public class IncidentsController : ControllerBase
 
     // --------------------------------------------------------
     // GET /api/incidents
+    // Vypis pro konzoli - NE pro agenty. Drive bez vlastni policy zdedil tridni
+    // USBGuardianClients, coz pustilo i strojovy ucet libovolne stanice k historii
+    // CELE flotily (usernames, hostnames, zarizeni), ne jen sve vlastni udalosti.
     // --------------------------------------------------------
     [HttpGet]
+    [Microsoft.AspNetCore.Authorization.Authorize(Policy = "USBGuardianAdmins")]
     public async Task<IActionResult> GetIncidents(
         [FromQuery] DateTime? from,
         [FromQuery] DateTime? to,
