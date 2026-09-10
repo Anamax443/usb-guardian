@@ -134,6 +134,10 @@
             title="Beta se osvědčila → stane se stable. Dosavadní stable tím spadne do archivu.">
         ▲ Povýšit betu na stable
     </button>
+    <button class="btn" @onclick="AktualizovatFleet" disabled="@(_busy || string.IsNullOrEmpty(_verzeStable))"
+            title="Aktualizuje VŠECHNY stanice s agentem na aktuální stable verzi, kromě stanic ve vzorku beta (ty mají zůstat na svém kanálu záměrně).">
+        ⇪ Aktualizovat fleet na stable
+    </button>
 </div>
 @if (_verzeMsg is not null) { <div class="banner @(_verzeBad ? "bad" : "ok")">@_verzeMsg</div> }
 
@@ -849,6 +853,19 @@ denní souhrn) je další krok.</p>
         try
         {
             var (ok, zprava) = await Deploy.SpustBetuAsync(await CurrentUser());
+            _verzeMsg = zprava;
+            _verzeBad = !ok;
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task AktualizovatFleet()
+    {
+        _verzeMsg = null;
+        _busy = true;
+        try
+        {
+            var (ok, zprava) = await Deploy.SpustFleetUpdateAsync(await CurrentUser());
             _verzeMsg = zprava;
             _verzeBad = !ok;
         }
