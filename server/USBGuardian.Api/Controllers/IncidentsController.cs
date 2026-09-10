@@ -60,23 +60,22 @@ public class IncidentsController : ControllerBase
         if (request.Incidents.Count == 0)
             return Ok(new { queued = 0 });
 
-        // Audit 04.09.2026: Hostname v datech je dnes jen TVRZENÍ - libovolná stanice
-        // ze skupiny USB-Guardian-Clients může napsat cizí hostname. ZATÍM JEN LOGUJI
-        // (neodmítám request) - hostname z autentizované identity strojového účtu ještě
-        // nebyl ověřen proti reálnému provozu, tvrdé odmítnutí s chybou ve formátu by
-        // umlčelo celý fleet naráz. Až pár dní bez falešných varování, zpřísnit na 403
-        // (viz HANDOFF 5.12).
+        // Audit 04.09.2026: Hostname v datech byl jen TVRZENÍ - libovolná stanice ze skupiny
+        // USB-Guardian-Clients mohla napsat cizí hostname. Od 04.09. do 10.09. bezelo jen
+        // WARN-ONLY logovani (HANDOFF 5.12), aby se overil format Windows identity v produkci
+        // bez rizika umlceni celeho fleetu chybnym predpokladem - za tu dobu 0 nesouhlasu
+        // v Aktivite (kategorie "bezpecnost"), takze tvrde odmitnuti (403) je bezpecne zapnout.
         var authHostname = CallerIdentity.MachineHostnameOrNull(HttpContext.User.Identity);
         if (authHostname is not null
             && !string.Equals(authHostname, request.Hostname, StringComparison.OrdinalIgnoreCase))
         {
             _logger.LogWarning(
-                "Batch tvrdí Hostname={Claimed}, ale autentizovaná identita je stroj {Actual} - " +
-                "zatím jen loguji, incident se přesto zapíše",
+                "Batch tvrdí Hostname={Claimed}, ale autentizovaná identita je stroj {Actual} - odmítnuto",
                 request.Hostname, authHostname);
             _dennik.Log("bezpecnost",
-                $"batch se hlásí jako {request.Hostname}, ale autentizovaná identita je {authHostname}",
+                $"batch se hlásí jako {request.Hostname}, ale autentizovaná identita je {authHostname} - odmítnuto",
                 ActivityLevel.Warn, request.Hostname);
+            return Forbid();
         }
 
         var sourceIp   = HttpContext.Connection.RemoteIpAddress?.ToString();

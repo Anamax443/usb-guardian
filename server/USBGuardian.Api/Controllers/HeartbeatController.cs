@@ -32,16 +32,19 @@ public class HeartbeatController : ControllerBase
         [FromQuery] string? whitelistVersion,
         [FromQuery] string? agentVersion)
     {
-        // Audit 04.09.2026: hostname v query je dnes jen TVRZENÍ - libovolná stanice ze skupiny
-        // USB-Guardian-Clients může poslat cizí hostname. ZATÍM JEN LOGUJI (neodmítám heartbeat) -
-        // stejná opatrnost jako u IncidentsController.SubmitBatch, viz komentář tam i HANDOFF 5.12.
+        // Audit 04.09.2026: hostname v query byl jen TVRZENÍ - libovolná stanice ze skupiny
+        // USB-Guardian-Clients mohla poslat cizí hostname. Od 04.09. do 10.09. bezelo jen WARN-ONLY
+        // logovani (HANDOFF 5.12), aby se overilo, ze format Windows identity v produkci sedi a
+        // netvrde odmitne cely fleet omylem - za tu dobu 0 nesouhlasu v Aktivite (kategorie
+        // "bezpecnost"), takze tvrde odmitnuti (403) je bezpecne zapnout.
         var authHostname = CallerIdentity.MachineHostnameOrNull(HttpContext.User.Identity);
         if (authHostname is not null
             && !string.Equals(authHostname, hostname, StringComparison.OrdinalIgnoreCase))
         {
             _dennik.Log("bezpecnost",
-                $"heartbeat se hlásí jako {hostname}, ale autentizovaná identita je {authHostname}",
+                $"heartbeat se hlásí jako {hostname}, ale autentizovaná identita je {authHostname} - odmítnuto",
                 ActivityLevel.Warn, hostname);
+            return Forbid();
         }
 
         // Aktualizujeme LastSeen
