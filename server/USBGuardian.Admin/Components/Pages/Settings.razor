@@ -1,5 +1,6 @@
 @page "/nastaveni"
 @rendermode @(new InteractiveServerRenderMode(prerender: false))
+@using System.Diagnostics
 @using System.Net.Mail
 @using USBGuardian.Admin.Notifications
 @using USBGuardian.Admin.Maintenance
@@ -75,10 +76,12 @@
     hlásila agenta a déle se neozvala, se počítá jako zmlklá (možný výpadek / tamper). Default 180 min.</p>
 
 <h2>Verze agenta</h2>
-<p class="muted">Archiv balíčků na tomto serveru. <strong>Stable</strong> je verze pro fleet,
-    <strong>beta</strong> pro vzorek stanic, na kterém se nová verze nejdřív osvědčí. Ostatní verze
-    jsou archiv — nerozvážejí se nikam, ale je z čeho se vrátit, když se nasazená ukáže jako špatná.
-    Tady se volí <em>záměr</em>; přepnutí provede dávka <span class="mono">Set-AgentVersion.cmd</span>.</p>
+<p class="muted">Archiv balíčků na tomto serveru. <strong>Stable</strong> je verze pro fleet
+    (i pro <strong>čerstvé instalace</strong> — <span class="mono">Deploy-AgentFleet.ps1</span> vždy
+    bere z tohoto kanálu, nikdy z beta), <strong>beta</strong> pro vzorek stanic, na kterém se nová
+    verze nejdřív osvědčí na existujících strojích. Ostatní verze jsou archiv — nerozvážejí se nikam,
+    ale je z čeho se vrátit, když se nasazená ukáže jako špatná. Uložení tady rovnou přepne kanál
+    (spustí se <span class="mono">Set-AgentVersion.cmd</span> na serveru za tebe).</p>
 @if (_verzeChyba is not null)
 {
     <div class="banner bad">Archiv verzí nelze číst: @_verzeChyba</div>
@@ -779,19 +782,64 @@ denní souhrn) je další krok.</p>
         { _verzeMsg = "Není zvolená beta verze."; _verzeBad = true; return; }
 
         var puvodni = _verzeStable;
+        var novy = _verzeBeta.Trim();
         _busy = true;
         try
         {
             await using (var db = await DbFactory.CreateDbContextAsync())
-                await Set(db, "agent.version.stable", _verzeBeta.Trim());
-            _verzeStable = _verzeBeta.Trim();
-            _verzeMsg = $"Stable = {_verzeStable}"
-                      + (string.IsNullOrEmpty(puvodni) ? "" : $"; z {puvodni} je archiv")
-                      + ". Rozvoz spusť dávkou Set-AgentVersion.cmd " + _verzeStable + " stable na serveru.";
-            _verzeBad = false;
+                await Set(db, "agent.version.stable", novy);
+            _verzeStable = novy;
+
+            var (ok, vystup) = await PrepniKanalAsync(novy, "stable");
+            _verzeMsg = ok
+                ? $"Stable = {novy}" + (string.IsNullOrEmpty(puvodni) ? "" : $"; z {puvodni} je archiv") + " — přepnuto na serveru."
+                : $"Záměr uložen (stable = {novy}), ale přepnutí na serveru SELHALO: {vystup}. "
+                + $"Zkus ručně: Set-AgentVersion.cmd {novy} stable";
+            _verzeBad = !ok;
         }
         catch (Exception ex) { _verzeMsg = "Chyba: " + ex.Message; _verzeBad = true; }
         finally { _busy = false; }
+    }
+
+    /// <summary>
+    /// Spustí Set-AgentVersion.cmd na tomhle serveru (konzole běží jako LocalSystem na .213,
+    /// stejný stroj jako archiv i publikovaná slozka - žádný vzdálený přístup, žádné nové ACL).
+    /// Dřív se tohle jen doporučovalo udělat ručně po uložení - v praxi se to zapomínalo
+    /// (přesně tenhle stav 10.09.2026: stable v DB řekl 924b9b8, na disku pořád leželo staré
+    /// cb8ef1d, protože dávka po uložení nikdy neproběhla).
+    /// </summary>
+    private static async Task<(bool Ok, string Vystup)> PrepniKanalAsync(string commit, string kanal)
+    {
+        var script = Path.Combine(AppContext.BaseDirectory, "scripts", "Set-AgentVersion.cmd");
+        if (!File.Exists(script))
+            return (false, $"Set-AgentVersion.cmd nenalezen ({script})");
+
+        try
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName = "cmd.exe",
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true,
+            };
+            psi.ArgumentList.Add("/c");
+            psi.ArgumentList.Add(script);
+            psi.ArgumentList.Add(commit);
+            psi.ArgumentList.Add(kanal);
+
+            using var p = Process.Start(psi);
+            if (p is null) return (false, "proces nevznikl");
+
+            var stdout = await p.StandardOutput.ReadToEndAsync();
+            var stderr = await p.StandardError.ReadToEndAsync();
+            await p.WaitForExitAsync();
+            var vystup = (stdout + stderr).Trim();
+
+            return p.ExitCode == 0 ? (true, vystup) : (false, $"kód {p.ExitCode}: {vystup}");
+        }
+        catch (Exception ex) { return (false, ex.Message); }
     }
 
     private async Task RozvezBetu()
@@ -876,11 +924,24 @@ denní souhrn) je další krok.</p>
             }
             catch (Exception ex) { zapis = " (keep.txt nezapsán: " + ex.Message + ")"; }
 
+            // Zaměr je uloženy - ted rovnou i provest, at se nestane presne to, co 10.09.2026:
+            // DB rekla stable=924b9b8, na disku zustalo stare cb8ef1d, protoze nikdo nespustil
+            // Set-AgentVersion.cmd rucne. Kazdy kanal, ktery ma neco vybrano, se prepne.
+            var prepnuti = new List<string>();
+            if (!string.IsNullOrWhiteSpace(_verzeStable))
+            {
+                var (ok, vystup) = await PrepniKanalAsync(_verzeStable.Trim(), "stable");
+                prepnuti.Add(ok ? $"stable→{_verzeStable} OK" : $"stable→{_verzeStable} SELHALO: {vystup}");
+            }
+            if (!string.IsNullOrWhiteSpace(_verzeBeta))
+            {
+                var (ok, vystup) = await PrepniKanalAsync(_verzeBeta.Trim(), "beta");
+                prepnuti.Add(ok ? $"beta→{_verzeBeta} OK" : $"beta→{_verzeBeta} SELHALO: {vystup}");
+            }
+
             NactiVerze();
-            _verzeMsg = $"Uloženo — stable: {(string.IsNullOrEmpty(_verzeStable) ? "—" : _verzeStable)}, "
-                      + $"beta: {(string.IsNullOrEmpty(_verzeBeta) ? "—" : _verzeBeta)}, archiv {keep}{zapis}. "
-                      + "Přepnutí provede Set-AgentVersion.cmd na serveru.";
-            _verzeBad = false;
+            _verzeMsg = $"Uloženo, archiv {keep}{zapis}. " + string.Join("; ", prepnuti);
+            _verzeBad = prepnuti.Any(p => p.Contains("SELHALO"));
         }
         catch (Exception ex) { _verzeMsg = "Chyba: " + ex.Message; _verzeBad = true; }
         finally { _busy = false; }
