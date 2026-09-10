@@ -11,10 +11,12 @@
 // zapisovat security policy, ne jen ji číst.
 // ============================================================
 
+using System.Diagnostics;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using USBGuardian.Api.Data;
 using USBGuardian.Api.Models;
+using USBGuardian.Api.Security;
 
 namespace USBGuardian.Api.Controllers;
 
@@ -24,11 +26,13 @@ public class WhitelistController : ControllerBase
 {
     private readonly AppDbContext _db;
     private readonly ILogger<WhitelistController> _logger;
+    private readonly ActivityLogger _dennik;
 
-    public WhitelistController(AppDbContext db, ILogger<WhitelistController> logger)
+    public WhitelistController(AppDbContext db, ILogger<WhitelistController> logger, ActivityLogger dennik)
     {
         _db     = db;
         _logger = logger;
+        _dennik = dennik;
     }
 
     // --------------------------------------------------------
@@ -39,6 +43,9 @@ public class WhitelistController : ControllerBase
     [Microsoft.AspNetCore.Authorization.Authorize(Policy = "USBGuardianClients")]
     public async Task<IActionResult> GetWhitelist()
     {
+        var sw = Stopwatch.StartNew();
+        var hostname = CallerIdentity.MachineHostnameOrNull(HttpContext.User.Identity);
+
         // Aktivní = PUBLIKOVANÁ + PODEPSANÁ verze. Servírujeme PŘESNÝ blob (`Json`), který byl offline
         // podepsán → agent ho uloží verbatim a ověří `.sig` bajt na bajt. NE re-serializovat!
         var version = await _db.WhitelistVersions
@@ -47,10 +54,16 @@ public class WhitelistController : ControllerBase
             .FirstOrDefaultAsync();
 
         if (version == null || string.IsNullOrEmpty(version.Json))
+        {
+            _dennik.Log("whitelist", "stažení odmítnuto – žádná publikovaná (podepsaná) verze",
+                ActivityLevel.Warn, hostname);
             return NotFound("Žádný publikovaný (podepsaný) whitelist – vydej verzi v konzoli.");
+        }
 
         _logger.LogDebug("Whitelist {Version} stažen od {Ip}",
             version.Version, HttpContext.Connection.RemoteIpAddress);
+        _dennik.Log("whitelist", $"whitelist {version.Version} stažen ({sw.Elapsed.TotalMilliseconds:0} ms)",
+            ActivityLevel.Info, hostname);
 
         return Content(version.Json, "application/json; charset=utf-8");
     }
@@ -107,7 +120,12 @@ public class WhitelistController : ControllerBase
             d.IsActive);
 
         if (exists)
+        {
+            _dennik.Log("whitelist",
+                $"přidání zařízení {dto.VendorId}:{dto.ProductId}:{dto.SerialNumber} odmítnuto – už je na whitelistu",
+                ActivityLevel.Warn, user: dto.ApprovedBy);
             return Conflict("Zařízení je již na whitelistu.");
+        }
 
         var device = new WhitelistDevice
         {
@@ -129,6 +147,9 @@ public class WhitelistController : ControllerBase
         _logger.LogInformation(
             "Přidáno zařízení {VendorId}:{ProductId}:{Serial} od {ApprovedBy}",
             dto.VendorId, dto.ProductId, dto.SerialNumber, dto.ApprovedBy);
+        _dennik.Log("whitelist",
+            $"přidáno zařízení {dto.VendorId}:{dto.ProductId}:{dto.SerialNumber} ({dto.Description}), nová verze",
+            ActivityLevel.Info, user: dto.ApprovedBy);
 
         return Ok(device);
     }

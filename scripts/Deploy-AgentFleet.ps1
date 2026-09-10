@@ -55,6 +55,10 @@ if (-not (Test-Path (Join-Path $SourcePath "ToastHelper\ToastHelper.exe"))) {
 $watchSrc = Join-Path $PSScriptRoot "Watch-USBGuardian.ps1"
 if (-not $LogCsv) { $LogCsv = Join-Path $PSScriptRoot ("deploy-fleet-" + (Get-Date -Format 'yyyyMMdd_HHmmss') + ".csv") }
 
+# Velikost balicku pro mereni rychlosti kopirovani - spocitat jednou pro vsechny
+# cile, ne per-host (stejny zdroj, zbytecne opakovane prochazeni disku).
+$sourceSizeBytes = (Get-ChildItem $SourcePath -Recurse -File | Measure-Object -Property Length -Sum).Sum
+
 Write-Host "USB Guardian - fleet deploy" -ForegroundColor Cyan
 Write-Host "  Cilu:    $($targetHosts.Count)"
 Write-Host "  Zdroj:   $SourcePath"
@@ -64,10 +68,22 @@ Write-Host "  Audit:   $LogCsv"
 
 # ── Per-host logika (scriptblock pro runspace) ───────────────
 $perHost = {
-    param($h, $InstallDir, $ServiceName, $SourcePath, $watchSrc, $DryRun, $Reinstall)
+    param($h, $InstallDir, $ServiceName, $SourcePath, $watchSrc, $DryRun, $Reinstall, $sourceSizeBytes)
 
     $r = [ordered]@{ Host = $h; Status = ''; Detail = ''; Ts = (Get-Date -Format 'HH:mm:ss') }
     $share = "\\$h\C`$\Program Files\USBGuardian"
+
+    # Vysvetleni robocopy exit kodu (bitova maska, funguje bez ohledu na jazyk
+    # OS - robocopy sam pise hlasky v lokalizaci serveru, tohle ne).
+    function Vysvetli-RoboKod([int]$code) {
+        $bity = @()
+        if ($code -band 1)  { $bity += 'zkopirovano OK' }
+        if ($code -band 2)  { $bity += 'v cili navic soubory/adresare' }
+        if ($code -band 4)  { $bity += 'nesouhlasici soubory/adresare' }
+        if ($code -band 8)  { $bity += 'nektere soubory se NEpodarilo zkopirovat (retry vycerpan)' }
+        if ($code -band 16) { $bity += 'VAZNA CHYBA - nezkopirovalo se nic (prava nebo cesta nedostupna)' }
+        return $(if ($bity.Count -gt 0) { $bity -join ', ' } else { 'neznamy kod' })
+    }
 
     try {
         if (-not (Test-Connection -ComputerName $h -Count 1 -Quiet)) {
@@ -84,8 +100,20 @@ $perHost = {
             $r.Status = 'WOULD-DEPLOY'; $r.Detail = $(if ($exists) { 'reinstall' } else { 'fresh' }); return [pscustomobject]$r
         }
 
-        & robocopy $SourcePath $share /E /R:2 /W:2 /NFL /NDL /NP /NJH /NJS | Out-Null
-        if ($LASTEXITCODE -ge 8) { throw "robocopy selhal (kod $LASTEXITCODE)" }
+        # Vystup se NEzahazuje (drivejsi | Out-Null) - je to jediny zdroj informace PROC
+        # kopirovani selhalo (napr. "Access is denied" na cilovem sdileni). Cas se meri
+        # sami (Stopwatch), ne parsovanim robocopy souhrnu - ten je lokalizovany dle
+        # jazyka serveru, cislo v sekundach ne.
+        $sw = [System.Diagnostics.Stopwatch]::StartNew()
+        $roboOut = & robocopy $SourcePath $share /E /R:2 /W:2 /NFL /NDL /NP /NJH /NJS 2>&1 | Out-String
+        $sw.Stop()
+        if ($LASTEXITCODE -ge 8) {
+            $posledni = ($roboOut -split '\r?\n' | Where-Object { $_.Trim() } | Select-Object -Last 5) -join ' | '
+            throw "robocopy selhal (kod $LASTEXITCODE = $(Vysvetli-RoboKod $LASTEXITCODE)): $posledni"
+        }
+        $secs  = [Math]::Max($sw.Elapsed.TotalSeconds, 0.01)
+        $mbps  = [Math]::Round(($sourceSizeBytes / 1MB) / $secs, 1)
+        $rychlost = "kopie $([Math]::Round($sourceSizeBytes/1MB,1)) MB za $([Math]::Round($secs,1))s ($mbps MB/s)"
         & robocopy (Split-Path $watchSrc) "$share\scripts" (Split-Path $watchSrc -Leaf) /R:2 /W:2 /NFL /NDL /NP /NJH /NJS | Out-Null
 
         # Sluzba pres sc.exe (SCM/named-pipes – stejna cesta jako robocopy/SMB, co funguje;
@@ -125,7 +153,7 @@ $perHost = {
         Start-Sleep -Seconds 2
         $st = (& sc.exe "\\$h" query $ServiceName 2>&1 | Out-String)
         $wd = $(if ($wOk) { 'wd ok' } else { 'wd FAIL: ' + ($wOut.Trim() -replace '\s+',' ') })
-        $extra = $wd + '; ' + $toMsg
+        $extra = $rychlost + '; ' + $wd + '; ' + $toMsg
         if ($st -match 'RUNNING') { $r.Status = 'OK'; $r.Detail = ($(if ($exists) { 'reinstalled' } else { 'installed' }) + '; ' + $extra) }
         else                      { $r.Status = 'STARTED?'; $r.Detail = 'sluzba vytvorena, stav nepotvrzen RUNNING; ' + $extra }
     }
@@ -143,7 +171,8 @@ foreach ($h in $targetHosts) {
     [void]$ps.AddScript($perHost).
         AddArgument($h).AddArgument($InstallDir).AddArgument($ServiceName).
         AddArgument($SourcePath).AddArgument($watchSrc).
-        AddArgument([bool]$DryRun).AddArgument([bool]$ReinstallExisting)
+        AddArgument([bool]$DryRun).AddArgument([bool]$ReinstallExisting).
+        AddArgument($sourceSizeBytes)
     $running += [pscustomobject]@{ PS = $ps; Handle = $ps.BeginInvoke() }
 }
 $results = foreach ($j in $running) { $j.PS.EndInvoke($j.Handle); $j.PS.Dispose() }

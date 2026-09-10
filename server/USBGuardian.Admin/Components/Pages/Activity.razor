@@ -48,6 +48,21 @@ tady je vidět <em>provoz</em>, ne jen výsledek.</p>
     <input class="inp" style="min-width:220px" @bind="_hledat" @bind:event="onchange" @bind:after="Nacti"
            placeholder="hledat v textu / stanici" />
 
+    <span class="sep"></span>
+    <details class="inp" style="display:inline-block; padding:4px 8px">
+        <summary style="cursor:pointer">Skrýt zdroje (@_skryteZdroje.Count)</summary>
+        <div style="padding-top:6px">
+            @foreach (var z in _zdroje)
+            {
+                <label style="display:block; white-space:nowrap">
+                    <input type="checkbox" checked="@_skryteZdroje.Contains(z)"
+                           @onchange="@(e => PrepnoutSkryty(z, (bool)e.Value!))" /> @z
+                </label>
+            }
+            <span class="muted">Platí jen pro "všechny zdroje" – uloženo sdíleně pro celou konzoli.</span>
+        </div>
+    </details>
+
     <a class="btn" href="@ExportUrl()" target="_blank" rel="noopener"
        title="Stáhnout aktuální výběr jako CSV pro Excel">⬇ CSV</a>
 </div>
@@ -96,10 +111,13 @@ else
     /// <summary>Strop výběru – deník roste rychle a stránka není archiv.</summary>
     private const int Strop = 500;
 
+    private const string KlicSkryteZdroje = "activity.hiddenSources";
+
     private readonly List<ActivityEntry> _radky = new();
     private List<string> _zdroje = new();
+    private HashSet<string> _skryteZdroje = new(StringComparer.OrdinalIgnoreCase);
     private string _hodin = "8", _uroven = "", _zdroj = "", _hledat = "";
-    private bool _zive, _nacitam;
+    private bool _zive, _nacitam, _skryteNacteny;
     private DateTime _nacteno = DateTime.Now;
     private string? _chyba;
     private Timer? _casovac;
@@ -114,6 +132,14 @@ else
         {
             await using var db = await DbFactory.CreateDbContextAsync();
 
+            if (!_skryteNacteny)
+            {
+                var ulozeno = (await db.AppSettings.FirstOrDefaultAsync(s => s.Key == KlicSkryteZdroje))?.Value ?? "";
+                _skryteZdroje = ulozeno.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+                _skryteNacteny = true;
+            }
+
             IQueryable<ActivityEntry> q = db.ActivityLog;
             if (int.TryParse(_hodin, out var h) && h > 0)
             {
@@ -121,7 +147,16 @@ else
                 q = q.Where(a => a.Timestamp >= od);
             }
             if (!string.IsNullOrEmpty(_uroven)) q = q.Where(a => a.Level == _uroven);
-            if (!string.IsNullOrEmpty(_zdroj)) q = q.Where(a => a.Source == _zdroj);
+            if (!string.IsNullOrEmpty(_zdroj))
+            {
+                // Explicitní výběr jednoho zdroje má přednost – i kdyby byl mezi
+                // defaultně skrytými (jinak by ses k němu přes dropdown nedostal).
+                q = q.Where(a => a.Source == _zdroj);
+            }
+            else if (_skryteZdroje.Count > 0)
+            {
+                q = q.Where(a => !_skryteZdroje.Contains(a.Source));
+            }
             if (!string.IsNullOrWhiteSpace(_hledat))
             {
                 var s = _hledat.Trim();
@@ -141,6 +176,20 @@ else
         }
         catch (Exception ex) { _chyba = ex.Message; }
         finally { _nacitam = false; }
+    }
+
+    private async Task PrepnoutSkryty(string zdroj, bool skryt)
+    {
+        if (skryt) _skryteZdroje.Add(zdroj); else _skryteZdroje.Remove(zdroj);
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var hodnota = string.Join(",", _skryteZdroje.OrderBy(x => x));
+        var row = await db.AppSettings.FirstOrDefaultAsync(s => s.Key == KlicSkryteZdroje);
+        if (row is null) db.AppSettings.Add(new AppSetting { Key = KlicSkryteZdroje, Value = hodnota });
+        else             row.Value = hodnota;
+        await db.SaveChangesAsync();
+
+        await Nacti();
     }
 
     private void PrepnoutZive()

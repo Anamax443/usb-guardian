@@ -26,11 +26,14 @@ public class AgentDeployService : BackgroundService
 {
     private readonly ILogger<AgentDeployService> _logger;
     private readonly IDbContextFactory<AppDbContext> _dbFactory;
+    private readonly ActivityLogger _dennik;
 
-    public AgentDeployService(ILogger<AgentDeployService> logger, IDbContextFactory<AppDbContext> dbFactory)
+    public AgentDeployService(ILogger<AgentDeployService> logger, IDbContextFactory<AppDbContext> dbFactory,
+                               ActivityLogger dennik)
     {
         _logger    = logger;
         _dbFactory = dbFactory;
+        _dennik    = dennik;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -50,6 +53,12 @@ public class AgentDeployService : BackgroundService
     private async Task<int> RunOnceAsync(CancellationToken ct)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
+
+        // Nezávisle na "auto-nasazení zapnuto/vypnuto" - stejný scheduled task a stejné
+        // soubory používá i ruční "Nasadit teď", takže výsledek se má promítnout vždycky.
+        try { await DeployResultIngestor.RunAsync(db, _dennik); }
+        catch (Exception ex) { _logger.LogWarning(ex, "Načtení výsledku posledního nasazení selhalo"); }
+
         var cfg = await DeployConfig.LoadAsync(db);
 
         if (!cfg.Enabled)

@@ -5,6 +5,7 @@
 // Singleton; běh chráněn semaforem (manuál nepřekryje časovač).
 // ============================================================
 
+using System.Diagnostics;
 using System.DirectoryServices;
 using Microsoft.EntityFrameworkCore;
 using USBGuardian.Api.Data;
@@ -16,6 +17,7 @@ public class AdSyncRunner
 {
     private readonly ILogger<AdSyncRunner> _logger;
     private readonly IDbContextFactory<AppDbContext> _dbFactory;
+    private readonly ActivityLogger _dennik;
     private readonly string _searchBase;
     private readonly bool _includeDisabled;
     private readonly SemaphoreSlim _gate = new(1, 1);
@@ -26,10 +28,12 @@ public class AdSyncRunner
     public AdSyncRunner(
         ILogger<AdSyncRunner> logger,
         IDbContextFactory<AppDbContext> dbFactory,
+        ActivityLogger dennik,
         IConfiguration config)
     {
         _logger          = logger;
         _dbFactory       = dbFactory;
+        _dennik          = dennik;
         _searchBase      = config["AdSync:SearchBase"] ?? string.Empty;
         _includeDisabled = bool.Parse(config["AdSync:IncludeDisabled"] ?? "false");
     }
@@ -41,6 +45,7 @@ public class AdSyncRunner
         if (!await _gate.WaitAsync(0, ct))
             return "AD sync právě běží…";
 
+        var sw = Stopwatch.StartNew();
         try
         {
             var adComputers = QueryActiveDirectory();
@@ -101,12 +106,14 @@ public class AdSyncRunner
             LastRunUtc  = now;
             LastSummary = $"{adComputers.Count} v AD · +{inserted} nových · {updated} aktualizováno · {gone} už není v AD";
             _logger.LogInformation("AD sync hotov: {Summary}", LastSummary);
+            _dennik.Log("adsync", $"{LastSummary} ({sw.Elapsed.TotalSeconds:0.0}s)");
             return LastSummary;
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "AD sync selhal");
             LastSummary = "chyba: " + ex.Message;
+            _dennik.Log("adsync", $"AD sync selhal po {sw.Elapsed.TotalSeconds:0.0}s: {ex.Message}", ActivityLevel.Error);
             return LastSummary;
         }
         finally
