@@ -52,34 +52,58 @@ public class DeviceBlocker
         // Escapujeme PNPDeviceID pro PowerShell
         var escapedId = pnpDeviceId.Replace("'", "''").Replace("&", "`&");
 
+        // Disable-PnpDevice obalen v try/catch (-ErrorAction Stop): bez toho je výchozí
+        // $ErrorActionPreference 'Continue', takže nedokončující chyba (zařízení nejde
+        // deaktivovat) nezastaví skript a "BLOCKED" se vypíše i po SELHÁNÍ Disable-PnpDevice.
+        // Stejný nález/oprava jako dřív u UnblockDevice (§8.4 HANDOFF) - tam BLOCKED/FAILED,
+        // tady stejný vzor.
         var script = $@"
             $device = Get-PnpDevice | Where-Object {{ $_.InstanceId -like '*{escapedId}*' }}
             if ($device) {{
-                Disable-PnpDevice -InstanceId $device.InstanceId -Confirm:$false
-                Write-Output ('BLOCKED:' + $device.InstanceId)
+                try {{
+                    Disable-PnpDevice -InstanceId $device.InstanceId -Confirm:$false -ErrorAction Stop
+                    Write-Output ('BLOCKED:' + $device.InstanceId)
+                }} catch {{
+                    Write-Output ('FAILED:' + $_.Exception.Message)
+                }}
             }} else {{
                 Write-Output 'NOT_FOUND'
             }}
         ";
 
         var result = RunPowerShell(script);
+        var blockResult = InterpretBlockOutput(result, pnpDeviceId);
 
-        if (result.Contains("BLOCKED"))
+        if (blockResult.IsSuccess)
         {
             _logger.LogWarning("Zařízení DEAKTIVOVÁNO: {PnpId}", pnpDeviceId);
             TrackBlocked(pnpDeviceId, deviceKey);   // zapamatovat (+ klíč pro reconciliaci s whitelistem)
-            return BlockResult.Success(pnpDeviceId);
         }
         else if (result.Contains("NOT_FOUND"))
         {
             _logger.LogWarning("Zařízení nenalezeno v PnpDevice: {PnpId}", pnpDeviceId);
-            return BlockResult.Failed("Zařízení nenalezeno");
         }
         else
         {
-            _logger.LogError("Neočekávaný výstup PowerShell: {Output}", result);
-            return BlockResult.Failed($"PowerShell chyba: {result}");
+            _logger.LogError("Blokování selhalo pro {PnpId}: {Error}", pnpDeviceId, blockResult.ErrorMessage);
         }
+
+        return blockResult;
+    }
+
+    // --------------------------------------------------------
+    // Čistá interpretace výstupu blokovacího skriptu (bez I/O, bez vedlejsich efektu) -
+    // testovatelná odděleně od RunPowerShell/TrackBlocked.
+    // --------------------------------------------------------
+    internal static BlockResult InterpretBlockOutput(string output, string pnpDeviceId)
+    {
+        if (output.Contains("BLOCKED"))
+            return BlockResult.Success(pnpDeviceId);
+        if (output.Contains("NOT_FOUND"))
+            return BlockResult.Failed("Zařízení nenalezeno");
+        if (output.Contains("FAILED"))
+            return BlockResult.Failed($"Disable-PnpDevice selhalo: {output.Trim()}");
+        return BlockResult.Failed($"PowerShell chyba: {output}");
     }
 
     // --------------------------------------------------------
