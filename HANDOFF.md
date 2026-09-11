@@ -471,6 +471,31 @@ teorii (Event Log zdroj „Service Control Manager" 7000/7009/7011 kolem 8:22), 
 `EnsureCreatedAsync` odolnější vůči pomalému startu SQL Serveru (timeout/retry mimo kritickou cestu
 startu), případně zvýšit service start timeout přes `HKLM\SYSTEM\CurrentControlSet\Control\ServicesPipeTimeout`.
 
+### 5.14 Zmlklý agent = potvrzený ping + druhý deploy incident téhož dne (11.09.2026)
+
+**Feature:** „Zmlklo agentů" se počítalo čistě z `LastSeen` (agent dlouho neodpověděl), bez ohledu na to,
+jestli je PC vůbec zapnuté – vypnutý notebook přes noc vypadal stejně „zmlkle" jako spadlá služba na
+běžícím stroji. Přidán `Computer.LastPingOk/LastPingAt` (`database/10_ping_status.sql`) + nová
+`PingMonitorService` (Admin, `ping.intervalMinutes`, default 5 min), co na pozadí pinguje jen stanice,
+které hlásí agenta a nejsou čerstvé. „Zmlklý" teď vyžaduje **potvrzený** ping (PC běží, agent mlčí);
+nová kategorie `ProbablyOff` (ping neodpovídá) dostala vlastní pill „vypnuto?" ve sloupci Stav – dřív se
+schovávala pod obecné „hlásí", což byl viditelný rozpor (filtr „zmlklý" ukazoval řádky s pill „hlásí").
+Klasifikace vytažena do čisté `StationStatus.cs` (10 nových testů).
+
+**Druhý deploy incident (cca 9:50–10:05):** Ruční `robocopy` konzole na `APP_SERVER` **neměl `/XF
+appsettings.local.json`** (na rozdíl od `Deploy-Api.cmd`, který ho vylučuje od začátku) – přepsal
+produkční `appsettings.local.json` starým lokálním vývojovým souborem. Následky: `Kestrel:Endpoints:Http:Url`
+na `127.0.0.1` (konzole neposlouchala zvenku, i když SCM hlásil RUNNING), `Authorization:DevAllowAll=true`
+(vypnuté ověřování oprávnění – naštěstí bez efektu, protože nebyla dostupná zvenku), a connection string na
+`127.0.0.1` místo skutečného `SQL_SERVER` (odtud `SqlException` v Event Logu u `BetaRolloutService` i
+`ServiceRestartService`). Oprava: záloha rozbitého souboru, přepsání jen `ConnectionStrings` na skutečný
+server, **odstranění** `DevAllowAll`/`Kestrel` klíčů (dopočítají se z šablony `appsettings.json`, která má
+bezpečné výchozí `false`/`0.0.0.0:4200`) – bezpečnější než hádat chybějící hodnoty (`AdminGroups` zůstala
+nedotčená, protože ji ten starý soubor vůbec nepřepisoval). **Nápravné opatření:** nový
+`scripts/Deploy-Console.cmd` (stejný stop→kopie s `/XF`→start→ověř vzor jako `Deploy-Api.cmd`, přes UNC na
+`APP_SERVER_HOST`) – ruční robocopy bez vyloučení už se nemá čím opakovat. Stará lokální
+`appsettings.local.json` v repu (nebezpečná, z 18.6.) smazána.
+
 ### 5.5 Roadmapa (pending)
 - **Monitoring expirace podpisového certu** – `CN=powershell.domena.loc` platí do 2028-06-17; alert e-mailem z konzole.
 - **„Vše server na APP_SERVER":** přesun API runtime z SQL_SERVER na APP_SERVER (konzole+API na APP_SERVER, DB na SQL_SERVER, agent repoint na
