@@ -100,7 +100,9 @@ od 500+ agentů nesmí ovlivnit adminní použití). Čte/píše SQL_SERVER, mod
 | `Computers` (Stanice) | Inventář z AD; dlaždice = filtr; cesta v AD (OU); tlačítko Aktualizovat z AD |
 | `Settings` / `Docs` | Efektivní konfigurace (read-only) / nápověda v prohlížeči |
 | `AdSyncRunner` | Logika AD syncu – volatelná z časovače i z UI (semafor proti souběhu) |
-| `AdSyncService` | Časovač nad `AdSyncRunner` (interval z configu) |
+| `AdSyncService` | Časovač nad `AdSyncRunner` – **běží vždy** jako hosted service, `adsync.enabled`/`adsync.intervalMinutes` čte z `AppSettings` při každém tiku (dřív jen z configu při startu, viz [AD sync](#ad-sync)) |
+| `PingMonitorService` | Časovač (`ping.intervalMinutes`, default 5 min) – pinguje jen stanice, co hlásí agenta a nejsou čerstvé; výsledek do `Computer.LastPingOk`/`LastPingAt` (viz [Zmlklý agent vs. vypnuté PC](#zmlklý-agent-vs-vypnuté-pc-ping)) |
+| `StationStatus` | Čistá, testovaná klasifikace stavu stanice (Silent/ProbablyOff) ze tří signálů – sdílená mezi stránkou Stanice a kontrolou „Zmlklí agenti" |
 | `AppInfo` | Commit hash buildu (MSBuild `git rev-parse` stamp z gitu) → patička + `:4200/api/version` |
 
 **Autorizace:** Windows Auth (Negotiate). Přístup jen členům `Authorization:AdminGroups`
@@ -116,6 +118,35 @@ AdSyncRunner: name → Hostname, dNSHostName → Domain, operatingSystem, distin
         ↓  upsert (klíč = hostname), NEpřepisuje LastSeen/AgentVersion (vlastní agent/API)
 SQL Computers + reconciliation: InActiveDirectory; "v AD ⨯ hlásí agenta" = kam chybí agent
 ```
+
+**Zapnutí/vypnutí z konzole, ne jen ze souboru (11.09.2026):** `AdSyncService` je dnes registrovaná jako hosted
+service **vždy** – stejný vzor, jaký už používají `AgentDeployService`/`BetaRolloutService`. Dřív o tom, jestli se
+služba vůbec zaregistruje, rozhodovalo `AdSync:Enabled` v `appsettings.local.json`, čtené **jen při startu**
+(`Program.cs`) – přepnutí tak vyžadovalo úpravu souboru na serveru a restart konzole; stránka Nastavení hodnotu
+jen zobrazovala, bez možnosti změnit. `adsync.enabled`/`adsync.intervalMinutes` teď žijí v `AppSettings` a čtou se
+při **každém tiku**, takže mají v Nastavení skutečný přepínač + uložení intervalu (bez restartu). `AdSync:SearchBase`/
+`AdSync:IncludeDisabled` zůstávají v souboru – ty se mění výjimečně, na rozdíl od provozního on/off.
+
+### Zmlklý agent vs. vypnuté PC (ping)
+
+Dřív se „zmlklo agentů" počítalo čistě z `LastSeen` (agent dlouho neodpověděl) – bez ohledu na to, jestli je PC
+vůbec zapnuté. Vypnutý notebook přes noc tak vypadal na stránce Stanice stejně „zmlkle" jako spadlá služba na
+běžícím stroji, přestože jde o naprosto různé situace (jedna nechce žádnou akci, druhá ano).
+
+```
+PingMonitorService (časovač, ping.intervalMinutes, default 5 min)
+   ↓ kandidáti = hlásí agenta (AgentVersion/LastSeen vyplněné) A nejsou čerství (LastSeen < comm.silentAfterMinutes)
+   ↓ ping jen těchto kandidátů (čerství se nepingují – je jich naprostá většina)
+Computer.LastPingOk / LastPingAt   (database/10_ping_status.sql)
+   ↓
+StationStatus.Silent      = hlásí agenta ∧ není čerstvý ∧ LastPingOk = true   → „zmlklý", stojí za pozornost
+StationStatus.ProbablyOff = hlásí agenta ∧ není čerstvý ∧ LastPingOk = false  → pill „vypnuto?", žádná akce
+        (LastPingOk zatím null → zmlklý čeká na první ping, pill „warn")
+```
+
+Klasifikace je vytažená do čisté, jednotkově testované `StationStatus.cs` – používá ji **jak** stránka Stanice
+(dlaždice „Zmlklo agentů" + sloupec „Kom."), **tak** kontrola „Zmlklí agenti" na stránce Kontroly, takže obě
+místa nutně souhlasí (dřív počítala vlastní, nezávislou – a nekonzistentní – logiku jen z `LastSeen`).
 
 ## Lokální admin konzole agenta
 
@@ -416,9 +447,21 @@ robocopy" by na běžícím agentovi přepsala část DLL, kopie zamčeného `.e
 | Čistá instalace na stanice bez agenta | `Deploy-AgentFleet.ps1` | `USBGuardian-AutoDeploy` | `gmsa-deploy$` |
 | Aktualizace nasazeného agenta | `Update-Agent.cmd` | `USBGuardian-UpdateAgent` (+ `-UpdateAgentBeta`) | `gmsa-deploy$` |
 | Nasazení API na jeho server | `Deploy-Api.cmd` | `USBGuardian-ApiDeploy` | `gmsa-srvdeploy$` |
+| Nasazení konzole na `APP_SERVER` | `Deploy-Console.cmd` | — (ruční spuštění přes UNC, ne scheduled task) | osobní admin účet s přístupem na `APP_SERVER` |
 
-Oba `.cmd` drží stejný vzor: **zastav službu → počkej na `STOPPED` → zkopíruj (bez `*.local.json`) → nastartuj →
-ověř `RUNNING`**; návratový kód = počet neúspěšných stanic, log v `C:\ProgramData\USBGuardian\deploy\`.
+Všechny tři `.cmd` skripty drží stejný vzor: **zastav službu → počkej na `STOPPED` → zkopíruj (bez `*.local.json`) →
+nastartuj → ověř `RUNNING`**; log v `C:\ProgramData\USBGuardian\deploy\`. `Deploy-Api.cmd`/`Update-Agent.cmd` běží
+přes scheduled task nad více cíli a vrací návratový kód = počet neúspěšných stanic; `Deploy-Console.cmd` má jediný
+cíl a vrací přímo 0/nenulový kód. **Log vždy míří na cílový stroj** (kde nasazovaná komponenta běží), ne na stroj,
+ze kterého se skript spouští – ten typicky nemá právo zapisovat do jeho `C:\ProgramData`.
+
+> **Proč `Deploy-Console.cmd` (11.09.2026):** na rozdíl od API neměla konzole vlastní deploy skript – nasazovala se
+> ručním `robocopy` na `APP_SERVER`, kam (na rozdíl od `SQL_SERVER`) má admin účet přímý přístup, takže se to nikdy
+> neřešilo přes scheduled task/gMSA jako `Deploy-Api.cmd`. Jednou vynechané `/XF appsettings.local.json` v ručním
+> příkazu přepsalo produkční konfiguraci (skutečný SQL server, `Kestrel` binding, `Authorization:DevAllowAll`)
+> lokálním vývojovým souborem. Nový skript je modelovaný na `Deploy-Api.cmd` (stejné stop → kopie s `/XF` → start →
+> ověř), volaný ručně přes UNC proti `APP_SERVER_HOST` – vylučuje přesně tuhle třídu chyby, aniž by konzole
+> potřebovala vlastní scheduled-task identitu navíc (admin už na `APP_SERVER` přístup má).
 
 **Dávka (.cmd), ne PowerShell:** prostředí vynucuje `AllSigned` přes GPO; `.cmd` mu nepodléhá, takže změna
 nasazovacího kroku nevyžaduje nový podpis.
@@ -475,6 +518,10 @@ Klíč `cmd.report.<HOST>` v `AppSettings` slouží i jako audit „naposledy vy
 Tabulka `AppSettings` (key/value, migrace 06) spravovaná z Nastavení; `AccessCache` singleton:
 - `policy.enforce` – vynucovat jen schválená média (agent začne respektovat po heartbeat distribuci – pending).
 - `comm.silentAfterMinutes` – práh „zmlklého agenta" (default 180); hranice pro tečku komunikace i dlaždici na Stanicích.
+- `ping.intervalMinutes` – jak často `PingMonitorService` ověřuje dostupnost zmlklých stanic (default 5 min), viz
+  [Zmlklý agent vs. vypnuté PC](#zmlklý-agent-vs-vypnuté-pc-ping).
+- `adsync.enabled` / `adsync.intervalMinutes` – zapnutí/vypnutí a interval AD synchronizace; dřív jen
+  `AdSync:Enabled` v souboru + restart konzole, viz [AD sync](#ad-sync).
 - `deploy.*` – auto-enrollment (viz níže): `enabled`/`dryRun`/`defaultEnroll`/`intervalMinutes`/`maxPerRun`/`allowHosts`/`includeHosts`/`excludeHosts`/`targetsFile`/`lastRun`.
   **Model default + výjimky:** `defaultEnroll` (Nastavení) = výchozí pro nově objevené PC (nasazovat/ne). Per-stanice výjimky
   se dělají **přímo v Stanicích** (sloupec „Nasazení", + hromadně „Vyřadit/Zařadit vše"); ukládají se jako `includeHosts`
@@ -506,15 +553,18 @@ Nastavení: [auto-deploy-setup.md](auto-deploy-setup.md).
 - **Přehled** – dlaždicový souhrn napříč listy + filtr (období/akce/fulltext) + kumulace (GroupBy přes
   anonymní typ → in-memory map) + sloupec „Schváleno" dle aktivního whitelistu. Tabulka „Detailně" má
   **řaditelné hlavičky** (řazení v DB přes query-string, před `Take(200)`).
-- **Stanice** – AD inventář, filtr, cesta v AD (OU), ikona komunikace (dle čerstvosti `LastSeen`),
-  dlaždice „Zmlklo agentů" (hlásí agenta, ale `LastSeen` starší než práh `comm.silentAfterMinutes` – možný výpadek/tamper),
+- **Stanice** – AD inventář, filtr, cesta v AD (OU), ikona/pill komunikace (dle čerstvosti `LastSeen` **a**
+  potvrzeného pingu, viz [Zmlklý agent vs. vypnuté PC](#zmlklý-agent-vs-vypnuté-pc-ping)), dlaždice „Zmlklo agentů"
+  (hlásí agenta, není čerstvý **a** ping potvrzuje, že PC běží – jinak jen pill „vypnuto?", žádná akce),
   tlačítko „Vyžádat data" (řádek/hromadně) → [ReportNow](#vyžádání-dat-na-klik-reportnow). Sloupec **„Nasazení"** u stanic
   bez agenta = přepínač zařadit/vyřadit z auto-enrollmentu (výjimka proti `deploy.defaultEnroll`); hromadně „Vyřadit/Zařadit vše".
 - **Whitelist** – serial-only zadání + backfill VID/PID z incidentů + import + inline edit + `IsActive` checkbox.
   **Kapacita** média se dotahuje z incidentů (max `SizeBytes` dle sériáku, display-only – na whitelistu se nedrží).
 - **Kontroly** – health checks serveru i klientů. Seznam kontrol se ukáže **dopředu** a odškrtává se s průběžnými
-  výsledky (aby bylo vidět, že to běží, ne jen že se něco točí); prodleva mezi kroky je záměrná. Export výsledků
-  do CSV / HTML / PDF (tisk) / TXT. Součástí je i **plánovaný restart** služeb (server i klient).
+  výsledky (aby bylo vidět, že to běží, ne jen že se něco točí); prodleva mezi kroky je záměrná. Kontrola „Zmlklí
+  agenti" používá stejnou `StationStatus` klasifikaci jako stránka Stanice (jedno místo pravdy, viz
+  [Zmlklý agent vs. vypnuté PC](#zmlklý-agent-vs-vypnuté-pc-ping)). Export výsledků do CSV / HTML / PDF (tisk) / TXT.
+  Součástí je i **plánovaný restart** služeb (server i klient).
 - **Aktivita** – deník provozu (viz [Deník provozu](#deník-provozu-activitylog)): filtry (období, úroveň, zdroj,
   hledání), režim **živě** s obnovou po 3 s, export CSV.
 - **Databáze** – read-only přehled obsahu DB: počty záznamů v tabulkách, rozsah incidentů (kontrola retence),
@@ -580,6 +630,16 @@ Bajt-exact: stejný blob string se **podepisuje** i **servíruje** (`/api/whitel
 bez BOM (SHA-256 / Pkcs1), takže RSA podpis sedí. **Trade-off (vědomě zvolený):** privátní klíč je na serveru `APP_SERVER`
 (chránit ACL/DPAPI) výměnou za **plnou automatizaci** (žádný ruční offline krok). Offline `WhitelistSigner` zůstává
 jako nástroj pro generování klíčů / ruční ověření.
+
+> **`POST /api/whitelist/devices` publikuje jinak – jen katalog (11.09.2026):** tenhle endpoint je pro externí
+> nástroje/L1 správu mimo konzoli (konzole sama vždy jde přímo přes `WhitelistPublisher.PublishAsync`, ne přes API).
+> Dřív volal `BumpWhitelistVersion()`, který při každém přidání zařízení touhle cestou deaktivoval poslední
+> PODEPSANOU verzi a nahradil ji novou „aktivní" `WhitelistVersion` s prázdným `Json`/`Signature` – API totiž
+> nemá (a nesmí mít) přístup k privátnímu podpisovému klíči, ten je jen na `APP_SERVER` (viz výše). `GetWhitelist`/
+> `GetSignature` na takovou verzi sice bezpečně vrátí 404 (fail-secure), ale nově přidané zařízení se k agentům
+> nedostalo a **celý whitelist mezitím tiše „zmizel"** všem, dokud si toho někdo nevšiml a ručně nepublikoval v
+> konzoli. `BumpWhitelistVersion` je odstraněná; `AddDevice` dnes jen zapíše katalogovou položku a v odpovědi i v
+> deníku řekne, že publikace je samostatný ruční krok („Publikovat nyní" v konzoli).
 
 ## Vynucování: server → agent + lokální break-glass (Fáze 2+3)
 

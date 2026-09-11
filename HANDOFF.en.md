@@ -25,8 +25,8 @@ The server console aggregates data, keeps a station inventory from AD and shows 
 | **Console account** | **LocalSystem** = `DOMENA\APP_SERVER$` (SQL grant: read all + write Computers/WhitelistDevices/WhitelistVersions/AppSettings) |
 | **Console authorization** | AD `DOMENA\IT-Admins` + whitelist `DOMENA\it-admin` (+ DB list from Settings) |
 | **Agent↔API encryption** | HTTPS + **thumbprint pinning** (no CA) — verified end-to-end (heartbeat OK from PC-01) |
-| **AD sync** | enabled 60 min + on-demand; **213 in AD, ~212 without agent** |
-| **Live commit** (2026-09-04 16:05) | **console `3a6a2b2`** (redeployed: the "Incident queue (spool)" check verified live via `/api/health` – 16 checks, the new one reports `ok`/`empty`) · **API `bbf6772`** (redeployed: durable incident spool `8fbfa6d` + spool monitoring `2766344` + dedup fix `e8d702c` + FallbackPolicy `0bc6709` + hostname warn-only `58f43f3`, plus the earlier `297ac7a`) · **agent beta `924b9b8`** (BARTKOVAJW11, CERNYSW11, TRNKAMW11N) · **agent stable `cb8ef1d`** (PC-01/TRNKAMW11, rest of the fleet — `56b4235`/the whitelist-expiry fix is git-only so far, not rolled out to the fleet). Local console verified end-to-end on CERNYSW11 — see 5.11. External security audit + remediation — see 5.12 |
+| **AD sync** | enabled (`adsync.enabled=true` in DB), 60 min + on-demand; toggleable from Settings since 2026-09-11 (see 5.15) |
+| **Live commit** (2026-09-11, end of day) | **console `00cebc3`** (ping-gated silent agent + PingMonitorService + AD sync toggleable from the UI + fix for Deploy-Console.cmd/Deploy-Api.cmd, see 5.14/5.15) · **API `8da4843`** (P1 steps 1–2 deployed – GET /api/incidents admins-only, hostname 403; steps 3–6 either agent-only or not urgent to deploy, see 5.13/5.15) · **agent beta+stable `924b9b8`** (unchanged – steps 3–5 of the P1 list are waiting for a joint beta wave). Security audit + remediation 2026-09-04 — see 5.12; deeper review pass 2026-09-10–11 — see 5.13/5.15 |
 | **Agent rollout – the routine that works** | package → archive `…\USBGuardianAgentVersions\<commit>` → **beta to a single station** (temporarily overwritten `update-beta.txt`) → verify → beta to the rest → only then **stable**. Log `…\deploy\update-agent.log`; the console's "Agent version" only catches up on the next heartbeat (≤2 min), so right after a rollout it still shows the old one |
 | **Console – pages** | Overview (filter+aggregation+sort, capacity, **CSV export + manager report with charts**), Stations (AD inventory + "Agents gone silent" + "Request data" + **Deployment / bulk exclude-include**), Whitelist (**capacity + catalog filter + auto-published signed version**), Settings (enforcement/access/email/alerts/monitoring/auto-enrollment+default PC/retention/**Maintenance: reload settings**), **Database**, **Health checks**, Documentation (+HTML animation) |
 | **Enforcement (P1-3)** | **whitelist 1:1** (server-side auto-sign, internal RSA key on APP_SERVER) → **enforcement** server→agent (`policy.enforce` in heartbeat) → **break-glass** (local console 5080, offline, logged, cleared on sync) + **auto-re-enable** + whitelist reconciliation. Local console: service restart, break-glass, whitelist list |
@@ -258,6 +258,36 @@ re-signing on every change.
 > `sc sdset` (one ACE, not an account holding the keys to the server), or let the server gMSA do the restart the
 > same way it does the deploy.
 
+### 5.9 Updating an already-deployed agent (2026-09-03)
+The fleet script only handled a **clean install**. `-ReinstallExisting` went straight into `robocopy` without
+stopping the service — a running `USBGuardian.exe` is locked, so part of the DLLs would get overwritten, the
+`.exe` copy would fail, and the station would end up with a **mix of versions** while the deploy still reports
+success. That's why the update is a separate task:
+
+`scripts/Update-Agent.cmd <SOURCE> <HOST | HOST_FILE> [SERVICE]` — stops the service, **waits for `STOPPED`**,
+copies, starts it and **verifies `RUNNING`**. Skips a station with no service (a clean install goes through
+AutoDeploy). The return code is the number of failed stations; log in
+`C:\ProgramData\USBGuardian\deploy\update-agent.log`.
+
+Runs as the **`USBGuardian-UpdateAgent`** task on `APP_SERVER` under `gmsa-deploy$`; the station list lives in
+`C:\ProgramData\USBGuardian\deploy\update.txt` (one host per line, `#` = comment).
+
+**A batch file, not PowerShell** — `.cmd` is not subject to `AllSigned`, so changing the update step needs no
+re-signing.
+
+> **Creating the task under the gMSA (gotcha):** `schtasks /Create /RU "…gmsa$"` without a password produces a
+> task with `LogonType=InteractiveToken` → it never starts ("the user has not been granted the requested logon
+> type", event 332). S4U (`/NP`) has no network credentials and can't reach `\\HOST\C$`. Only one approach
+> works: pull the XML of a working task, swap its `<Command>`/`<Arguments>`/`<URI>`, save it as **UTF-16** and
+> register it via `/XML` — that carries `LogonType=Password`, for which the system fetches the gMSA password
+> itself.
+
+> **When the deploy task starts reporting `ERROR_LOGON_FAILURE (0x8007052E)`**, it's not about permissions —
+> it's a stale local copy of the gMSA password. Fix on `APP_SERVER`: `Install-ADServiceAccount gmsa-deploy`.
+
+**Verified on 2026-09-03:** PC-01 skipped straight from `f2bb194` to `560722b`, the Component Versions check
+reports a single agent version. This also cleared out two files that had been sitting in the queue since July.
+
 ### 5.10 Activity log — deployment and what does not add up (2026-09-04)
 `dbo.ActivityLog` + `sp_PurgeActivityLog` are in the DB, grants issued (see Live State), console and API both run
 `5431dce`, and the log is filling up: at 8:16 the **Activity** page showed heartbeats from four stations
@@ -423,6 +453,138 @@ an agent, while "Agent auto-enrollment" in live mode reports "no stations to dep
 – so this is a deliberate opt-in gate (the "PC-01 → .180 → fleet" rollout from 5.3), not a bug.
 To widen the rollout: `Settings → Auto-enrollment → deploy.includeHosts`, once the signing-cert
 GPO trust has rolled out (5.4).
+
+### 5.13 Deeper review pass + P1 remediation (2026-09-10–11)
+An independent, in-depth code pass (not just a static audit like in 5.12) over the whitelist's
+enforcement/authorization/publish workflow scored the system **8.1/10** (idea+architecture 8.8–9/10, pulled
+down by concrete implementation weaknesses). Seven P1 findings, fixed **one step = one commit**, build+tests
+green before every push:
+
+1. **`95465ab`** – `GET /api/incidents` carried the same (class-level) `USBGuardianClients` policy as the rest
+   of the controller → the machine account of ANY station could pull the incident history of the WHOLE fleet.
+   Authorization moved from the class down to individual actions (the same pattern as `WhitelistController`).
+   **Deployed and verified 2026-09-10** (`/api/version` → `95465ab`).
+2. **`1542bbb`** – the hostname in the payload (both heartbeat and incident batch) had been WARN-ONLY since
+   2026-09-04 (see 5.12) – 6 days without a single false positive in Activity (verified directly in the DB),
+   so it was tightened to a hard **403 Forbidden** on a mismatch with the authenticated machine identity.
+3. **`8da4843`** – `DeviceBlocker.BlockDevice` could wrongly evaluate a block as successful: `Disable-PnpDevice`
+   was not wrapped in a try/catch, so a non-terminating error (the default `$ErrorActionPreference` is
+   `Continue`) got lost and the script printed `BLOCKED` anyway. The same class of bug already fixed earlier
+   for `UnblockDevice` (§8.4). Fixed, plus `InterpretBlockOutput` pulled out into a clean, testable function (4
+   new tests, `InternalsVisibleTo` introduced for the agent for the first time).
+
+**Still remaining from the P1 list:** wildcard PnP ID matching (unlike `UnblockDevice`, `BlockDevice` doesn't
+try an exact match first), the audit trail can write `Blocked` before the `HandleBlock` result confirms it
+(`PolicyEnforcer.HandleDevice` writes the incident BEFORE calling `HandleBlock`), a whitelist publish
+inconsistency around a new active unsigned version, and the spool retry not restarting itself after a SQL
+outage without a service restart.
+
+**Side incident during the deployment of step 2 (2026-09-11, approx. 8:21–8:46):** After redeploying the API
+on `SQL_SERVER`, the `USB Guardian API` service **failed to come back up** once the old version was stopped
+(the deploy task ended with `Last Result: 5`, ports 5443/5050 stopped listening for ~25 min – the whole fleet
+reported "API unavailable (offline mode)"). The Event Log showed the process getting as far as logging the TLS
+cert pin and then nothing – no exception, no confirmation of listening. Suspect spot: `Program.cs` lines
+210–215, `db.Database.EnsureCreatedAsync()` runs synchronously BEFORE `app.RunAsync()` – if SQL Server was
+slow/unavailable at that moment, the Windows SCM killed the service on the start timeout before Kestrel ever
+got going (no exception logged, because it was an external kill, not a crash). **Unrelated to the fix's code**
+(steps 1–2 don't touch the DB or startup). A manual `Start-Service`/restart via the Services console fixed it;
+the API is now running on `8da4843`. **Open:** verify the theory (Event Log source "Service Control Manager"
+7000/7009/7011 around 8:22), consider making `EnsureCreatedAsync` more resilient to a slow SQL Server startup
+(timeout/retry off the critical startup path), or possibly raise the service start timeout via
+`HKLM\SYSTEM\CurrentControlSet\Control\ServicesPipeTimeout`.
+
+### 5.14 Silent agent = confirmed ping + a second deploy incident the same day (2026-09-11)
+**Feature:** "Silent agents" used to be computed purely from `LastSeen` (the agent hasn't answered in a while),
+regardless of whether the PC was even switched on – a laptop powered off overnight looked exactly as "silent"
+as a crashed service on a running machine. Added `Computer.LastPingOk/LastPingAt`
+(`database/10_ping_status.sql`) plus a new `PingMonitorService` (Admin, `ping.intervalMinutes`, default 5 min)
+that pings, in the background, only the stations that report an agent and aren't fresh. "Silent" now requires a
+**confirmed** ping (the PC is up, the agent is quiet); the new `ProbablyOff` category (the ping doesn't answer)
+got its own "off?" pill in the Status column – previously it hid under the generic "reports" pill, which was a
+visible contradiction (the "silent" filter showed rows with the "reports" pill). The classification was pulled
+out into a clean `StationStatus.cs` (10 new tests).
+
+**Second deploy incident (approx. 9:50–10:05):** The manual console `robocopy` on `APP_SERVER` **did not have
+`/XF appsettings.local.json`** (unlike `Deploy-Api.cmd`, which has excluded it from the start) – it overwrote
+the production `appsettings.local.json` with an old local development file. Consequences:
+`Kestrel:Endpoints:Http:Url` set to `127.0.0.1` (the console didn't listen externally even though the SCM
+reported RUNNING), `Authorization:DevAllowAll=true` (authorization checks disabled – luckily with no effect,
+since it wasn't reachable from outside), and the connection string pointing at `127.0.0.1` instead of the real
+`SQL_SERVER` (hence the `SqlException` entries in the Event Log from both `BetaRolloutService` and
+`ServiceRestartService`). Fix: backed up the broken file, overwrote only `ConnectionStrings` with the real
+server, **removed** the `DevAllowAll`/`Kestrel` keys (they fall back to the `appsettings.json` template, which
+has safe defaults of `false`/`0.0.0.0:4200`) – safer than guessing at missing values (`AdminGroups` was left
+untouched, since the old file never overwrote it at all). **Preventive fix:** a new `scripts/Deploy-Console.cmd`
+(the same stop→copy with `/XF`→start→verify pattern as `Deploy-Api.cmd`, over UNC to `APP_SERVER_HOST`) – there
+is no longer a manual, exclusion-less robocopy left to repeat. The old local `appsettings.local.json` in the
+repo (unsafe, from 2026-06-18) was deleted.
+
+### 5.15 Finishing the P1 list (items 4–6), deploy script fixes, AD sync from the console (2026-09-11)
+
+Continuing from 5.13/5.14 the same day:
+
+4. **`08315d6`** – unlike `UnblockDevice`, `BlockDevice` did not try an exact `Get-PnpDevice
+   -InstanceId` match first — it went straight to a `-like '*id*'` substring match. A USB device can
+   set its VID/PID/serial number to whatever it likes, so in principle a substring match could catch a
+   DIFFERENT connected device too. Unified with the `UnblockDevice` pattern (exact match → wildcard
+   only as a fallback).
+5. **`0982226`** – `HandleDevice` wrote `Incident.Action` = the INTENDED action (`DetermineAction`)
+   BEFORE `HandleBlock` had even run. When the block failed (missing `PNPDeviceId`, a
+   `Disable-PnpDevice` error) and fell back to warn, the incident had already claimed "Blocked" in the
+   meantime – the audit trail could say the media had been blocked even though it stayed accessible.
+   `HandleWarn`/`HandleBlock` now return the ACTUAL outcome, and `HandleDevice` only writes the
+   confirmed result. `DetermineAction` exposed as `internal` for tests.
+6. **`11734f2`** – `POST /api/whitelist/devices` (API) called `BumpWhitelistVersion`, which
+   deactivated the last SIGNED whitelist version and replaced it with a NEW "active" version with an
+   empty `Json`/`Signature` – the API has no access to the signing key (it lives only on `APP_SERVER`,
+   see `WhitelistPublisher.cs`). `GetWhitelist`/`GetSignature` do safely return 404 for an empty
+   version, but a newly added device never reaches the agents until someone notices and manually
+   publishes it from the console – meanwhile the whole whitelist effectively "disappears." The method
+   was removed (it had no other caller); `AddDevice` now just writes to the catalog and tells the
+   caller in the response that publishing is a separate step in the console. The endpoint has no
+   caller today (the console goes straight through `WhitelistPublisher`), so there is no urgency to
+   deploy this.
+
+**Still remaining from the P1 list:** step 7 – the spool retry does not restart itself after a SQL
+outage without a service restart.
+
+**"Silent agents" consistency (`6e5d6d2`):** the check on the Health checks page computed silence
+purely from `LastSeen`, independently of the 5.14 fix on Stations – a second, independent spot with
+the same bug (user finding: "in the checks you didn't account for silent agents whose PC is simply
+switched off"). `CheckAgentsSilentAsync` now uses the same `StationStatus.Silent`/`ProbablyOff`
+classification (a single source of truth).
+
+**Deploy script fixes (`6a80a26`)** – two connected findings from the first real-world use of the new
+`Deploy-Console.cmd`:
+- Unicode box-drawing separators in `rem` comments (`── ... ──`), copied from the same pattern in
+  `Deploy-Api.cmd`, only worked there because `Deploy-Api.cmd` always runs via the scheduled task on
+  `.213` (a different codepage). Running `Deploy-Console.cmd` manually from one's own station broke it
+  into nonsense commands – the same class of bug as the earlier "diacritics corrupted after a UTF-8
+  BOM" (`523d907`). Converted to plain ASCII in both scripts.
+- More serious: `%LOG%` pointed at the LOCAL `%ProgramData%` of the machine the script is launched
+  from – which typically has no permission to write there (verified: Access denied on the author's own
+  station). The failed redirect on `robocopy ... >> %LOG%` meant robocopy NEVER RAN AT ALL, but the
+  script still reported it as "return code 0 (fine)" – the console stayed on the old version while both
+  the log and the console output claimed success (only caught by comparing the DLL size/date on the
+  target against a fresh publish). The log now points at `APPHOST` (where the console actually runs),
+  not at the launching machine. The other `.cmd` scripts (`Archive-AgentVersion`, `Install-Agent`,
+  `Set-AgentVersion`, `Uninstall-Agent`, `Update-Agent`) have the same Unicode characters, but they only
+  ever run through their existing scheduled-task channel – not fixed, out of scope for today.
+
+**AD sync from the console, not just from a file (`00cebc3`)** – `AdSync:Enabled` used to be read ONLY
+at startup (`Program.cs`), which decided whether `AdSyncService` even registered itself as a hosted
+service. Turning it on/off therefore meant editing `appsettings.local.json` on the server plus
+restarting the console; the Settings page only displayed the value, with no way to change it (user
+finding: "there's no way to turn the sync on"). `AdSyncService` now always runs (like
+`BetaRolloutService`/`AgentDeployService`) and reads `adsync.enabled`/`adsync.intervalMinutes` from
+`AppSettings` on every tick. Settings got a real toggle plus interval storage. `SearchBase`/
+`IncludeDisabled` stay in the file (they change rarely). After deploying, `adsync.enabled=true` was set
+in the DB manually (SQL) so the enabled state would not revert when the file-based config was reloaded.
+
+**Live state at end of day:** console `00cebc3` (APP_SERVER), API `8da4843` (SQL_SERVER, unchanged
+since step 2 – steps 4–6 don't affect API/console enforcement apart from the already-mentioned
+`11734f2`, which was not urgent to deploy), agent `924b9b8` (stable+beta, unchanged – steps 3–5 are
+waiting for a joint beta wave).
 
 ### 5.5 Roadmap (pending)
 - **Monitoring of signing cert expiry** – `CN=powershell.domena.loc` valid until 2028-06-17; alert via e-mail from the console.

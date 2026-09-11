@@ -111,7 +111,8 @@
           {label:{cs:'Least-privilege v SQL', en:'Least privilege in SQL'}, note:{cs:'zápis jen tam, kam komponenta opravdu píše', en:'writes only where the component really writes'}},
           {label:{cs:'Podepsané PS skripty', en:'Signed PS scripts'}, note:{cs:'prostředí vynucuje AllSigned přes GPO', en:'the environment enforces AllSigned through GPO'}},
           {label:{cs:'FallbackPolicy (API)', en:'FallbackPolicy (API)'}, note:{cs:'fail-closed defaultně, nezapomenutý [Authorize]', en:'fail-closed by default, no forgotten [Authorize]'}},
-          {label:{cs:'Ověření hostname', en:'Hostname verification'}, note:{cs:'tvrzení vs. autentizovaná identita, zatím warn-only', en:'claim vs. authenticated identity, warn-only for now'}}
+          {label:{cs:'Ověření hostname', en:'Hostname verification'}, note:{cs:'tvrzení vs. autentizovaná identita — nyní tvrdé 403', en:'claim vs. authenticated identity — now a hard 403'}},
+          {label:{cs:'Hlubší prověrka (8,1/10)', en:'Deeper review (8.1/10)'}, note:{cs:'kódový průchod enforcementu; 7 nálezů, 6 opraveno (10.–11.9.2026)', en:'code-level pass on enforcement; 7 findings, 6 fixed (10–11 Sep 2026)'}}
         ]},
       { side:'right', color:'--c4',
         label:{cs:'Proč to je', en:'Why it exists'},

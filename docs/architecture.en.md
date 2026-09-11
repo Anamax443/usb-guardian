@@ -103,7 +103,9 @@ must not affect admin use). Reads/writes SQL_SERVER, models reused from the API 
 | `Activity` | The activity log with filters, live mode and CSV export |
 | `Health` | Health checks of the server and clients + scheduled service restart |
 | `AdSyncRunner` | AD sync logic – callable from the timer and from the UI (a semaphore prevents overlap) |
-| `AdSyncService` | Timer over `AdSyncRunner` (interval from config) |
+| `AdSyncService` | Timer over `AdSyncRunner` – **always runs** as a hosted service, reads `adsync.enabled`/`adsync.intervalMinutes` from `AppSettings` on every tick (previously from config at startup only, see [AD sync](#ad-sync)) |
+| `PingMonitorService` | Timer (`ping.intervalMinutes`, default 5 min) – pings only stations that report an agent but aren't fresh; stores the result into `Computer.LastPingOk`/`LastPingAt` (see [Silent agent vs. a powered-off PC](#silent-agent-vs-a-powered-off-pc-ping)) |
+| `StationStatus` | Pure, tested classification of a station's status (Silent/ProbablyOff) from three signals – shared between the Stations page and the "Silent agents" check |
 | `AppInfo` | Build commit hash (MSBuild `git rev-parse` stamp) → footer + `:4200/api/version` |
 
 **Authorization:** Windows Auth (Negotiate). Access only for members of `Authorization:AdminGroups`
@@ -119,6 +121,38 @@ AdSyncRunner: name → Hostname, dNSHostName → Domain, operatingSystem, distin
         ↓  upsert (key = hostname), does NOT overwrite LastSeen/AgentVersion (owned by the agent/API)
 SQL Computers + reconciliation: InActiveDirectory; "in AD ⨯ reporting an agent" = where the agent is missing
 ```
+
+**Toggled from the console, not just from a file (2026-09-11):** `AdSyncService` is now always registered as a
+hosted service – the same pattern already used by `AgentDeployService`/`BetaRolloutService`. Previously, whether
+the service registered at all was decided by `AdSync:Enabled` in `appsettings.local.json`, read **only at
+startup** (`Program.cs`) – toggling it required editing the file on the server and restarting the console; the
+Settings page only displayed the value, with no way to change it. `adsync.enabled`/`adsync.intervalMinutes` now
+live in `AppSettings` and are read on **every tick**, so Settings has a real switch plus an editable interval –
+no restart needed. `AdSync:SearchBase`/`AdSync:IncludeDisabled` remain in the file – those change rarely, unlike
+the operational on/off toggle.
+
+### Silent agent vs. a powered-off PC (ping)
+
+"Silent agents" used to be computed purely from `LastSeen` (the agent hasn't responded in a while) – regardless
+of whether the PC was even switched on. A laptop powered off overnight looked exactly as "silent" on the
+Stations page as a crashed service on a machine that was actually running, even though the two call for
+completely different responses.
+
+```
+PingMonitorService (timer, ping.intervalMinutes, default 5 min)
+   ↓ candidates = report an agent (AgentVersion/LastSeen set) AND aren't fresh (LastSeen < comm.silentAfterMinutes)
+   ↓ pings only those candidates (fresh stations are the vast majority and are skipped)
+Computer.LastPingOk / LastPingAt   (database/10_ping_status.sql)
+   ↓
+StationStatus.Silent      = reports an agent ∧ not fresh ∧ LastPingOk = true   → "silent", worth investigating
+StationStatus.ProbablyOff = reports an agent ∧ not fresh ∧ LastPingOk = false  → "off?" pill, no action needed
+        (LastPingOk still null → silent-pending-first-ping, shown as the "warn" pill)
+```
+
+The classification is factored into a pure, unit-tested `StationStatus.cs` – used **both** by the Stations page
+(the "Silent agents" tile + the communication pill) **and** by the "Silent agents" check on the Health checks
+page, so the two necessarily agree (previously each computed its own, independent – and inconsistent – logic
+straight off `LastSeen`).
 
 ## Agent local admin console
 
@@ -442,10 +476,23 @@ would fail, and the station would be left with a **mix of versions** while the d
 | Clean install on stations without an agent | `Deploy-AgentFleet.ps1` | `USBGuardian-AutoDeploy` | `gmsa-deploy$` |
 | Update of a deployed agent | `Update-Agent.cmd` | `USBGuardian-UpdateAgent` (+ `-UpdateAgentBeta`) | `gmsa-deploy$` |
 | Deployment of the API to its server | `Deploy-Api.cmd` | `USBGuardian-ApiDeploy` | `gmsa-srvdeploy$` |
+| Deployment of the console to `APP_SERVER` | `Deploy-Console.cmd` | — (run manually over UNC, no scheduled task) | a personal admin account with access to `APP_SERVER` |
 
-Both `.cmd` files follow the same pattern: **stop the service → wait for `STOPPED` → copy (without
-`*.local.json`) → start → verify `RUNNING`**; the return code is the number of failed stations, the log lives
-in `C:\ProgramData\USBGuardian\deploy\`.
+All three `.cmd` scripts follow the same pattern: **stop the service → wait for `STOPPED` → copy (without
+`*.local.json`) → start → verify `RUNNING`**; the log lives in `C:\ProgramData\USBGuardian\deploy\`.
+`Deploy-Api.cmd`/`Update-Agent.cmd` run through a scheduled task over several targets and return the number of
+failed stations as the exit code; `Deploy-Console.cmd` has a single target and returns 0/non-zero directly. **The
+log always goes to the target machine** (where the deployed component actually runs), not the machine the script
+is launched from – that one typically has no rights to write into its own `C:\ProgramData`.
+
+> **Why `Deploy-Console.cmd` (2026-09-11):** unlike the API, the console had no dedicated deploy script – it was
+> deployed with a manual `robocopy` against `APP_SERVER`, which (unlike `SQL_SERVER`) an admin account can reach
+> directly, so it was never routed through a scheduled task/gMSA the way `Deploy-Api.cmd` is. A manual command
+> that once omitted `/XF appsettings.local.json` overwrote the production configuration (the real SQL server, the
+> `Kestrel` binding, `Authorization:DevAllowAll`) with a local development file. The new script is modeled on
+> `Deploy-Api.cmd` (the same stop → copy with `/XF` → start → verify), invoked manually over UNC against
+> `APP_SERVER_HOST` – it rules out exactly this class of mistake without giving the console its own scheduled-task
+> identity (an admin already has access to `APP_SERVER`).
 
 **Batch (.cmd), not PowerShell:** the environment enforces `AllSigned` through GPO; a `.cmd` is not subject to
 it, so changing a deployment step does not require re-signing.
@@ -507,6 +554,10 @@ The `AppSettings` table (key/value, migration 06) managed from Settings; `Access
 - `policy.enforce` – enforce approved media only (distributed to the agent through the heartbeat).
 - `comm.silentAfterMinutes` – the "silent agent" threshold (default 180); the boundary for both the
   communication dot and the tile on Stations.
+- `ping.intervalMinutes` – how often `PingMonitorService` checks the reachability of silent stations (default
+  5 min), see [Silent agent vs. a powered-off PC](#silent-agent-vs-a-powered-off-pc-ping).
+- `adsync.enabled` / `adsync.intervalMinutes` – turning AD sync on/off and its interval; previously only
+  `AdSync:Enabled` in the file + a console restart, see [AD sync](#ad-sync).
 - `deploy.*` – auto-enrollment (see below):
   `enabled`/`dryRun`/`defaultEnroll`/`intervalMinutes`/`maxPerRun`/`allowHosts`/`includeHosts`/`excludeHosts`/`targetsFile`/`lastRun`.
   **Default + exceptions model:** `defaultEnroll` (Settings) = the default for newly discovered PCs (deploy or
@@ -541,18 +592,21 @@ signing, CRLF + UTF-8 BOM. Setup: [auto-deploy-setup.en.md](auto-deploy-setup.en
 - **Overview** – a cross-page tile summary + filter (period/action/full-text) + aggregation (GroupBy over an
   anonymous type → in-memory map) + an "Approved" column per the active whitelist. The "Detailed" table has
   **sortable headers** (sorting in the DB via a query string, before `Take(200)`).
-- **Stations** – AD inventory, filter, AD path (OU), communication icon (by the freshness of `LastSeen`),
-  the "Silent agents" tile (reports an agent but `LastSeen` is older than the `comm.silentAfterMinutes`
-  threshold – a possible outage or tampering), the "Request data" button (row/bulk) → ReportNow. The
-  **"Deployment"** column on stations without an agent = include/exclude from auto-enrollment (an exception to
+- **Stations** – AD inventory, filter, AD path (OU), a communication icon/pill (by the freshness of `LastSeen`
+  **and** a confirmed ping, see [Silent agent vs. a powered-off PC](#silent-agent-vs-a-powered-off-pc-ping)),
+  the "Silent agents" tile (reports an agent, isn't fresh, **and** a ping confirms the PC is up – otherwise just
+  the "off?" pill, no action needed), the "Request data" button (row/bulk) → ReportNow. The **"Deployment"**
+  column on stations without an agent = include/exclude from auto-enrollment (an exception to
   `deploy.defaultEnroll`); in bulk via "Exclude/Include all".
 - **Whitelist** – serial-only entry + VID/PID backfill from incidents + import + inline edit + the `IsActive`
   checkbox. Media **capacity** is pulled from incidents (max `SizeBytes` per serial, display-only – it is not
   kept on the whitelist).
 - **Health checks** – checks of the server and the clients. The list of checks is shown **up front** and ticked
   off with running results (so it is visible that it works, not just that something spins); the delay between
-  steps is deliberate. Results export to CSV / HTML / PDF (print) / TXT. It also covers the **scheduled
-  restart** of services (server and client).
+  steps is deliberate. The "Silent agents" check uses the same `StationStatus` classification as the Stations
+  page (a single source of truth, see [Silent agent vs. a powered-off PC](#silent-agent-vs-a-powered-off-pc-ping)).
+  Results export to CSV / HTML / PDF (print) / TXT. It also covers the **scheduled restart** of services (server
+  and client).
 - **Activity** – the activity log (see above): filters (period, level, source, search), a **live** mode with a
   3 s refresh, CSV export.
 - **Database** – a read-only overview of the DB content: row counts per table, the incident date range
@@ -622,6 +676,18 @@ Byte-exact: the same blob string is **signed**, **served** (`/api/whitelist`) an
 all UTF-8 without BOM (SHA-256 / Pkcs1), so the RSA signature matches. **Trade-off (deliberately chosen):**
 the private key is on the app server (protected by ACL/DPAPI) in exchange for **full automation** (no manual
 offline step). The offline `WhitelistSigner` remains as a tool for key generation / manual verification.
+
+> **`POST /api/whitelist/devices` publishes differently – catalog only (2026-09-11):** this endpoint is meant for
+> external tooling/L1 administration outside the console (the console itself always goes through
+> `WhitelistPublisher.PublishAsync` directly, never through the API). It used to call `BumpWhitelistVersion()`,
+> which, on every device added this way, deactivated the last SIGNED version and replaced it with a new "active"
+> `WhitelistVersion` carrying an empty `Json`/`Signature` – the API has no (and must have no) access to the
+> private signing key, which lives only on `APP_SERVER` (see above). `GetWhitelist`/`GetSignature` safely return
+> 404 for such a version (fail-secure), but the newly added device never reached the agents, and **the whole
+> whitelist silently "vanished"** for everyone in the meantime, until someone noticed and republished manually
+> from the console. `BumpWhitelistVersion` has been removed; `AddDevice` now only writes the catalog entry and
+> tells the caller, in both the response and the activity log, that publishing is a separate manual step ("Publish
+> now" in the console).
 
 ## Enforcement: server → agent + local break-glass (phases 2+3)
 

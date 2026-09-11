@@ -49,12 +49,15 @@ technické opatření pro **NIS2 / zákon 181/2014 Sb. / ISO 27001**.
 | 39 | **Zavřeno nešifrované HTTP 5050** – naslouchá jen v `Development`, produkce (Windows služba) jen HTTPS `:5443` | ✅ |
 | 40 | **Externí bezpečnostní audit + náprava** (04.09.2026) – 6 nálezů, 5 opravených a nasazených, 1 záměrně jen v pozorovacím režimu (viz Bezpečnost) | ✅ |
 | 41 | **Durabilní fronta incidentů** – `IncidentSpool` zapíše batch na disk PŘED potvrzením API, přežije pád procesu, přehraje se při restartu; kontrola „Fronta incidentů (spool)" na `/kontroly` | ✅ |
-| 42 | **První testy a CI** – 24 C# testů (0 do 04.09.2026), `.github/workflows/build-and-test.yml` na každý push/PR | ✅ |
+| 42 | **První testy a CI** – 58 C# testů (0 do 04.09.2026), `.github/workflows/build-and-test.yml` na každý push/PR | ✅ |
+| 43 | **Hlubší oponenturní průchod + náprava P1** (10.–11.09.2026) – 6 ze 7 nálezů opraveno: autorizace `GET /api/incidents`, hostname ověření zpřísněno na tvrdé 403, `DeviceBlocker` false-success + exact-match fix, audit zaznamenává skutečný výsledek enforcementu (ne záměr), `POST /api/whitelist/devices` už nevytváří nepodepsanou aktivní verzi | ✅ 6/7 |
+| 44 | **Zmlklý agent = potvrzený ping** – `PingMonitorService` na pozadí ověřuje dostupnost jen u stanic, co hlásí agenta a nejsou čerstvé; „zmlklý" (stojí za pozornost) odlišeno od „vypnuto?" (ping neodpovídá, bez akce) na Stanicích i v Kontrolách | ✅ |
+| 45 | **AD sync přepínatelný z Nastavení** – dřív jen úpravou `appsettings.local.json` + restart konzole, teď skutečný přepínač + interval v DB (`AdSyncService` běží vždy, čte příznak při každém tiku) | ✅ |
 | – | Per-serial **blocklist** + blokace už-připojeného média | 🔜 |
 | – | Monitoring expirace podpisového certu | 🔜 |
 | – | **Retence deníku** – `sp_PurgeActivityLog` existuje, ale nikdo ji nevolá | 🔜 |
-| – | ACL na TLS/RSA klíče na serveru (poslední otevřená položka z auditu) | 🔜 |
-| – | Zpřísnění ověření hostname (dnes warn-only) na tvrdé odmítnutí | 🔜 |
+| – | ACL na TLS/RSA klíče na serveru (poslední otevřená položka z auditu 04.09.) | 🔜 |
+| – | Spool retry se po SQL výpadku sám nerozjede bez restartu (poslední P1 nález, 10.–11.09.) | 🔜 |
 
 ## Architektura
 
@@ -280,9 +283,13 @@ placeholdery — dosaď si vlastní hodnoty:
     "DevAllowAll": false
   },
   "Kestrel": { "Endpoints": { "Http": { "Url": "http://0.0.0.0:4200" } } },
-  "AdSync": { "Enabled": true, "IntervalMinutes": 60, "SearchBase": "", "IncludeDisabled": false }
+  "AdSync": { "SearchBase": "", "IncludeDisabled": false }
 }
 ```
+
+> **AD sync zapnuto/vypnuto a interval** se od 11.09.2026 nastavují v **Nastavení** (DB `AppSettings`
+> `adsync.enabled`/`adsync.intervalMinutes`), ne v `appsettings.local.json` — `SearchBase`/`IncludeDisabled`
+> zůstávají v souboru, mění se výjimečně.
 
 ## Databáze
 
@@ -299,6 +306,7 @@ SQL skripty v `database/` (spustit v pořadí):
 | `07_whitelist_publish.sql` | WhitelistVersions: `Json` (podepsaný blob) + `Signature` → `NVARCHAR(MAX)` (publikační workflow) |
 | `08_deploy_ignored.sql` | trvalé vyřazení stanice z nasazení (hromadné akce ho nepřepíšou) |
 | `09_activity_log.sql` | `ActivityLog` (deník provozu) + indexy + `sp_PurgeActivityLog` (úklid po dávkách 5000) |
+| `10_ping_status.sql` | `Computer.LastPingOk/LastPingAt` – potvrzená síťová dostupnost pro rozlišení „zmlklý agent" od „vypnuté PC" |
 
 Granty se do skriptů **nepíšou** (portabilita – žádné firemní účty v repu). Pro deník je potřeba
 `SELECT, INSERT ON dbo.ActivityLog` pro účet konzole i API a `EXECUTE ON dbo.sp_PurgeActivityLog` pro API.
@@ -362,11 +370,18 @@ GRANT INSERT, UPDATE ON dbo.WhitelistVersions TO [DOMENA\APP_SERVER$];          
 - Lokální konzole agenta: loopback, jen lokální admin, zápis omezený na break-glass a restart služby.
 - **`FallbackPolicy` na API** (od 04.09.2026) – chráněno je defaultně vše, veřejné jen to, co má explicitní
   `[AllowAnonymous]`. Nový endpoint bez atributu tak nemůže omylem skončit tiše veřejný.
-- **Ověření hostname** (od 04.09.2026, zatím warn-only) – server porovnává hostname z dat s autentizovanou
-  identitou strojového účtu volajícího; zatím jen loguje neshodu do Aktivity, po pár dnech bez falešných
-  poplachů se zpřísní na tvrdé odmítnutí.
+- **Ověření hostname** (od 04.09.2026 warn-only, od 10.09.2026 **tvrdé 403 Forbidden**) – server porovnává
+  hostname z dat s autentizovanou identitou strojového účtu volajícího; po 6 dnech bez jediného
+  falešného poplachu v Aktivitě zpřísněno z pouhého logování na odmítnutí požadavku.
 - **Nezávislý bezpečnostní audit** (04.09.2026) prošel repo po zveřejnění – 6 nálezů, 5 opravených a
   nasazených týž den (viz `docs/oponentura.md` kap. 34.7 pro detail každého).
+- **Hlubší oponenturní průchod** (10.–11.09.2026) – nezávislé hodnocení kódu (ne jen statický sken) na
+  8,1/10, sedm P1 nálezů v enforcementu/autorizaci/whitelist publish. Šest opravených: autorizace
+  `GET /api/incidents` (jen admini, ne každá stanice), `DeviceBlocker` mohl chybně vyhodnotit blokování
+  jako úspěšné (chybějící try/catch kolem `Disable-PnpDevice`) a nezkoušel přesnou shodu PnP ID před
+  wildcard fallbackem, audit mohl zaznamenat `Blocked` dřív, než enforcement doopravdy proběhl,
+  `POST /api/whitelist/devices` mohl aktivovat nepodepsanou verzi whitelistu. Jeden zbývá (spool retry
+  po SQL výpadku vyžaduje ruční restart) — viz `docs/oponentura.md` kap. 35.
 
 ## Repo struktura
 
@@ -382,15 +397,17 @@ usb-guardian/
 │   └── USBGuardian.Admin/    # Blazor Server admin konzole (APP_SERVER)
 │       ├── Components/        # Pages (Home, Computers, Whitelist, Settings, Database, Docs), Layout
 │       ├── AdSync/            # AdSyncRunner + AdSyncService
-│       ├── Deploy/            # AgentDeployService (auto-enrollment orchestrátor)
+│       ├── Deploy/            # AgentDeployService (auto-enrollment), PingMonitorService,
+│       │                      #   StationStatus (Silent/ProbablyOff klasifikace), DeployTrigger
 │       ├── Export/            # ExportEndpoints (CSV + manažerský report)
 │       ├── Notifications/     # IncidentAlertService + EmailSender
 │       └── appsettings.local.json.example
 ├── tools/WhitelistSigner/    # offline RSA podpis whitelistu (generate/sign/verify)
-├── database/                 # 01–09 SQL skripty
+├── database/                 # 01–10 SQL skripty
 ├── scripts/                  # certifikáty, Build-AgentPackage, watchdog, ToastHelper,
 │                             #   Install/Uninstall-Agent, Deploy-AgentFleet, Update-Agent.cmd,
-│                             #   Deploy-Api.cmd, Set/Archive-AgentVersion, New-DeployGmsa, tasks/
+│                             #   Deploy-Api.cmd, Deploy-Console.cmd, Set/Archive-AgentVersion,
+│                             #   New-DeployGmsa, tasks/
 ├── docs/                     # architecture(.en).md, auto-deploy-setup(.en).md, oponentura(.en).md,
 │                             #   how-it-works.html (animace), mind-map.html (myšlenková mapa),
 │                             #   flowchart.html (vývojový diagram), management-summary.html (A4)

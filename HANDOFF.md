@@ -18,15 +18,15 @@ Serverová konzole agreguje data, drží inventář stanic z AD a ukazuje, kam c
 | | |
 |---|---|
 | **Doména** | `domena.loc` |
-| **DB** | SQL Server `SQL_SERVER` (= `SQL_SERVER_IP`), databáze `USBGuardian`, skripty `database/01–07` aplikované, **`08_deploy_ignored.sql` = trvalé vyřazení stanice (Ignorovat)**, **`09_activity_log.sql` = deník provozu (04.09.2026)**; **+ `GRANT DELETE ON dbo.WhitelistDevices` účtu konzole** (mazání z katalogu – aplikováno ručně) **+ granty na `ActivityLog`**: `SELECT,INSERT` pro `APP_SERVER$` i `gmsa-api$`, `EXECUTE ON sp_PurgeActivityLog` pro `gmsa-api$` |
+| **DB** | SQL Server `SQL_SERVER` (= `SQL_SERVER_IP`), databáze `USBGuardian`, skripty `database/01–07` aplikované, **`08_deploy_ignored.sql` = trvalé vyřazení stanice (Ignorovat)**, **`09_activity_log.sql` = deník provozu (04.09.2026)**, **`10_ping_status.sql` = `Computer.LastPingOk/LastPingAt` (11.09.2026, viz 5.14)**; **+ `GRANT DELETE ON dbo.WhitelistDevices` účtu konzole** (mazání z katalogu – aplikováno ručně) **+ granty na `ActivityLog`**: `SELECT,INSERT` pro `APP_SERVER$` i `gmsa-api$`, `EXECUTE ON sp_PurgeActivityLog` pro `gmsa-api$` |
 | **API** | `SQL_SERVER`, Windows služba „USB Guardian API", install `C:\USBGuardian.Api`, gMSA `DOMENA\gmsa-api$`; **HTTPS `:5443`** (self-signed, **PIN `API_CERT_THUMBPRINT`**) – HTTP `:5050` zavřeno v produkci, jen `Development`. **Živá verze přes `GET /api/version`** |
 | **Verze/commit (kontrola)** | konzole patička + `:4200/api/version`; API `:5443/api/version`; agent hlásí commit → konzole „Agent verze". Vše stampuje `git rev-parse` (MSBuild) |
 | **Admin konzole** | **živá** `http://APP_SERVER_IP:4200/` (`APP_SERVER`), služba `USBGuardianConsole`, `C:\Apps\USBGuardianConsole`, self-contained |
 | **Účet konzole** | **LocalSystem** = `DOMENA\APP_SERVER$` (SQL grant: read vše + write Computers/WhitelistDevices/WhitelistVersions/AppSettings; **+ DELETE na `WhitelistDevices`** – mazání z katalogu, jinak ✕ hodí „DELETE permission denied") |
 | **Autorizace konzole** | AD `DOMENA\IT-Admins` + whitelist `DOMENA\it-admin` (+ DB seznam z Nastavení) |
 | **Šifrování agent↔API** | HTTPS + **pinning otisku** (bez CA) — ověřeno end-to-end (heartbeat OK z PC-01) |
-| **AD sync** | zapnutý 60 min + on-demand; **213 v AD, ~212 bez agenta** |
-| **Live commit** (04.09.2026 16:05) | **konzole `3a6a2b2`** (redeploy: kontrola „Fronta incidentů (spool)" ověřena naživo přes `/api/health` – 16 kontrol, nová hlásí `ok`/`prázdná`) · **API `bbf6772`** (redeploy: durabilní spool fronta incidentů `8fbfa6d` + monitoring spoolu `2766344` + dedup fix `e8d702c` + FallbackPolicy `0bc6709` + hostname warn-only `58f43f3`, plus dřívější `297ac7a`) · **agent beta `924b9b8`** (BARTKOVAJW11, CERNYSW11, TRNKAMW11N) · **agent stable `cb8ef1d`** (PC-01/TRNKAMW11, zbytek fleetu — `56b4235`/expirace whitelistu je zatím jen v gitu, na fleet nenasazeno). Lokální konzole ověřena end-to-end na CERNYSW11 — viz 5.11. Bezpečnostní audit + náprava — viz 5.12 |
+| **AD sync** | zapnutý (`adsync.enabled=true` v DB), 60 min + on-demand; přepínatelné z Nastavení od 11.09.2026 (viz 5.15) |
+| **Live commit** (11.09.2026, konec dne) | **konzole `00cebc3`** (ping-gated zmlklý agent + PingMonitorService + AD sync přepínatelný z UI + oprava Deploy-Console.cmd/Deploy-Api.cmd, viz 5.14/5.15) · **API `8da4843`** (P1 kroky 1–2 nasazené – GET /api/incidents jen adminům, hostname 403; kroky 3–6 buď agent-only nebo bez urgence k nasazení, viz 5.13/5.15) · **agent beta+stable `924b9b8`** (nezměněno – kroky 3–5 z P1 seznamu čekají na společnou beta vlnu). Bezpečnostní audit + náprava 04.09 — viz 5.12; hlubší průchod 10.–11.09 — viz 5.13/5.15 |
 | **Rozvoz agenta – osvědčený postup** | balíček → archiv `…\USBGuardianAgentVersions\<commit>` → **beta na jednu stanici** (dočasně přepsaný `update-beta.txt`) → ověřit → beta na zbytek → teprve pak **stable**. Log `…\deploy\update-agent.log`; „Agent verze" v konzoli se projeví až dalším heartbeatem (≤2 min), takže hned po rozvozu tam ještě chvíli svítí stará verze |
 | **Konzole – stránky** | Přehled (filtr+kumulace+řazení, kapacita, **export CSV + manažerský report s grafy**), Stanice (AD inventář + „Zmlklo agentů" + „Vyžádat data" + **Nasazení / hromadné vyřadit-zařadit**), Whitelist (**kapacita + filtr katalogu + auto-publish podepsané verze**), Nastavení (vynucování/přístup/email/alerty/dohled/auto-enrollment+default PC/retence/**Údržba: reload nastavení**), **Databáze**, **Kontroly** (health checks), Dokumentace (+HTML animace) |
 | **Enforcement (F1-3)** | **whitelist 1:1** (auto-podpis serverem, interní RSA klíč na APP_SERVER) → **vynucování** server→agent (`policy.enforce` v heartbeatu) → **break-glass** (lokální konzole 5080, offline, logováno, zruší se při sync) + **auto-re-enable** + reconciliace s whitelistem. Lokální konzole: restart služby, break-glass, seznam whitelistu |
@@ -495,6 +495,64 @@ nedotčená, protože ji ten starý soubor vůbec nepřepisoval). **Nápravné o
 `scripts/Deploy-Console.cmd` (stejný stop→kopie s `/XF`→start→ověř vzor jako `Deploy-Api.cmd`, přes UNC na
 `APP_SERVER_HOST`) – ruční robocopy bez vyloučení už se nemá čím opakovat. Stará lokální
 `appsettings.local.json` v repu (nebezpečná, z 18.6.) smazána.
+
+### 5.15 Dokončení P1 seznamu (4–6), oprava deploy skriptů, AD sync z konzole (11.09.2026)
+
+Pokračování 5.13/5.14 týž den:
+
+4. **`08315d6`** – `BlockDevice` na rozdíl od `UnblockDevice` nezkoušel nejdřív přesnou shodu
+   `Get-PnpDevice -InstanceId`, rovnou šel na `-like '*id*'` substring. VID/PID/sériové číslo si USB
+   zařízení nastaví libovolně, takže substring shoda mohla v principu zachytit i JINÉ připojené
+   zařízení. Sjednoceno se vzorem `UnblockDevice` (přesná shoda → wildcard jen fallback).
+5. **`0982226`** – `HandleDevice` zapisoval `Incident.Action` = ZÁMĚR (`DetermineAction`) PŘED tím, než
+   `HandleBlock` vůbec proběhl. Když block selhal (chybějící PNPDeviceId, chyba Disable-PnpDevice) a
+   spadl na fallback warn, incident už mezitím tvrdil „Blocked" – audit mohl říkat, že se médium
+   zablokovalo, i když zůstalo přístupné. `HandleWarn`/`HandleBlock` teď vrací SKUTEČNOU akci,
+   `HandleDevice` zapíše až potvrzený výsledek. `DetermineAction` zveřejněna jako `internal` pro testy.
+6. **`11734f2`** – `POST /api/whitelist/devices` (API) volal `BumpWhitelistVersion`, který deaktivoval
+   poslední PODEPSANOU verzi whitelistu a nahradil ji NOVOU „aktivní" verzí s prázdným `Json`/`Signature`
+   – API nemá přístup k podpisovému klíči (jen na APP_SERVER, viz `WhitelistPublisher.cs`). `GetWhitelist`/
+   `GetSignature` na prázdnou verzi sice bezpečně vrátí 404, ale nově přidané zařízení se k agentům
+   nedostane, dokud si toho někdo nevšimne a ručně nepublikuje v konzoli – celý whitelist mezitím
+   "zmizí". Metoda odstraněna (žádný jiný volající), `AddDevice` teď jen zapíše katalog a řekne v
+   odpovědi, že publikace je samostatný krok v konzoli. Endpoint dnes nemá žádného volajícího (konzole
+   jde přímo přes `WhitelistPublisher`), takže bez urgentního nasazení.
+
+**Zbývá z P1 seznamu:** krok 7 – spool retry se po SQL výpadku sám nerozjede bez restartu.
+
+**Konzistence „Zmlklí agenti" (6e5d6d2):** kontrola na stránce Kontroly počítala silent čistě z
+`LastSeen`, nezávisle na opravě 5.14 na Stanicích – druhé, nezávislé místo se stejnou chybou (nález
+uživatele: „v kontrolách sis nezohlednil u zmlklých agentů to, že jsou vypnuté PC"). `CheckAgentsSilentAsync`
+teď používá stejnou `StationStatus.Silent`/`ProbablyOff` klasifikaci (jedno místo pravdy).
+
+**Oprava nasazovacích skriptů (6a80a26)** – dva na sebe navazující nálezy při prvním ostrém použití
+nového `Deploy-Console.cmd`:
+- Unicode box-drawing dělítka v `rem` komentářích (`── ... ──`), zkopírovaná ze stejného vzoru v
+  `Deploy-Api.cmd`, fungovala tam jen díky tomu, že `Deploy-Api.cmd` vždy běží přes scheduled task na
+  `.213` (jiná codepage). Ruční spuštění `Deploy-Console.cmd` z vlastní stanice je rozbilo na nesmyslné
+  příkazy – stejná třída chyby jako dřívější „poškozená diakritika po UTF-8 BOM" (`523d907`). Převedeno
+  na čistý ASCII v obou skriptech.
+- Závažnější: `%LOG%` mířil na LOKÁLNÍ `%ProgramData%` stroje, ze kterého se skript spouští – ten
+  typicky nemá právo tam zapisovat (ověřeno: Access denied na vlastní stanici). Selhaný zápis
+  přesměrování u `robocopy ... >> %LOG%` znamenal, že robocopy VŮBEC NEPROBĚHLA, ale skript to ohlásil
+  jako „návratový kód 0 (v pořádku)" – konzole zůstala na staré verzi, zatímco log i konzolový výstup
+  tvrdily úspěch (odhaleno až srovnáním velikosti/data DLL na cíli s čerstvým publish). Log teď míří na
+  `APPHOST` (kde konzole skutečně běží), ne na spouštějící stroj. Ostatní `.cmd` skripty (`Archive-
+  AgentVersion`, `Install-Agent`, `Set-AgentVersion`, `Uninstall-Agent`, `Update-Agent`) mají stejné
+  Unicode znaky, ale běží jen přes svůj existující scheduled-task kanál – neopravováno, mimo dnešní rozsah.
+
+**AD sync z konzole, ne jen souborem (`00cebc3`)** – `AdSync:Enabled` se dřív četl JEN při startu
+(`Program.cs`), rozhodovalo to, jestli se `AdSyncService` vůbec zaregistruje jako hosted service.
+Zapnout/vypnout tak šlo jen úpravou `appsettings.local.json` na serveru + restart konzole; stránka
+Nastavení hodnotu jen zobrazovala, bez možnosti změnit (nález uživatele: „není možnost synchronizaci
+zapnout"). `AdSyncService` teď běží vždy (jako `BetaRolloutService`/`AgentDeployService`) a čte
+`adsync.enabled`/`adsync.intervalMinutes` z `AppSettings` při každém tiku. Nastavení dostalo skutečný
+přepínač + uložení intervalu. `SearchBase`/`IncludeDisabled` zůstávají v souboru (mění se výjimečně).
+Po nasazení nastaveno `adsync.enabled=true` v DB ručně (SQL), aby zapnutí z file-configu nezmizelo.
+
+**Live stav ke konci dne:** konzole `00cebc3` (APP_SERVER), API `8da4843` (SQL_SERVER, nezměněno od
+kroku 2 – kroky 4–6 se API/konzole enforcementu netýkají kromě již zmíněného 11734f2, který nebyl
+urgentní k nasazení), agent `924b9b8` (stable+beta, nezměněno – kroky 3–5 čekají na společnou beta vlnu).
 
 ### 5.5 Roadmapa (pending)
 - **Monitoring expirace podpisového certu** – `CN=powershell.domena.loc` platí do 2028-06-17; alert e-mailem z konzole.

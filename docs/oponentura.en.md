@@ -9,8 +9,8 @@
 | **Project** | USB Guardian |
 | **Repository** | `Anamax443/usb-guardian` |
 | **Author** | Milan Trnka (AXIMA) |
-| **Document version** | 1.1 — chapters 1–33 as in version 1.0, chapter 34 = an addendum dated 4 Sep 2026 |
-| **Date** | 2026-06-19, extended 2026-09-04 |
+| **Document version** | 1.2 — chapters 1–33 as in version 1.0, chapter 34 = an addendum dated 4 Sep 2026, chapter 35 = an addendum dated 11 Sep 2026 |
+| **Date** | 2026-06-19, extended 2026-09-04 and 2026-09-11 |
 | **Classification** | Internal — material for an opponent review |
 | **Domain environment** | `domena.loc` (AXIMA) |
 | **Language** | [🇨🇿 Čeština](oponentura.md) · 🇬🇧 English |
@@ -95,6 +95,7 @@ live verification on the pilot station, and an **honest analysis of limitations,
 
 **PART VIII — Addendum**
 34. What changed since version 1.0 (state as of 4 Sep 2026)
+35. The second deep pass and P1 remediation (state as of 11 Sep 2026)
 
 **Appendices**
 - A. Glossary
@@ -2496,6 +2497,196 @@ addresses, the domain and account names) were replaced with placeholders before 
 `SQL_SERVER`, `DOMENA`…); the real values stay local in the gitignored `docs/local-values.local.md`. Going
 public is also context for 34.7 — the external audit was possible precisely because the code became
 readable from the outside.
+
+## 35. The second deep pass and P1 remediation (state as of 11 Sep 2026)
+
+Chapter 34 described the state as of 4 Sep 2026. A week later, on 10–11 Sep 2026, a second pass took place —
+this time not a static audit of the repository as in 34.7, but an independent deep pass directly through the
+enforcement, authorization and whitelist-publish code. It scored the system **8.1/10** (the idea and
+architecture alone 8.8–9/10; concrete implementation weaknesses pull the total down) and found seven
+priority-1 (P1) findings. They were fixed under the same discipline as in 34.7 — one step, one commit, build
+and tests green before pushing — and this chapter describes them with the same degree of honesty: what was
+found, why it mattered, what was verified before fixing, what is deployed and what is still pending.
+
+### 35.1 `GET /api/incidents`: missing isolation between stations
+
+What: the `IncidentsController` had a single (class-level) authorization policy, `USBGuardianClients`,
+across the whole controller — the same one used for submitting data. A single station's machine account
+could therefore use `GET /api/incidents` to pull the incident history of the ENTIRE fleet, not just its own.
+
+Why it mattered: authentication (who is calling) worked correctly, but authorization (what the caller is
+allowed to read) did not — a least-privilege violation in exactly the part of the system that carries the
+audit trail.
+
+The fix: authorization moved from the class level to individual actions, following the pattern
+`WhitelistController` already used (see 34.7.2) — the console's read endpoint got its own policy, separate
+from the client-side write.
+
+Deployed and verified: commit `95465ab`, deployed and verified on 10 Sep 2026 (`/api/version` reports
+`95465ab`).
+
+### 35.2 Agent-submitted hostname: from a warning to a hard rejection
+
+What: verifying the hostname in agent-submitted data (heartbeat and the incident batch) had run, since 4 Sep
+2026 (see 34.7.6, 34.7.7), only in observation mode — logging a mismatch against the caller's authenticated
+machine-account identity to `ActivityLog`, without stopping processing.
+
+What was verified before tightening it: exactly what 34.7.7 was waiting for — six days of operation with not
+a single false positive in the "bezpecnost" category of the Activity log, confirmed directly in the
+database, not just by eyeballing the page.
+
+The fix: a hostname mismatch against the authenticated identity is now a hard **403 Forbidden**, not just a
+log entry.
+
+Deployed and verified: commit `1542bbb`, deployed and verified. Rolling this step out was accompanied by an
+unrelated, code-independent incident during the API service restart — described in 35.9(a).
+
+### 35.3 `DeviceBlocker.BlockDevice`: a blocking failure could go unnoticed
+
+What: `Disable-PnpDevice` inside `BlockDevice` was not wrapped in a try/catch. The default
+`$ErrorActionPreference` is `Continue`, so a non-terminating PowerShell error was silently lost and the
+script still printed `BLOCKED`, even when the device was not actually blocked.
+
+Why it mattered: the same bug class had already been fixed once — for `UnblockDevice` (§8.4 of this
+document). That the same mistake resurfaced on the other side of the same pair of functions is itself worth
+recording: fixing one spot does not guarantee its sibling function got the same discipline.
+
+The fix: `Disable-PnpDevice` wrapped in a try/catch; the output-interpretation logic extracted into a
+separate, cleanly testable function, `InterpretBlockOutput` (4 new tests; `InternalsVisibleTo` introduced
+for the agent project for the first time, so tests could reach the internal function).
+
+Deployment status: commit `8da4843`, fixed on the agent side, **awaiting a combined beta rollout wave**
+together with findings 35.4 and 35.5 — as of the evening of 11 Sep 2026 not yet deployed to the fleet (both
+the stable and beta channels remained on `924b9b8`).
+
+### 35.4 `BlockDevice`: no exact match attempted before the wildcard fallback
+
+What: `UnblockDevice` first tries an exact match via `Get-PnpDevice -InstanceId`, only then falls back to a
+`-like` substring search. `BlockDevice` went straight to a substring match (`-like '*id*'`), with no
+exact-match attempt first.
+
+Why it mattered: a USB device's VID, PID and serial number are set by the device itself — an attacker can
+choose them arbitrarily. The loose substring match could in principle affect a different, unrelated
+connected device rather than the one meant to be blocked.
+
+The fix: `BlockDevice` brought in line with the `UnblockDevice` pattern — an exact `InstanceId` match first,
+`-like` only as a fallback.
+
+Deployment status: commit `08315d6`, fixed on the agent side, the same pending-beta status as 35.3 —
+awaiting the combined wave with findings 35.3 and 35.5.
+
+### 35.5 The audit trail could claim "Blocked" while the device stayed accessible
+
+What: `PolicyEnforcer.HandleDevice()` wrote `Incident.Action` (the result of `DetermineAction()`, i.e. the
+policy's INTENDED outcome) BEFORE the code that attempts the block was even called. When the block failed
+(e.g. a missing `PNPDeviceId`, a `Disable-PnpDevice` error) and fell back to a warning, the incident already
+said "Blocked" in the meantime.
+
+Why it mattered: this is the most serious of the seven findings, because it does not concern the enforcement
+itself but the TRUSTWORTHINESS of the audit trail this document leans on for its NIS2 argument (chapter 14)
+— the audit record could lie at exactly the moment its truthfulness matters most: when blocking fails.
+
+The fix: `HandleWarn`/`HandleBlock` now return the ACTUALLY achieved `IncidentAction`, not the intended one.
+`HandleDevice` writes the incident only after the enforcement outcome is confirmed. `DetermineAction` made
+`internal` for testability.
+
+Deployment status: commit `0982226`, fixed on the agent side, the same pending-beta status as 35.3 and 35.4.
+
+### 35.6 `POST /api/whitelist/devices` could irrecoverably "switch off" the whole whitelist
+
+What: this API endpoint (intended for external/L1-admin tooling, not used by the console itself) called
+`BumpWhitelistVersion`, which deactivated the last properly SIGNED whitelist version and replaced it with a
+new "active" version carrying an empty `Json`/`Signature` — because the API process has no access (by
+design) to the private signing key, which lives only on the console/app-server side
+(`WhitelistPublisher.cs`).
+
+Why it mattered: `GetWhitelist`/`GetSignature` on an empty version safely return 404 (so agents do not
+receive a corrupted whitelist), but the newly added device — and, in effect, the ENTIRE whitelist — would
+stop reaching any agent until someone noticed and manually republished from the console. A silent outage
+with no error message.
+
+The fix: the `BumpWhitelistVersion` call was removed from this endpoint. `AddDevice` now only writes the
+catalogue entry and tells the caller, in the response, that publication is a separate step performed in the
+console.
+
+Deployment status: commit `11734f2`. The endpoint currently has no caller (the console goes directly through
+`WhitelistPublisher`), so there was no urgency to redeploy immediately — the fix is complete in the code and
+awaits the API's normal deploy cycle.
+
+### 35.7 Spool retry after a SQL Server outage (open)
+
+What: `IncidentSpool` (see Appendix A, added 4 Sep 2026 — 34.7.6) survives a process crash, but its retry
+logic does not automatically resume after a SQL Server outage — it needs a manual service restart.
+
+Why it matters: if SQL Server goes down for an extended period, the on-disk spool grows, but once SQL Server
+is back the API will not start draining it on its own without a restart. Resilience against a database
+outage is therefore only partial — no data is lost, but resuming the flow needs a human action.
+
+Status: **the one item of the seven P1 findings that remains unresolved.** It stays on the roadmap (see
+chapter 20 / HANDOFF §5.5) — automatically resuming the retry loop once SQL connectivity returns, without
+needing to restart the whole service.
+
+### 35.8 Two side improvements from the same day
+
+Unrelated to a security finding, but produced as a byproduct of live operational use the same day, and
+touching the same subsystems:
+
+**(a) A "silent agent" now requires a confirmed ping.** Detecting a "silent" agent used to be computed
+purely from `LastSeen`, regardless of whether the station was even switched on — a laptop off overnight
+looked exactly as "silent" as a service that crashed on a running machine. `Computer.LastPingOk`/`LastPingAt`
+and a new `PingMonitorService` (interval configurable, 5 min by default) were added, pinging in the
+background only stations that report an agent whose data is stale. "Silent" now requires a confirmed ping
+(the PC is up, the agent is not responding); a new `ProbablyOff` category (the ping does not answer) got its
+own status indicator. The classification was pulled into one shared place (`StationStatus.cs`) — a second,
+independent check on the Health-checks page computed "silence" the same old (flawed) way and was
+subsequently switched to the same class, so the system would not carry two places computing the same truth
+differently.
+
+**(b) AD sync can now be toggled live from the console.** `AdSync.Enabled` used to be read only once at
+console startup, deciding whether `AdSyncService` was registered at all — changing it required editing the
+config file on the server and restarting the console, while the Settings page only displayed the value.
+Brought in line with the pattern the console already uses for other always-running services
+(`BetaRolloutService`, `AgentDeployService`): `AdSyncService` now always runs and reads
+`adsync.enabled`/`adsync.intervalMinutes` from the central `AppSettings` in the database on every tick.
+Settings got a real toggle.
+
+### 35.9 Two deployment incidents the same day
+
+In the spirit of the honest treatment chapter 34 established: two operational incidents while deploying the
+fixes above, neither related to the security substance of the fixes themselves.
+
+**(a) The API failed to start after deploying step 35.2 (roughly 8:21–8:46, 11 Sep 2026).** After
+redeploying the API, the "USB Guardian API" service failed to come back up once the old version stopped —
+ports 5443/5050 did not listen for about 25 minutes, and the whole fleet reported "API unavailable." The
+Event Log showed the process getting as far as logging the TLS pin and then nothing — no exception, no
+confirmation of listening. Suspect: in `Program.cs`, `db.Database.EnsureCreatedAsync()` runs synchronously
+BEFORE `app.RunAsync()`; if SQL Server was slow at that moment, the Windows SCM may have killed the service
+on the start timeout before Kestrel ever bound — with no exception logged, because it was an external kill
+of the process, not a code failure. Unrelated to the code of fix 35.2. Fixed by manually restarting the
+service; the theory (Event Log source "Service Control Manager", events 7000/7009/7011) remains to be
+formally confirmed, and a possible fix (moving `EnsureCreatedAsync`'s timeout/retry off the startup critical
+path, or raising `ServicesPipeTimeout`) is on the roadmap.
+
+**(b) The console's production configuration got overwritten (roughly 9:50–10:05, 11 Sep 2026).** A manual
+`robocopy` of the console on the app server lacked the `/XF appsettings.local.json` exclusion that
+`Deploy-Api.cmd` has had from the start — it overwrote the production `appsettings.local.json` with a stale
+local development file. Result: the console listened only on `127.0.0.1` (unreachable from outside, even
+though the SCM reported RUNNING), `Authorization.DevAllowAll=true` (harmless only because the console was
+not reachable from outside), and the connection string pointed at `127.0.0.1` instead of the real SQL
+server. Fixed by restoring safe values; the corrective measure is a new `scripts/Deploy-Console.cmd`,
+mirroring `Deploy-Api.cmd` (stop → copy with `/XF` → start → verify), so a manual robocopy without the
+exclusion no longer has a reason to recur. The first real use of the new script surfaced two bugs of its own
+— the wrong character encoding in comments (which had only worked via a scheduled task with a different
+code page) and a log path pointing at the machine running the script rather than the target server, whose
+failed write masked a failed robocopy as "OK" — both fixed the same day.
+
+Deployed state as of the evening of 11 Sep 2026 (see HANDOFF §5.15): the console at commit `00cebc3`
+(includes 35.8b and the deploy-script fix from 35.9b), the API at `8da4843` (includes findings 35.1–35.2;
+findings 35.4–35.6 do not touch API/console enforcement except 35.6, whose deployment was not urgent), the
+agent at `924b9b8` unchanged (findings 35.3–35.5 await the combined beta wave). Of the seven P1 findings, six
+are fixed in code; two of them (35.1, 35.2) are deployed and verified on the fleet, three agent-side fixes
+(35.3–35.5) and one non-urgent API fix (35.6) sit in the repository awaiting their deploy; finding 35.7
+remains open, unchanged.
 
 ---
 

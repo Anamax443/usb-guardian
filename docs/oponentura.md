@@ -9,8 +9,8 @@
 | **Projekt** | USB Guardian |
 | **Repozitář** | `Anamax443/usb-guardian` |
 | **Autor** | Milan Trnka (AXIMA) |
-| **Verze dokumentu** | 1.1 — kapitoly 1–33 ve znění 1.0, kapitola 34 = doplněk k 4. 9. 2026 |
-| **Datum** | 2026-06-19, doplněno 2026-09-04 |
+| **Verze dokumentu** | 1.2 — kapitoly 1–33 ve znění 1.0, kapitola 34 = doplněk k 4. 9. 2026, kapitola 35 = doplněk k 11. 9. 2026 |
+| **Datum** | 2026-06-19, doplněno 2026-09-04 a 2026-09-11 |
 | **Klasifikace** | Interní — podklad pro oponenturu |
 | **Doménové prostředí** | `domena.loc` (AXIMA) |
 | **Jazyk** | 🇨🇿 Čeština · [🇬🇧 English](oponentura.en.md) |
@@ -94,6 +94,7 @@ stanici a **poctivý rozbor omezení, rizik a otevřených bodů**.
 
 **ČÁST VIII — Doplněk**
 34. Co se změnilo od verze 1.0 (stav k 4. 9. 2026)
+35. Druhý hloubkový průchod a náprava P1 (stav k 11. 9. 2026)
 
 **Přílohy**
 - A. Glosář pojmů
@@ -2400,6 +2401,184 @@ Repo `Anamax443/usb-guardian` se stalo **veřejným** 4. 9. 2026. Firemní hodno
 doménové a účetní jméno) byly před zveřejněním nahrazeny placeholdery (`APP_SERVER`, `SQL_SERVER`,
 `DOMENA`…); skutečné hodnoty zůstávají lokálně v gitignored `docs/local-values.local.md`. Zveřejnění je i
 kontext pro 34.7 — externí audit byl možný právě proto, že kód je teď čitelný zvenčí.
+
+## 35. Druhý hloubkový průchod a náprava P1 (stav k 11. 9. 2026)
+
+Kapitola 34 popsala stav k 4. 9. 2026. O týden později, 10.–11. 9. 2026, proběhl druhý průchod — tentokrát
+ne static audit repozitáře jako v 34.7, ale nezávislý hloubkový průchod přímo kódem enforcementu,
+autorizace a publikace whitelistu. Ohodnotil systém **8,1/10** (samotný nápad a architektura 8,8–9/10, dolů
+táhnou konkrétní implementační slabiny) a našel sedm nálezů priority P1. Opravovaly se podle stejné
+disciplíny jako v 34.7 — jeden krok, jeden commit, build a testy zeleně před pushem — a tato kapitola je
+popisuje se stejnou mírou upřímnosti: co bylo nalezeno, proč to vadilo, co se ověřilo před opravou, co je
+nasazeno a co ještě čeká.
+
+### 35.1 `GET /api/incidents`: chybějící izolace mezi stanicemi
+
+Co: `IncidentsController` měl jedinou (třídní) autorizační policy `USBGuardianClients` pro celý controller
+— stejnou, jakou má i příjem dat. Strojový účet libovolné jedné stanice tak mohl přes `GET /api/incidents`
+vytáhnout historii incidentů CELÉ flotily, ne jen svou vlastní.
+
+Proč to vadilo: autentizace (kdo volá) fungovala správně, ale autorizace (co smí to, co volá, číst) ne —
+porušení principu least-privilege přímo v té části systému, která nese auditní stopu.
+
+Oprava: autorizace přesunuta z úrovně třídy na jednotlivé akce, podle vzoru, který už používal
+`WhitelistController` (viz 34.7.2) — čtecí endpoint pro konzoli dostal vlastní politiku, oddělenou od
+klientského zápisu dat.
+
+Nasazeno a ověřeno: commit `95465ab`, nasazeno a ověřeno 10. 9. 2026 (`/api/version` hlásí `95465ab`).
+
+### 35.2 Hostname v datech agenta: z varování na tvrdé odmítnutí
+
+Co: ověření hostname v datech agenta (heartbeat i dávka incidentů) běželo od 4. 9. 2026 (viz 34.7.6, 34.7.7)
+jen v pozorovacím režimu — logovalo neshodu s autentizovanou identitou strojového účtu do `ActivityLog`, ale
+nezastavovalo zpracování.
+
+Co se ověřilo před zpřísněním: přesně to, na co čekala 34.7.7 — šest dní provozu bez jediného falešného
+poplachu v kategorii „bezpecnost" v Aktivitě, ověřeno přímo dotazem do databáze, ne jen vizuální kontrolou
+stránky.
+
+Oprava: neshoda hostname vůči autentizované identitě je nyní tvrdé **403 Forbidden**, ne jen záznam do
+deníku.
+
+Nasazeno a ověřeno: commit `1542bbb`, nasazeno a ověřeno. Nasazení tohoto kroku doprovodil vedlejší, s
+opravou nesouvisející incident při restartu API služby — popsáno v 35.9(a).
+
+### 35.3 `DeviceBlocker.BlockDevice`: chyba blokování se mohla ztratit
+
+Co: `Disable-PnpDevice` v `BlockDevice` nebyl obalený v try/catch. Výchozí `$ErrorActionPreference` je
+`Continue`, takže nedokončující (non-terminating) chyba PowerShellu se ztratila beze stopy a skript stejně
+vypsal `BLOCKED`, i když se zařízení fakticky nezablokovalo.
+
+Proč to vadilo: stejná třída chyby už byla jednou opravena — u `UnblockDevice` (§8.4 tohoto dokumentu). Že
+se stejná chyba objevila znovu na druhé straně stejné dvojice funkcí, je samo o sobě zjištění k zapsání:
+oprava jednoho místa nezaručuje, že sesterská funkce má stejnou disciplínu.
+
+Oprava: `Disable-PnpDevice` obalen do try/catch, interpretace výstupu vytažena do samostatné, čistě
+testovatelné funkce `InterpretBlockOutput` (4 nové testy; `InternalsVisibleTo` poprvé zavedeno i pro projekt
+agenta, aby na internal funkci mohly sáhnout testy).
+
+Stav nasazení: commit `8da4843`, opraveno na straně agenta, **čeká na společnou beta vlnu** spolu s nálezy
+35.4 a 35.5 — k večeru 11. 9. 2026 ještě nenasazeno na flotilu (stable i beta kanál zůstávaly na `924b9b8`).
+
+### 35.4 `BlockDevice`: chybějící přesná shoda před wildcard fallbackem
+
+Co: `UnblockDevice` nejdřív zkouší přesnou shodu `Get-PnpDevice -InstanceId`, teprve pak padá na `-like`
+substring. `BlockDevice` dělal rovnou substring shodu (`-like '*id*'`), bez pokusu o přesnou shodu napřed.
+
+Proč to vadilo: VID, PID i sériové číslo USB zařízení si nastavuje samo připojené zařízení — útočník je může
+zvolit libovolně. Volná substring shoda tak v principu mohla zasáhnout i JINÉ, nesouvisející připojené
+zařízení, ne to, které mělo být zablokované.
+
+Oprava: `BlockDevice` sjednocen se vzorem `UnblockDevice` — přesná shoda `InstanceId` napřed, `-like` jen
+jako fallback.
+
+Stav nasazení: commit `08315d6`, opraveno na straně agenta, stejný pending-beta stav jako 35.3 — čeká na
+společnou vlnu s nálezy 35.3 a 35.5.
+
+### 35.5 Audit mohl tvrdit „Blocked", i když zařízení zůstalo přístupné
+
+Co: `PolicyEnforcer.HandleDevice()` zapisoval `Incident.Action` (výsledek `DetermineAction()`, tedy ZÁMĚR
+politiky) PŘED tím, než se vůbec zavolal kód, který se o blokování pokusí. Když blokování selhalo (např.
+chybějící `PNPDeviceId`, chyba `Disable-PnpDevice`) a spadlo na fallback varování, incident už mezitím
+tvrdil „Blocked".
+
+Proč to vadilo: toto je nejzávažnější ze sedmi nálezů, protože se netýká samotného vynucení, ale
+DŮVĚRYHODNOSTI auditní stopy, na které dokument staví argumentaci pro NIS2 (kapitola 14) — auditní záznam
+mohl lhát přesně v okamžiku, kdy na jeho pravdivosti nejvíc záleží (selhání blokace).
+
+Oprava: `HandleWarn`/`HandleBlock` nyní vrací SKUTEČNĚ dosaženou `IncidentAction`, ne zamýšlenou.
+`HandleDevice` zapisuje incident až po potvrzeném výsledku enforcementu. `DetermineAction` zveřejněna jako
+`internal` kvůli testovatelnosti.
+
+Stav nasazení: commit `0982226`, opraveno na straně agenta, stejný pending-beta stav jako 35.3 a 35.4.
+
+### 35.6 `POST /api/whitelist/devices` mohl nenávratně „vypnout" celý whitelist
+
+Co: tento API endpoint (určený pro externí/L1-admin nástroje, ne pro samotnou konzoli) volal
+`BumpWhitelistVersion`, který deaktivoval poslední řádně PODEPSANOU verzi whitelistu a nahradil ji novou
+„aktivní" verzí s prázdným `Json`/`Signature` — protože proces API nemá (a záměrně nemá) přístup k
+privátnímu podpisovému klíči, ten žije jen na straně konzole/APP_SERVER (`WhitelistPublisher.cs`).
+
+Proč to vadilo: `GetWhitelist`/`GetSignature` na prázdnou verzi sice bezpečně vrátí 404 (agenti tedy
+nedostanou poškozený whitelist), ale nově přidané zařízení — a ve skutečnosti CELÝ whitelist — by přestal
+být agentům dostupný, dokud by si toho někdo nevšiml a ručně nepublikoval znovu z konzole. Tichý výpadek bez
+chybové hlášky.
+
+Oprava: volání `BumpWhitelistVersion` z tohoto endpointu odstraněno. `AddDevice` nyní jen zapíše katalogový
+záznam a v odpovědi řekne, že publikace je samostatný krok prováděný v konzoli.
+
+Stav nasazení: commit `11734f2`. Endpoint dnes nemá žádného volajícího (konzole jde přímo přes
+`WhitelistPublisher`), takže bez urgentní potřeby okamžitého nasazení — oprava je hotová v kódu a čeká na
+běžný deploy cyklus API.
+
+### 35.7 Spool retry po výpadku SQL Serveru (otevřeno)
+
+Co: `IncidentSpool` (viz Příloha A, přidán 4. 9. 2026 — 34.7.6) přežije pád procesu, ale jeho retry logika
+se po výpadku SQL Serveru sama nerozjede — potřebuje manuální restart služby.
+
+Proč to vadí: pokud SQL Server spadne na delší dobu, spool na disku poroste, ale po jeho obnovení se z něj
+API bez restartu samo nezačne odbavovat. Odolnost proti výpadku databáze je tak jen částečná — data se
+neztratí, ale obnovení toku vyžaduje lidský zásah.
+
+Stav: **jediný nedořešený bod ze sedmi P1 nálezů.** Zůstává na roadmapě (viz kapitola 20 / HANDOFF §5.5) —
+automatický restart retry smyčky po obnovené konektivitě k SQL, bez nutnosti restartovat celou službu.
+
+### 35.8 Dva vedlejší provozní vylepšení téhož dne
+
+Nesouvisí přímo s bezpečnostním nálezem, ale vznikly jako vedlejší produkt živého provozního použití týž
+den a dotýkají se stejných podsystémů:
+
+**(a) „Zmlklý agent" vyžaduje potvrzený ping.** Detekce „zmlklo agentů" se dřív počítala čistě z `LastSeen`,
+bez ohledu na to, jestli je stanice vůbec zapnutá — vypnutý notebook přes noc vypadal stejně „zmlkle" jako
+spadlá služba na běžícím stroji. Přidán `Computer.LastPingOk`/`LastPingAt` a nová `PingMonitorService`
+(interval nastavitelný, default 5 min), která na pozadí pinguje jen stanice hlásící agenta, jejichž data
+nejsou čerstvá. „Zmlklý" teď vyžaduje potvrzený ping (PC běží, agent mlčí); nová kategorie `ProbablyOff`
+(ping neodpovídá) dostala vlastní stavovou značku. Klasifikace vytažena do jednoho sdíleného místa
+(`StationStatus.cs`) — druhá, nezávislá kontrola na stránce Kontroly počítala „zmlklost" stejnou starou
+(chybnou) cestou a byla dodatečně přepnuta na stejnou třídu, aby v systému nezůstala dvě různá místa se
+stejnou pravdou počítanou dvakrát a odlišně.
+
+**(b) AD sync zapínatelný živě z konzole.** `AdSync.Enabled` se dřív četl jen jednou při startu konzole a
+rozhodoval, jestli se `AdSyncService` vůbec zaregistruje — změna vyžadovala úpravu konfiguračního souboru na
+serveru a restart konzole; stránka Nastavení hodnotu jen zobrazovala. Sjednoceno se vzorem, který v konzoli
+už platí pro jiné vždy-běžící služby (`BetaRolloutService`, `AgentDeployService`): `AdSyncService` teď běží
+vždy a při každém tiku čte `adsync.enabled`/`adsync.intervalMinutes` z centrálních `AppSettings` v databázi.
+Nastavení dostalo skutečný přepínač.
+
+### 35.9 Dva nasazovací incidenty téhož dne
+
+V duchu poctivého rozboru, který zavedla kapitola 34: dva provozní incidenty při nasazování oprav výše, oba
+bez souvislosti s bezpečnostní podstatou oprav samotných.
+
+**(a) Start API po nasazení kroku 35.2 (cca 8:21–8:46, 11. 9. 2026).** Po redeployi API se služba „USB
+Guardian API" po zastavení staré verze **nerozjela** — port 5443/5050 neposlouchal ~25 minut, celá flotila
+hlásila „API nedostupné". Event Log ukázal, že proces doběhl až k zalogování TLS pinu a pak nic — žádná
+výjimka, žádné potvrzení naslouchání. Podezřelé místo: `Program.cs`, `db.Database.EnsureCreatedAsync()` běží
+synchronně PŘED `app.RunAsync()`; pokud byl SQL Server v tu chvíli pomalý, Windows SCM mohl zabít službu na
+start-timeoutu dřív, než se Kestrel vůbec rozjel — bez zalogované výjimky, protože šlo o externí kill
+procesu, ne o pád kódu. Nesouvisí s kódem opravy 35.2. Napraveno ručním restartem služby; teorie (Event Log
+zdroj „Service Control Manager", události 7000/7009/7011) zůstává k formálnímu ověření, případná oprava
+(timeout/retry `EnsureCreatedAsync` mimo kritickou cestu startu, případně zvýšení `ServicesPipeTimeout`) je
+na roadmapě.
+
+**(b) Přepsání produkční konfigurace konzole (cca 9:50–10:05, 11. 9. 2026).** Ruční `robocopy` konzole na
+APP_SERVER neměl vyloučení `/XF appsettings.local.json`, které má `Deploy-Api.cmd` od začátku — přepsal
+produkční `appsettings.local.json` starým lokálním vývojovým souborem. Následek: konzole poslouchala jen na
+`127.0.0.1` (nedostupná zvenku, přestože SCM hlásil RUNNING), `Authorization.DevAllowAll=true` (bez efektu
+jen díky tomu, že konzole nebyla dostupná zvenku) a connection string mířil na `127.0.0.1` místo skutečného
+SQL serveru. Napraveno obnovením bezpečných hodnot; nápravné opatření je nový `scripts/Deploy-Console.cmd`,
+mirror `Deploy-Api.cmd` (stop → kopie s `/XF` → start → ověření), takže ruční robocopy bez vyloučení už
+nemá důvod se opakovat. Při prvním ostrém použití nového skriptu se ukázaly ještě dvě jeho vlastní chyby —
+nesprávná znaková sada v komentářích (fungovala jen přes plánovanou úlohu s jinou codepage) a logovací cesta
+mířící na lokální stroj spouštějícího místo na cílový server, kvůli které neúspěšný zápis logu maskoval
+neúspěšné robocopy jako „OK" — obě opraveny týž den.
+
+Aktuální nasazený stav k večeru 11. 9. 2026 (viz HANDOFF §5.15): konzole na commitu `00cebc3` (zahrnuje
+35.8b a nápravu deploy skriptů z 35.9b), API na `8da4843` (zahrnuje nálezy 35.1–35.2; nálezy 35.4–35.6 se
+enforcementu API/konzole netýkají kromě 35.6, jehož nasazení nebylo urgentní), agent na `924b9b8` beze změny
+(nálezy 35.3–35.5 čekají na společnou beta vlnu). Ze sedmi P1 nálezů je šest opravených v kódu; dva z nich
+(35.1, 35.2) jsou nasazené a ověřené na flotile, tři agentí opravy (35.3–35.5) a jedna nenaléhavá API oprava
+(35.6) čekají v repozitáři na svůj deploy; nález 35.7 zůstává otevřený beze změny.
 
 ---
 

@@ -49,12 +49,15 @@ Unapproved media are warned or blocked. Designed as a technical control for
 | 39 | **Closed unencrypted HTTP 5050** – only listens in `Development`, production (Windows service) is HTTPS `:5443` only | ✅ |
 | 40 | **External security audit + remediation** (2026-09-04) – 6 findings, 5 fixed and deployed, 1 deliberately in observation mode only (see Security) | ✅ |
 | 41 | **Durable incident queue** – `IncidentSpool` writes the batch to disk BEFORE the API acknowledges it, survives a process crash, replayed on restart; the "Incident queue (spool)" check on `/kontroly` | ✅ |
-| 42 | **First tests and CI** – 24 C# tests (0 before 2026-09-04), `.github/workflows/build-and-test.yml` on every push/PR | ✅ |
+| 42 | **First tests and CI** – 58 C# tests (0 before 2026-09-04), `.github/workflows/build-and-test.yml` on every push/PR | ✅ |
+| 43 | **Deeper opponent review + P1 remediation** (2026-09-10/11) – 6 of 7 findings fixed: authorization on `GET /api/incidents`, hostname verification tightened to a hard 403, `DeviceBlocker` false-success + exact-match fix, audit now records the actual enforcement outcome (not just intent), `POST /api/whitelist/devices` no longer creates an unsigned active version | ✅ 6/7 |
+| 44 | **Silent agent = confirmed by ping** – a background `PingMonitorService` checks reachability only for stations that report an agent but are not fresh; "silent" (worth a look) is now distinguished from "off?" (ping doesn't answer, no action) on both Stations and Health checks | ✅ |
+| 45 | **AD sync toggle moved to Settings** – previously only via editing `appsettings.local.json` + restarting the console, now a real switch + interval in the DB (`AdSyncService` always runs, reads the flag on every tick) | ✅ |
 | – | Per-serial **blocklist** + blocking of an already-connected device | 🔜 |
 | – | Signing certificate expiry monitoring | 🔜 |
 | – | **Activity-log retention** – `sp_PurgeActivityLog` exists but nothing calls it | 🔜 |
 | – | ACLs on the server's TLS/RSA keys (last open item from the audit) | 🔜 |
-| – | Tighten hostname verification (warn-only today) to a hard rejection | 🔜 |
+| – | Spool retry doesn't come back on its own after a SQL outage without a restart (the last remaining P1 finding, 2026-09-10/11) | 🔜 |
 
 ## Architecture
 
@@ -285,9 +288,13 @@ names are replaced with placeholders — substitute your own values:
     "DevAllowAll": false
   },
   "Kestrel": { "Endpoints": { "Http": { "Url": "http://0.0.0.0:4200" } } },
-  "AdSync": { "Enabled": true, "IntervalMinutes": 60, "SearchBase": "", "IncludeDisabled": false }
+  "AdSync": { "SearchBase": "", "IncludeDisabled": false }
 }
 ```
+
+> **AD sync on/off and the interval** are set, as of 2026-09-11, in **Settings** (DB `AppSettings`
+> `adsync.enabled`/`adsync.intervalMinutes`), not in `appsettings.local.json` — `SearchBase`/`IncludeDisabled`
+> stay in the file, changed only rarely.
 
 ## Database
 
@@ -304,6 +311,7 @@ SQL scripts in `database/` (run in order):
 | `07_whitelist_publish.sql` | WhitelistVersions: `Json` (signed blob) + `Signature` → `NVARCHAR(MAX)` (publishing workflow) |
 | `08_deploy_ignored.sql` | permanent exclusion of a station from deployment (bulk actions do not override it) |
 | `09_activity_log.sql` | `ActivityLog` (operations log) + indexes + `sp_PurgeActivityLog` (cleanup in batches of 5000) |
+| `10_ping_status.sql` | `Computer.LastPingOk/LastPingAt` – confirmed network reachability, to tell a "silent agent" apart from an "off PC" |
 
 Grants are deliberately **not** in the scripts (portability – no company accounts in the repo). The activity
 log needs `SELECT, INSERT ON dbo.ActivityLog` for both the console and the API accounts, and
@@ -370,11 +378,18 @@ GRANT INSERT, UPDATE ON dbo.WhitelistVersions TO [DOMENA\APP_SERVER$];          
 - **API `FallbackPolicy`** (since 2026-09-04) – everything is protected by default, public only where
   explicitly marked `[AllowAnonymous]`. A new endpoint with no attribute can no longer end up silently public
   by accident.
-- **Hostname verification** (since 2026-09-04, warn-only for now) – the server compares the hostname in the
-  data against the caller's authenticated machine-account identity; for now it only logs a mismatch to
-  Activity, and will be tightened to a hard rejection after a few days with no false positives.
+- **Hostname verification** (warn-only since 2026-09-04, **hard 403 Forbidden since 2026-09-10**) – the server
+  compares the hostname in the data against the caller's authenticated machine-account identity; after 6 days
+  with zero false positives in Activity, tightened from plain logging to rejecting the request.
 - **Independent security audit** (2026-09-04) reviewed the repo after it went public – 6 findings, 5 fixed
   and deployed the same day (see `docs/oponentura.en.md` §34.7 for the detail on each).
+- **Deeper opponent review** (2026-09-10/11) – an independent code assessment (not just a static scan) scored
+  8.1/10, with seven P1 findings in enforcement/authorization/whitelist publishing. Six fixed: authorization on
+  `GET /api/incidents` (admins only, not every station), `DeviceBlocker` could wrongly report blocking as
+  successful (missing try/catch around `Disable-PnpDevice`) and did not try an exact PnP ID match before the
+  wildcard fallback, the audit could record `Blocked` before enforcement had actually happened,
+  `POST /api/whitelist/devices` could activate an unsigned whitelist version. One remains (spool retry after a
+  SQL outage needs a manual restart) — see `docs/oponentura.en.md` §35.
 
 ## Repo structure
 
@@ -390,15 +405,17 @@ usb-guardian/
 │   └── USBGuardian.Admin/    # Blazor Server admin console (APP_SERVER)
 │       ├── Components/        # Pages (Home, Computers, Whitelist, Settings, Database, Docs), Layout
 │       ├── AdSync/            # AdSyncRunner + AdSyncService
-│       ├── Deploy/            # AgentDeployService (auto-enrollment orchestrator)
+│       ├── Deploy/            # AgentDeployService (auto-enrollment), PingMonitorService,
+│       │                      #   StationStatus (Silent/ProbablyOff classification), DeployTrigger
 │       ├── Export/            # ExportEndpoints (CSV + manager report)
 │       ├── Notifications/     # IncidentAlertService + EmailSender
 │       └── appsettings.local.json.example
 ├── tools/WhitelistSigner/    # offline RSA whitelist signing (generate/sign/verify)
-├── database/                 # 01–09 SQL scripts
+├── database/                 # 01–10 SQL scripts
 ├── scripts/                  # certificates, Build-AgentPackage, watchdog, ToastHelper,
 │                             #   Install/Uninstall-Agent, Deploy-AgentFleet, Update-Agent.cmd,
-│                             #   Deploy-Api.cmd, Set/Archive-AgentVersion, New-DeployGmsa, tasks/
+│                             #   Deploy-Api.cmd, Deploy-Console.cmd, Set/Archive-AgentVersion,
+│                             #   New-DeployGmsa, tasks/
 ├── docs/                     # architecture(.en).md, auto-deploy-setup(.en).md, oponentura(.en).md,
 │                             #   how-it-works.html (animation), mind-map.html, flowchart.html,
 │                             #   management-summary.html (A4 one-pager)
