@@ -332,7 +332,7 @@ jinak nezměnil žádný `.cs`. Dřív (`BeforeTargets=CoreGenerateAssemblyInfo`
 
 ## Testy a CI
 
-Do 04.09.2026 repo nemělo žádné C# testy (jen jeden JS test na UI). Dnes: **70 testů** ve třech projektech,
+Do 04.09.2026 repo nemělo žádné C# testy (jen jeden JS test na UI). Dnes: **76 testů** ve třech projektech,
 všechny xUnit, bez mock frameworku – buď skutečné instance směrované do dočasného adresáře (agent), nebo čisté
 funkce beze závislosti na infrastruktuře (API, konzole):
 
@@ -340,9 +340,9 @@ funkce beze závislosti na infrastruktuře (API, konzole):
 |---------|-----------|-------|
 | `tests/USBGuardian.Agent.Tests` | `WhitelistChecker`, `PolicyEnforcer` (expirace whitelistu, rozhodovací logika), `DeviceBlocker` (interpretace výstupu blokovacího skriptu, skutečný timeout/kill zaseknutého PowerShellu), `LocalConsoleService` (CSRF Origin/Referer kontrola) | 20 |
 | `tests/USBGuardian.Api.Tests` | `IncidentSpool` (zápis/čtení/mazání/karanténa poškozeného souboru), dedup klíč a ohraničený exponenciální retry odstup (`IncidentQueueWorker`), `CallerIdentity` (parsování Windows identity) | 21 |
-| `tests/USBGuardian.Admin.Tests` | `StationStatus`, `Reachability`, `DeployResultIngestor` – čistá rozhodovací logika konzole (stav stanic, dostupnost, zpracování výsledků nasazení) | 29 |
+| `tests/USBGuardian.Admin.Tests` | `StationStatus`, `Reachability`, `DeployResultIngestor` – čistá rozhodovací logika konzole (stav stanic, dostupnost, zpracování výsledků nasazení); `HealthService.EvaluateSigningKey` – kontrola „Podpisový klíč whitelistu" (nenastaveno/chybí soubor/nelze přečíst/OK) | 35 |
 
-API i konzole sahají na `internal` metody přes `InternalsVisibleTo` (`AssemblyInfo.cs` v obou projektech) –
+API i konzole sahají na `internal` metody přes `InternalsVisibleTo` (`AssemblyInfo.cs` ve všech třech projektech) –
 řeší se tím, že např. `WindowsIdentity`/`HttpListenerContext`/reálný `powershell.exe` proces nejdou v testu
 snadno sestrojit, takže testovaná logika je rozdělená na čistou rozhodovací/parsovací funkci (testovatelná)
 a tenký obal nad frameworkem/OS (netestovaný, triviální).

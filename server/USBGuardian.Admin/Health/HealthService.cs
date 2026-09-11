@@ -520,30 +520,37 @@ public sealed class HealthService
             changedAfter == 0 ? "" : "Whitelist → Publikovat nyní.");
     }
 
-    private static Task<CheckOutcome> CheckSigningKeyAsync(Ctx c, CancellationToken ct)
+    private static Task<CheckOutcome> CheckSigningKeyAsync(Ctx c, CancellationToken ct) =>
+        Task.FromResult(EvaluateSigningKey(c.Config["Whitelist:PrivateKeyPath"]));
+
+    // Vytazeno z CheckSigningKeyAsync jako testovatelna jednotka (nález 11.09.2026: appsettings.local.json
+    // na APP_SERVER v produkci Whitelist:PrivateKeyPath ztratil - tahle kontrola by to na /kontroly ukazala
+    // jako "nenastaveno", kdyby se na ni někdo podíval; regresní test má hlídat, že to i nadál pozná).
+    // Skutečné File.Exists/File.OpenRead nejsou mockované - stejný vzor jako IncidentSpoolTests
+    // (reálný dočasný soubor), ne umělá abstrakce nad souborovým systémem jen kvůli testu.
+    internal static CheckOutcome EvaluateSigningKey(string? path)
     {
-        var path = c.Config["Whitelist:PrivateKeyPath"];
         if (string.IsNullOrWhiteSpace(path))
         {
-            return Task.FromResult(new CheckOutcome(HealthState.Off, "nenastaveno",
-                "Doplň Whitelist:PrivateKeyPath do appsettings.local.json na serveru konzole."));
+            return new CheckOutcome(HealthState.Off, "nenastaveno",
+                "Doplň Whitelist:PrivateKeyPath do appsettings.local.json na serveru konzole.");
         }
 
         if (!File.Exists(path))
         {
-            return Task.FromResult(new CheckOutcome(HealthState.Bad, $"soubor neexistuje: {path}",
-                "Ulož privátní klíč na uvedenou cestu (chraň ho ACL – čte ho jen účet konzole)."));
+            return new CheckOutcome(HealthState.Bad, $"soubor neexistuje: {path}",
+                "Ulož privátní klíč na uvedenou cestu (chraň ho ACL – čte ho jen účet konzole).");
         }
 
         try
         {
             using var _ = File.OpenRead(path);
-            return Task.FromResult(new CheckOutcome(HealthState.Ok, $"k dispozici ({path})"));
+            return new CheckOutcome(HealthState.Ok, $"k dispozici ({path})");
         }
         catch (Exception ex)
         {
-            return Task.FromResult(new CheckOutcome(HealthState.Bad, "nelze přečíst: " + Short(ex.Message),
-                "Uprav ACL souboru tak, aby na něj měl účet služby konzole čtecí právo."));
+            return new CheckOutcome(HealthState.Bad, "nelze přečíst: " + Short(ex.Message),
+                "Uprav ACL souboru tak, aby na něj měl účet služby konzole čtecí právo.");
         }
     }
 

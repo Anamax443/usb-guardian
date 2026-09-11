@@ -353,7 +353,7 @@ is reliable** – a generated source file `GitCommit.g.cs` is rewritten only whe
 
 ## Tests and CI
 
-Until 2026-09-04 the repo had no C# tests at all (just one JS test for the UI). Today: **70 tests** across
+Until 2026-09-04 the repo had no C# tests at all (just one JS test for the UI). Today: **76 tests** across
 three projects, all xUnit, no mock framework – either real instances routed into a temp directory (agent) or
 pure functions with no infrastructure dependency (API, console):
 
@@ -361,9 +361,9 @@ pure functions with no infrastructure dependency (API, console):
 |---------|---------------|-------|
 | `tests/USBGuardian.Agent.Tests` | `WhitelistChecker`, `PolicyEnforcer` (whitelist expiry, decision logic), `DeviceBlocker` (interpreting the block script's output, actually timing out and killing a stuck PowerShell), `LocalConsoleService` (CSRF Origin/Referer check) | 20 |
 | `tests/USBGuardian.Api.Tests` | `IncidentSpool` (write/read/delete/quarantine of a corrupt file), the dedup key and bounded exponential retry backoff (`IncidentQueueWorker`), `CallerIdentity` (parsing a Windows identity) | 21 |
-| `tests/USBGuardian.Admin.Tests` | `StationStatus`, `Reachability`, `DeployResultIngestor` – the console's pure decision logic (station state, reachability, deploy-result processing) | 29 |
+| `tests/USBGuardian.Admin.Tests` | `StationStatus`, `Reachability`, `DeployResultIngestor` – the console's pure decision logic (station state, reachability, deploy-result processing); `HealthService.EvaluateSigningKey` – the "Whitelist signing key" check (unset/missing file/unreadable/OK) | 35 |
 
-The API and console tests reach into `internal` methods via `InternalsVisibleTo` (`AssemblyInfo.cs` in both
+The API and console tests reach into `internal` methods via `InternalsVisibleTo` (`AssemblyInfo.cs` in all three
 projects) – this works around the fact that, e.g., a `WindowsIdentity`/`HttpListenerContext`/a real
 `powershell.exe` process can't easily be constructed in a test, so the logic under test is split into a pure
 decision/parsing function (testable) and a thin wrapper around the framework/OS (untested, trivial).
