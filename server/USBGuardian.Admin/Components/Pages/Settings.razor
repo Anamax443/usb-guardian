@@ -71,9 +71,17 @@
         &nbsp;<button class="btn" @onclick="SaveComm" disabled="@_busy">Uložit</button>
         @if (_commMsg is not null) { <span class="muted">&nbsp;@_commMsg</span> }
     </dd>
+    <dt>Kontrola dostupnosti (ping) zmlklých po (min)</dt>
+    <dd>
+        <input class="inp" style="min-width:90px" @bind="_pingInterval" />
+        &nbsp;<button class="btn" @onclick="SavePing" disabled="@_busy">Uložit</button>
+        @if (_pingMsg is not null) { <span class="muted">&nbsp;@_pingMsg</span> }
+    </dd>
 </dl>
-<p class="muted">Hranice pro tečku komunikace i dlaždici „Zmlklo agentů" na Stanicích. Stanice, která dřív
-    hlásila agenta a déle se neozvala, se počítá jako zmlklá (možný výpadek / tamper). Default 180 min.</p>
+<p class="muted">Stanice, která dřív hlásila agenta a déle se neozvala, se počítá jako <strong>zmlklá</strong>
+    JEN když PingMonitorService potvrdí, že PC odpovídá na ping (možný výpadek / tamper) - jinak jde jen
+    o <strong>„vypnuto?"</strong> (nejspíš mimo síť, nevyžaduje akci). Default 180 min pro zmlklost, 5 min
+    pro interval kontroly dostupnosti.</p>
 
 <h2>Verze agenta</h2>
 <p class="muted">Archiv balíčků na tomto serveru. <strong>Stable</strong> je verze pro fleet
@@ -358,6 +366,9 @@ denní souhrn) je další krok.</p>
     private string _silentAfter = "180";
     private string? _commMsg;
 
+    private string _pingInterval = "5";
+    private string? _pingMsg;
+
     private bool _deployEnabled, _deployDryRun = true, _deployDefaultEnroll = true, _deployBad;
     private string _deployInterval = "30", _deployMaxPerRun = "10",
                    _deployAllow = "", _deployTargets = "", _deployLastRun = "";
@@ -411,6 +422,7 @@ denní souhrn) je další krok.</p>
             _groups  = SplitList(await Get(db, "access.groups"));
 
             var sa = await Get(db, "comm.silentAfterMinutes"); _silentAfter = string.IsNullOrEmpty(sa) ? "180" : sa;
+            var pi = await Get(db, "ping.intervalMinutes"); _pingInterval = string.IsNullOrEmpty(pi) ? "5" : pi;
 
             _emailEnabled    = string.Equals(await Get(db, "email.enabled"), "true", StringComparison.OrdinalIgnoreCase);
             _emailHost       = await Get(db, "email.host");
@@ -491,6 +503,24 @@ denní souhrn) je další krok.</p>
             _commMsg = "Uloženo.";
         }
         catch (Exception ex) { _commMsg = "Chyba: " + ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task SavePing()
+    {
+        _pingMsg = null;
+        if (!int.TryParse(_pingInterval?.Trim(), out var min) || min <= 0)
+        { _pingMsg = "Zadej kladné číslo minut."; return; }
+
+        _busy = true;
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            await Set(db, "ping.intervalMinutes", min.ToString());
+            _pingInterval = min.ToString();
+            _pingMsg = "Uloženo.";
+        }
+        catch (Exception ex) { _pingMsg = "Chyba: " + ex.Message; }
         finally { _busy = false; }
     }
 

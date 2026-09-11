@@ -121,7 +121,8 @@ else
                     <select class="f" form="fstanice" name="stav" onchange="this.form.requestSubmit()">
                         <option value="" selected="@(string.IsNullOrEmpty(Stav))">vše</option>
                         <option value="hlasi"  selected="@(Stav == "hlasi")">hlásí</option>
-                        <option value="zmlkl"  selected="@(Stav == "zmlkl")">zmlkl</option>
+                        <option value="zmlkl"  selected="@(Stav == "zmlkl")">zmlklý (PC běží)</option>
+                        <option value="vypnuto" selected="@(Stav == "vypnuto")">vypnuto? (ping neodpovídá)</option>
                         <option value="chybi"  selected="@(Stav == "chybi")">chybí agent</option>
                         <option value="neniad" selected="@(Stav == "neniad")">není v AD</option>
                     </select>
@@ -164,7 +165,9 @@ else
                     <td>@c.OperatingSystem</td>
                     <td class="muted">@c.Domain</td>
                     <td>
-                        @if (Reports(c)) { <span class="pill ok">hlásí</span> }
+                        @if (Silent(c)) { <span class="pill bad" title="Hlásí agenta, dlouho se neozval, ale PC odpovídá na ping">zmlklý</span> }
+                        else if (ProbablyOff(c)) { <span class="pill off" title="Hlásí agenta, dlouho se neozval, a neodpovídá ani na ping">vypnuto?</span> }
+                        else if (Reports(c)) { <span class="pill ok">hlásí</span> }
                         else if (c.InActiveDirectory) { <span class="pill bad">chybí agent</span> }
                         else { <span class="pill warn">není v AD</span> }
                     </td>
@@ -240,9 +243,12 @@ else
         </tbody>
     </table>
     <p class="muted" data-no-print>Komunikace (agent): <span class="dot ok"></span> komunikuje (≤ @_silentAfterMin min) ·
-        <span class="dot warn"></span> zmlkl (starší) · <span class="dot off"></span> žádný kontakt</p>
+        <span class="dot bad"></span> zmlkl a PC běží (ping OK) – stojí za pozornost ·
+        <span class="dot off"></span> zmlkl a PC nejspíš vypnuté (ping neodpovídá) / žádný kontakt ·
+        <span class="dot warn"></span> zmlkl, dostupnost se zatím ověřuje</p>
     <p class="muted" data-no-print>Ping (síť, nezávisle na agentovi): <span class="dot ok"></span> odpovídá ·
-        <span class="dot bad"></span> neodpovídá · <span class="dot off"></span> zatím neověřeno – tlačítko „Ověřit dostupnost“ výše</p>
+        <span class="dot bad"></span> neodpovídá · <span class="dot off"></span> zatím neověřeno – tlačítko „Ověřit dostupnost“ výše
+        nebo automaticky na pozadí (jen u zmlklých stanic, viz PingMonitorService)</p>
 }
 
 @code {
@@ -287,16 +293,11 @@ else
     private string? _reqError;
     private string? _deployMsg;   // chyba zápisu vyžádání (Load() ho nevynuluje)
 
-    // Ping "Ověřit dostupnost": bodová kontrola sítě, ne stav agenta. Drží se jen
-    // v paměti téhle instance komponenty (na rozdíl od _reqMap) – je to okamžitá
-    // odpověď na klik, ne stav, který musí přežít do dalšího heartbeatu.
-    private Dictionary<string, (bool Ok, DateTime CheckedAtLocal)> _pingMap = new(StringComparer.OrdinalIgnoreCase);
-
-    private (bool? Ok, DateTime? At) PingResult(Computer c) =>
-        _pingMap.TryGetValue(c.Hostname, out var r) ? (r.Ok, r.CheckedAtLocal) : (null, null);
-
-    private string PingDotClass(Computer c) => Reachability.DotClass(PingResult(c).Ok);
-    private string PingDotTitle(Computer c) { var (ok, at) = PingResult(c); return Reachability.DotTitle(ok, at); }
+    // Ping "Ověřit dostupnost": stejný persistovaný stav jako PingMonitorService (Computer.LastPingOk/
+    // LastPingAt) – ne jen v paměti téhle komponenty. Jinak by ruční klik jednoho operátora nebylo vidět
+    // v druhé záložce/u druhého uživatele, a hlavně by se nepromítlo do Silent()/ProbablyOff().
+    private string PingDotClass(Computer c) => Reachability.DotClass(c.LastPingOk);
+    private string PingDotTitle(Computer c) => Reachability.DotTitle(c.LastPingOk, c.LastPingAt?.ToLocalTime());
 
     private async Task PingFiltered()
     {
@@ -304,8 +305,12 @@ else
         if (hosts.Count > 0)
         {
             var results = await Reachability.PingManyAsync(hosts);
-            var now = DateTime.Now;
-            foreach (var (host, ok) in results) _pingMap[host] = (ok, now);
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var now = DateTime.UtcNow;
+            var rows = await db.Computers.Where(c => hosts.Contains(c.Hostname)).ToListAsync();
+            foreach (var c in rows)
+                if (results.TryGetValue(c.Hostname, out var ok)) { c.LastPingOk = ok; c.LastPingAt = now; }
+            await db.SaveChangesAsync();
         }
         await Load();
     }
@@ -328,19 +333,23 @@ else
     private bool Fresh(Computer c) =>
         c.LastSeen is { } t && (DateTime.UtcNow - t).TotalMinutes <= _silentAfterMin;
 
-    private bool Silent(Computer c) => Reports(c) && !Fresh(c);
+    // Klasifikace (Silent/ProbablyOff/CommDotClass) je čistá funkce ve StationStatus.cs -
+    // testovatelná odděleně, bez Computer/DB. Zmlklý smí platit JEN s potvrzeným pingem
+    // (viz database/10_ping_status.sql, PingMonitorService).
+    private bool Silent(Computer c) => StationStatus.Silent(Reports(c), Fresh(c), c.LastPingOk);
+    private bool ProbablyOff(Computer c) => StationStatus.ProbablyOff(Reports(c), Fresh(c), c.LastPingOk);
+    private string CommClass(Computer c) =>
+        StationStatus.CommDotClass(c.LastSeen is not null, Reports(c), Fresh(c), c.LastPingOk);
 
-    private string CommClass(Computer c)
+    private string CommTitle(Computer c)
     {
-        if (c.LastSeen is null) return "off";
-        return Fresh(c) ? "ok" : "warn";
+        if (c.LastSeen is null) return "Žádný kontakt s agentem";
+        var posledni = $"naposledy {c.LastSeen.Value.ToLocalTime():dd.MM.yyyy HH:mm}";
+        if (Fresh(c)) return $"Komunikuje – {posledni}";
+        if (Silent(c)) return $"Zmlkl (> {_silentAfterMin} min), PC běží (ping OK) – {posledni}";
+        if (ProbablyOff(c)) return $"Pravděpodobně vypnuto (ping neodpovídá) – {posledni}";
+        return $"Zmlkl (> {_silentAfterMin} min), dostupnost se ještě ověřuje – {posledni}";
     }
-
-    private string CommTitle(Computer c) => c.LastSeen is null
-        ? "Žádný kontakt s agentem"
-        : Fresh(c)
-            ? $"Komunikuje – naposledy {c.LastSeen.Value.ToLocalTime():dd.MM.yyyy HH:mm}"
-            : $"Zmlkl (> {_silentAfterMin} min) – naposledy {c.LastSeen.Value.ToLocalTime():dd.MM.yyyy HH:mm}";
 
     private IEnumerable<Computer> Filtered()
     {
@@ -348,6 +357,7 @@ else
         {
             "hlasi" => _all.Where(Reports),
             "zmlkl" => _all.Where(Silent),
+            "vypnuto" => _all.Where(ProbablyOff),
             "chybi" => _all.Where(c => c.InActiveDirectory && !Reports(c)),
             "neniad" => _all.Where(c => !c.InActiveDirectory),
             _       => _all

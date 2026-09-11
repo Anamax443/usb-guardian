@@ -117,6 +117,11 @@ builder.Services.AddHostedService<USBGuardian.Admin.Notifications.IncidentAlertS
 // ── Auto-enrollment agenta (běží, jen když deploy.enabled=true; default dry-run) ──
 builder.Services.AddHostedService<USBGuardian.Admin.Deploy.AgentDeployService>();
 
+// ── Ping monitor: dostupnost zmlklých stanic na pozadí (ping.intervalMinutes, default 5 min) ──
+// Bez tohohle byl ping jen ruční tlačítko - "Zmlklo agentů" tak nemohlo rozlišit
+// vypnuté PC od reálně spadlého agenta (viz Computers.razor Silent/ProbablyOff).
+builder.Services.AddHostedService<USBGuardian.Admin.Deploy.PingMonitorService>();
+
 // Ruční "nasadit teď" ze Stanic – konzole jen zapíše cíl a šťouchne do úlohy,
 // instalaci dělá deploy účet. Konzole sama na stanice nesahá.
 // Deník aktivity – konzole do něj píše zásahy operátora, API komunikaci agentů.

@@ -21,8 +21,6 @@ public class ReachabilityTests
     [Fact]
     public void Unreachable_host_gets_the_bad_dot_not_warn()
     {
-        // "bad" (--crit v CSS) je záměrně jiná barva než "Komunikace" sloupce
-        // (ten pro zmlklého agenta používá "warn") - ping je binární, ne odstupňovaný.
         Assert.Equal("bad", Reachability.DotClass(false));
     }
 

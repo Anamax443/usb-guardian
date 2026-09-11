@@ -42,6 +42,15 @@ public class Computer
     /// <summary>Kdo stanici vyřadil – bez toho se za půl roku nikdo nedozví proč.</summary>
     public string? DeployIgnoredBy { get; set; }
     public DateTime? DeployIgnoredAt { get; set; }
+
+    // ── Síťová dostupnost (ping) – NEZÁVISLE na agentovi ──
+    /// <summary>
+    /// Poslední zjištěná síťová dostupnost. NULL = zatím neověřeno. Plní PingMonitorService
+    /// (jen pro stanice, co hlásí agenta, ale nejsou čerstvé) i ruční "Ověřit dostupnost".
+    /// Slouží k rozlišení "PC běží, agent mlčí" (zmlklý) od "PC je prostě vypnuté" (bez akce).
+    /// </summary>
+    public bool? LastPingOk { get; set; }
+    public DateTime? LastPingAt { get; set; }
 }
 
 [Table("AppSettings")]
