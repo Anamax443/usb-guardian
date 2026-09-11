@@ -361,13 +361,13 @@ is reliable** – a generated source file `GitCommit.g.cs` is rewritten only whe
 
 ## Tests and CI
 
-Until 2026-09-04 the repo had no C# tests at all (just one JS test for the UI). Today: **81 tests** across
+Until 2026-09-04 the repo had no C# tests at all (just one JS test for the UI). Today: **90 tests** across
 three projects, all xUnit, no mock framework – either real instances routed into a temp directory (agent) or
 pure functions with no infrastructure dependency (API, console):
 
 | Project | What it tests | Count |
 |---------|---------------|-------|
-| `tests/USBGuardian.Agent.Tests` | `WhitelistChecker`, `PolicyEnforcer` (whitelist expiry, decision logic), `DeviceBlocker` (interpreting the block script's output, actually timing out and killing a stuck PowerShell), `LocalConsoleService` (CSRF Origin/Referer check) | 20 |
+| `tests/USBGuardian.Agent.Tests` | `WhitelistChecker`, `PolicyEnforcer` (whitelist expiry, decision logic), `DeviceBlocker` (interpreting the block script's output, actually timing out and killing a stuck PowerShell), `LocalConsoleService` (CSRF Origin/Referer check), `WhitelistSync` (rollback/replay protection – `IsRollback`/`TryGetIssuedAt`) | 29 |
 | `tests/USBGuardian.Api.Tests` | `IncidentSpool` (write/read/delete/quarantine of a corrupt file), the dedup key and bounded exponential retry backoff (`IncidentQueueWorker`), `CallerIdentity` (parsing a Windows identity) | 21 |
 | `tests/USBGuardian.Admin.Tests` | `StationStatus`, `Reachability`, `DeployResultIngestor` – the console's pure decision logic (station state, reachability, deploy-result processing); `HealthService.EvaluateSigningKey` – the "Whitelist signing key" check incl. `Whitelist:SigningRequired` (unset×required, missing file, unreadable, OK) | 40 |
 
@@ -707,6 +707,16 @@ Byte-exact: the same blob string is **signed**, **served** (`/api/whitelist`) an
 all UTF-8 without BOM (SHA-256 / Pkcs1), so the RSA signature matches. **Trade-off (deliberately chosen):**
 the private key is on the app server (protected by ACL/DPAPI) in exchange for **full automation** (no manual
 offline step). The offline `WhitelistSigner` remains as a tool for key generation / manual verification.
+
+> **Rollback/replay protection (opponent review, 2026-09-11):** a valid signature protects content integrity,
+> not its FRESHNESS — a validly-signed but OLDER blob (a stale backup, a DB rollback, an attacker with access
+> to old signed data) used to be saved without objection, because nothing compared the downloaded blob against
+> what the agent already had. `WhitelistSync` now compares the downloaded blob's `issuedAt` against the
+> current local file's `issuedAt` before saving (`WhitelistSync.IsRollback`) — an older one is rejected, the
+> whitelist stays unchanged. `issuedAt` is part of what the RSA signature covers, so an attacker can't just
+> strip/rewrite it without breaking the signature — which is why an unreadable/missing `issuedAt` is treated
+> just as strictly as an actual rollback (`WhitelistSync.TryGetIssuedAt`). Tests in
+> `WhitelistSyncRollbackTests.cs`.
 
 > **`POST /api/whitelist/devices` publishes differently – catalog only (2026-09-11):** this endpoint is meant for
 > external tooling/L1 administration outside the console (the console itself always goes through

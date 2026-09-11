@@ -194,6 +194,29 @@ public class WhitelistSync : BackgroundService
         // Validace JSON formátu
         JsonSerializer.Deserialize<object>(json);
 
+        // Nález oponentury 11.09.2026 (rollback protection): platně podepsaný, ale STARŠÍ blob
+        // (stará záloha, DB rollback, replay útočníkem s přístupem ke starým podepsaným datům) by
+        // se dřív uložil bez námitek - pinning brání zfalšování NOVÉHO obsahu, ale nebrání přehrání
+        // starého platného obsahu. `issuedAt` je součástí toho, co RSA podpis kryje
+        // (WhitelistPublisher.cs podepisuje PŘESNĚ tyhle bajty) - jakákoli změna, včetně smazání
+        // pole, podpis rozbije. "Nejde přečíst issuedAt" proto vždy znamená podezřelý vstup, nikdy
+        // legitimní starší formát, a odmítá se stejně jako skutečný rollback.
+        if (!TryGetIssuedAt(json, out var candidateIssuedAt))
+        {
+            _logger.LogError("Stažený whitelist nemá čitelné issuedAt – whitelist NEULOŽEN (podezřelý vstup)");
+            return;
+        }
+
+        var localIssuedAt = GetLocalIssuedAt();
+        if (IsRollback(localIssuedAt, candidateIssuedAt))
+        {
+            _logger.LogError(
+                "Stažený whitelist je STARŠÍ než aktuální (issuedAt {Candidate:o} < {Local:o}) – " +
+                "whitelist NEULOŽEN (možný rollback/replay)",
+                candidateIssuedAt, localIssuedAt);
+            return;
+        }
+
         // Krok 2: Stáhni podpis (.sig)
         var sigResponse = await _httpClient.GetAsync($"{_syncUrl}/api/whitelist/signature");
         if (!sigResponse.IsSuccessStatusCode)
@@ -242,6 +265,38 @@ public class WhitelistSync : BackgroundService
         }
         catch { return string.Empty; }
     }
+
+    private DateTime? GetLocalIssuedAt()
+    {
+        try
+        {
+            if (!File.Exists(_localWhitelistPath)) return null;
+            var json = File.ReadAllText(_localWhitelistPath);
+            return TryGetIssuedAt(json, out var issuedAt) ? issuedAt : null;
+        }
+        catch { return null; }
+    }
+
+    // --------------------------------------------------------
+    // Čisté funkce (bez I/O) - testovatelné odděleně od HTTP/souborového systému.
+    // --------------------------------------------------------
+
+    internal static bool TryGetIssuedAt(string json, out DateTime issuedAt)
+    {
+        issuedAt = default;
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            if (!doc.RootElement.TryGetProperty("issuedAt", out var prop)) return false;
+            issuedAt = prop.GetDateTime();
+            return true;
+        }
+        catch { return false; }
+    }
+
+    /// <summary>Bez lokální báze (první sync) nejde o rollback - cokoli platně podepsaného je lepší než nic.</summary>
+    internal static bool IsRollback(DateTime? currentIssuedAt, DateTime candidateIssuedAt) =>
+        currentIssuedAt.HasValue && candidateIssuedAt < currentIssuedAt.Value;
 
     public override void Dispose()
     {

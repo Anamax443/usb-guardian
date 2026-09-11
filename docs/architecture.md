@@ -339,13 +339,13 @@ jinak nezměnil žádný `.cs`. Dřív (`BeforeTargets=CoreGenerateAssemblyInfo`
 
 ## Testy a CI
 
-Do 04.09.2026 repo nemělo žádné C# testy (jen jeden JS test na UI). Dnes: **81 testů** ve třech projektech,
+Do 04.09.2026 repo nemělo žádné C# testy (jen jeden JS test na UI). Dnes: **90 testů** ve třech projektech,
 všechny xUnit, bez mock frameworku – buď skutečné instance směrované do dočasného adresáře (agent), nebo čisté
 funkce beze závislosti na infrastruktuře (API, konzole):
 
 | Projekt | Co testuje | Počet |
 |---------|-----------|-------|
-| `tests/USBGuardian.Agent.Tests` | `WhitelistChecker`, `PolicyEnforcer` (expirace whitelistu, rozhodovací logika), `DeviceBlocker` (interpretace výstupu blokovacího skriptu, skutečný timeout/kill zaseknutého PowerShellu), `LocalConsoleService` (CSRF Origin/Referer kontrola) | 20 |
+| `tests/USBGuardian.Agent.Tests` | `WhitelistChecker`, `PolicyEnforcer` (expirace whitelistu, rozhodovací logika), `DeviceBlocker` (interpretace výstupu blokovacího skriptu, skutečný timeout/kill zaseknutého PowerShellu), `LocalConsoleService` (CSRF Origin/Referer kontrola), `WhitelistSync` (rollback/replay ochrana – `IsRollback`/`TryGetIssuedAt`) | 29 |
 | `tests/USBGuardian.Api.Tests` | `IncidentSpool` (zápis/čtení/mazání/karanténa poškozeného souboru), dedup klíč a ohraničený exponenciální retry odstup (`IncidentQueueWorker`), `CallerIdentity` (parsování Windows identity) | 21 |
 | `tests/USBGuardian.Admin.Tests` | `StationStatus`, `Reachability`, `DeployResultIngestor` – čistá rozhodovací logika konzole (stav stanic, dostupnost, zpracování výsledků nasazení); `HealthService.EvaluateSigningKey` – kontrola „Podpisový klíč whitelistu" vč. `Whitelist:SigningRequired` (nenastaveno×vyžadováno, chybí soubor, nelze přečíst, OK) | 40 |
 
@@ -660,6 +660,15 @@ Bajt-exact: stejný blob string se **podepisuje** i **servíruje** (`/api/whitel
 bez BOM (SHA-256 / Pkcs1), takže RSA podpis sedí. **Trade-off (vědomě zvolený):** privátní klíč je na serveru `APP_SERVER`
 (chránit ACL/DPAPI) výměnou za **plnou automatizaci** (žádný ruční offline krok). Offline `WhitelistSigner` zůstává
 jako nástroj pro generování klíčů / ruční ověření.
+
+> **Rollback/replay ochrana (oponentura 11.09.2026):** platný podpis chrání integritu obsahu, ne jeho ČERSTVOST —
+> platně podepsaný, ale STARŠÍ blob (stará záloha, DB rollback, útočník s přístupem ke starým podepsaným datům) by
+> se dřív uložil bez námitek, protože nic neporovnávalo stažený blob s tím, co agent už má. `WhitelistSync` teď
+> před uložením porovná `issuedAt` staženého blobu s `issuedAt` aktuálního lokálního souboru
+> (`WhitelistSync.IsRollback`) — starší se odmítne, whitelist zůstane beze změny. `issuedAt` je součástí toho, co
+> RSA podpis kryje, takže ho útočník nemůže jen tak odstranit/přepsat, aniž by rozbil podpis — proto se
+> nečitelné/chybějící `issuedAt` bere stejně přísně jako skutečný rollback (`WhitelistSync.TryGetIssuedAt`).
+> Testy v `WhitelistSyncRollbackTests.cs`.
 
 > **`POST /api/whitelist/devices` publikuje jinak – jen katalog (11.09.2026):** tenhle endpoint je pro externí
 > nástroje/L1 správu mimo konzoli (konzole sama vždy jde přímo přes `WhitelistPublisher.PublishAsync`, ne přes API).
