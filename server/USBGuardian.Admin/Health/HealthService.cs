@@ -36,6 +36,7 @@
 
 using System.Diagnostics;
 using Microsoft.EntityFrameworkCore;
+using USBGuardian.Admin.Deploy;
 using USBGuardian.Api.Data;
 
 namespace USBGuardian.Admin.Health;
@@ -145,8 +146,9 @@ public sealed class HealthService
             true, CheckIncidentFlowAsync),
 
         new(GData, "Zmlklí agenti",
-            "Stanice, které už agenta hlásily, ale déle než je práh se neozvaly. "
-          + "Může jít o vypnuté PC, ale i o zastavenou službu nebo zásah uživatele.",
+            "Stanice, které už agenta hlásily, ale déle než je práh se neozvaly, A ZÁROVEŇ odpovídají "
+          + "na ping (PC běží, agent mlčí - zastavená služba nebo zásah uživatele). Vypnuté PC se do "
+          + "tohohle počtu nepočítá (viz Stanice → PingMonitorService).",
             true, CheckAgentsSilentAsync),
 
         new(GData, "Pokrytí stanic",
@@ -426,12 +428,27 @@ public sealed class HealthService
         if (reporting == 0)
             return new CheckOutcome(HealthState.Unknown, "žádný agent zatím nereportoval");
 
+        // Stejná definice jako Stanice (StationStatus.Silent): "zmlklý" = navíc potvrzený ping,
+        // jinak by vypnuté PC přes noc vypadalo stejně jako spadlá služba na běžícím stroji
+        // (nález 11.09.2026 - dřív tahle kontrola počítala čistě podle LastSeen).
         var limit = DateTime.UtcNow.AddMinutes(-c.Cfg.SilentAfterMinutes);
-        var silent = await c.Db.Computers.CountAsync(x => x.LastSeen != null && x.LastSeen < limit, ct);
+        var stale = await c.Db.Computers
+            .Where(x => x.LastSeen != null && x.LastSeen < limit)
+            .Select(x => x.LastPingOk)
+            .ToListAsync(ct);
+
+        var silent      = stale.Count(pingOk => StationStatus.Silent(reports: true, fresh: false, pingOk));
+        var probablyOff = stale.Count(pingOk => StationStatus.ProbablyOff(reports: true, fresh: false, pingOk));
+        var awaiting    = stale.Count - silent - probablyOff;
+
+        var detail = $"{silent} zmlklo (PC běží) z {reporting}";
+        if (probablyOff > 0) detail += $" · {probablyOff} nejspíš vypnuto";
+        if (awaiting    > 0) detail += $" · {awaiting} čeká na ověření pingu";
+        detail += $" (práh {c.Cfg.SilentAfterMinutes} min)";
 
         return new CheckOutcome(
             silent == 0 ? HealthState.Ok : silent == reporting ? HealthState.Bad : HealthState.Warn,
-            $"{silent} z {reporting} (práh {c.Cfg.SilentAfterMinutes} min)",
+            detail,
             silent == 0 ? ""
                 : "Seznam je na stránce Stanice (tečka komunikace). "
                 + "Když mlčí VŠECHNY, je problém na serveru, ne na stanicích.");
