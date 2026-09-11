@@ -353,25 +353,27 @@ is reliable** – a generated source file `GitCommit.g.cs` is rewritten only whe
 
 ## Tests and CI
 
-Until 2026-09-04 the repo had no C# tests at all (just one JS test for the UI). Today: **24 tests** across
-two projects, both xUnit, no mock framework – either real instances routed into a temp directory (agent) or
-pure functions with no infrastructure dependency (API):
+Until 2026-09-04 the repo had no C# tests at all (just one JS test for the UI). Today: **70 tests** across
+three projects, all xUnit, no mock framework – either real instances routed into a temp directory (agent) or
+pure functions with no infrastructure dependency (API, console):
 
 | Project | What it tests | Count |
 |---------|---------------|-------|
-| `tests/USBGuardian.Agent.Tests` | `WhitelistChecker`, `PolicyEnforcer` – whitelist expiry, decision logic | 8 |
-| `tests/USBGuardian.Api.Tests` | `IncidentSpool` (write/read/delete/quarantine of a corrupt file), the dedup key (`IncidentQueueWorker.MakeKey`), `CallerIdentity` (parsing a Windows identity) | 16 |
+| `tests/USBGuardian.Agent.Tests` | `WhitelistChecker`, `PolicyEnforcer` (whitelist expiry, decision logic), `DeviceBlocker` (interpreting the block script's output, actually timing out and killing a stuck PowerShell), `LocalConsoleService` (CSRF Origin/Referer check) | 20 |
+| `tests/USBGuardian.Api.Tests` | `IncidentSpool` (write/read/delete/quarantine of a corrupt file), the dedup key and bounded exponential retry backoff (`IncidentQueueWorker`), `CallerIdentity` (parsing a Windows identity) | 21 |
+| `tests/USBGuardian.Admin.Tests` | `StationStatus`, `Reachability`, `DeployResultIngestor` – the console's pure decision logic (station state, reachability, deploy-result processing) | 29 |
 
-The API tests reach into `internal` methods via `InternalsVisibleTo` (`server/USBGuardian.Api/AssemblyInfo.cs`)
-– this works around the fact that, e.g., a `WindowsIdentity` can't easily be constructed in a test, so the
-logic under test is split into a pure parsing function (testable) and a thin wrapper around the framework
-(untested, trivial).
+The API and console tests reach into `internal` methods via `InternalsVisibleTo` (`AssemblyInfo.cs` in both
+projects) – this works around the fact that, e.g., a `WindowsIdentity`/`HttpListenerContext`/a real
+`powershell.exe` process can't easily be constructed in a test, so the logic under test is split into a pure
+decision/parsing function (testable) and a thin wrapper around the framework/OS (untested, trivial).
 
 **CI (`.github/workflows/build-and-test.yml`, since 2026-09-04):** on every push/PR to `main` it builds the
-agent, the API and the console separately (no shared `.sln` covers all three) and runs both test projects.
-Runs on `windows-latest` – required, not optional: the agent/API/console use Windows-only APIs
-(`WindowsIdentity`/`WindowsPrincipal` for Negotiate auth, `AddWindowsService`, the `EventLog` provider), so
-this wouldn't even restore on Linux.
+agent, the API and the console separately (no shared `.sln` covers all three) and runs all three test
+projects – until 2026-09-11 `Admin.Tests` was built but never actually run (opponent-review finding), even
+though it has no DB dependency. Runs on `windows-latest` – required, not optional: the agent/API/console use
+Windows-only APIs (`WindowsIdentity`/`WindowsPrincipal` for Negotiate auth, `AddWindowsService`, the
+`EventLog` provider), so this wouldn't even restore on Linux.
 
 ## Data flow – an incident
 
@@ -657,7 +659,7 @@ The console only has write on `AppSettings` (no delete on `Incidents`), which is
 | Item | Description |
 |------|-------------|
 | Per-serial blocklist | Banning a specific medium, near-real-time to the agents (takes precedence over the whitelist) |
-| Console hardening | gMSA instead of LocalSystem; a dedicated `USB-Guardian-Admins`; HTTPS console; move the API to the app server |
+| Console hardening | gMSA instead of LocalSystem; a dedicated `USB-Guardian-Admins`; ~~HTTPS console~~ (done 2026-09-11, self-cert like agent↔API); move the API to the app server |
 | **ACL on the TLS/RSA keys** | `api-tls.pfx` and `whitelist_private.pem` on the server – the one item left unresolved from the 2026-09-04 audit, a server-side action (Set-Acl), not code |
 | **Activity-log retention** | `sp_PurgeActivityLog` exists but **nothing calls it** – add `activity.retentionDays` to Settings and the call to the API (pattern: `RetentionService`) |
 | ~~Local console on the fleet~~ | **Decided 2026-09-04: ON across the fleet, exclusively for a local admin of the station.** The template in the repo stays `false` (a safe default for other environments), the fleet package is built with `true`; the build warns about the opposite state |

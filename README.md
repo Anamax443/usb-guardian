@@ -284,7 +284,6 @@ placeholdery — dosaď si vlastní hodnoty:
     "AllowedUsers": [ "DOMENA\\jmeno.admina" ],
     "DevAllowAll": false
   },
-  "Kestrel": { "Endpoints": { "Http": { "Url": "http://0.0.0.0:4200" } } },
   "AdSync": { "SearchBase": "", "IncludeDisabled": false }
 }
 ```
@@ -292,6 +291,9 @@ placeholdery — dosaď si vlastní hodnoty:
 > **AD sync zapnuto/vypnuto a interval** se od 11.09.2026 nastavují v **Nastavení** (DB `AppSettings`
 > `adsync.enabled`/`adsync.intervalMinutes`), ne v `appsettings.local.json` — `SearchBase`/`IncludeDisabled`
 > zůstávají v souboru, mění se výjimečně.
+>
+> **Port konzole** je od 11.09.2026 pevně `:4200` **HTTPS** (self-signed cert, stejný vzor jako agent↔API,
+> žádná CA) — `Kestrel` se v `appsettings.json` už nekonfiguruje, viz `Program.cs`.
 
 ## Databáze
 

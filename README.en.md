@@ -289,7 +289,6 @@ names are replaced with placeholders — substitute your own values:
     "AllowedUsers": [ "DOMENA\\jmeno.admina" ],
     "DevAllowAll": false
   },
-  "Kestrel": { "Endpoints": { "Http": { "Url": "http://0.0.0.0:4200" } } },
   "AdSync": { "SearchBase": "", "IncludeDisabled": false }
 }
 ```
@@ -297,6 +296,9 @@ names are replaced with placeholders — substitute your own values:
 > **AD sync on/off and the interval** are set, as of 2026-09-11, in **Settings** (DB `AppSettings`
 > `adsync.enabled`/`adsync.intervalMinutes`), not in `appsettings.local.json` — `SearchBase`/`IncludeDisabled`
 > stay in the file, changed only rarely.
+>
+> **The console's port** has been a fixed `:4200` **HTTPS** since 2026-09-11 (self-signed cert, same
+> pattern as agent↔API, no CA) — `Kestrel` is no longer configured in `appsettings.json`, see `Program.cs`.
 
 ## Database
 

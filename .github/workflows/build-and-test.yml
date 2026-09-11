@@ -39,3 +39,9 @@ jobs:
 
       - name: Test API
         run: dotnet test tests/USBGuardian.Api.Tests/USBGuardian.Api.Tests.csproj -c Release
+
+      # Admin.Tests se buildil, ale nespouštěl (nález oponentury 11.09.2026) - žádná DB
+      # závislost (StationStatus/Reachability/DeployResultIngestor jsou čisté funkce),
+      # není důvod ho v CI přeskakovat.
+      - name: Test Admin console
+        run: dotnet test tests/USBGuardian.Admin.Tests/USBGuardian.Admin.Tests.csproj -c Release

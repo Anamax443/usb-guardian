@@ -29,6 +29,21 @@ builder.Configuration
     .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
     .AddJsonFile("appsettings.local.json", optional: true, reloadOnChange: true);
 
+// ── Self-contained TLS (oponentura 11.09.2026): stejný vzor jako agent↔API (SelfCert.cs) –
+// vlastní self-signed cert, bez CA, bez cert store, bez ruční distribuce. Konzole nese
+// citlivá data (hostname, uživatel, sériová čísla médií, incidenty, whitelist, zásahy
+// operátora) a dřív jela nešifrovaně po LAN i s Windows Authentication navrch – Integrated
+// Windows Auth řeší, KDO se přihlásí, ne jestli je provoz na drátě čitelný. Otisk certu je
+// vidět na /api/version resp. v Event Logu při startu, ať se dá jednou natrvalo naimportovat
+// do Trusted Root na strojích, co konzoli používají (`certutil -addstore -f Root <soubor>`) –
+// pak zmizí i prohlížečové varování, bez jakékoli závislosti na interní CA.
+var tlsCertPath = builder.Configuration["tls:certPath"] ?? @"C:\ProgramData\USBGuardian\admin-tls.pfx";
+var tlsCert     = USBGuardian.Api.SelfCert.LoadOrCreate(tlsCertPath, Environment.MachineName);
+builder.WebHost.ConfigureKestrel(o =>
+{
+    o.ListenAnyIP(4200, listen => listen.UseHttps(tlsCert));
+});
+
 // ── Windows Service hosting ───────────────────────────────────
 builder.Services.AddWindowsService(o => o.ServiceName = "USB Guardian Console");
 
@@ -164,6 +179,20 @@ app.MapGet("/api/version", () => Results.Json(new
     commit    = USBGuardian.Admin.AppInfo.Commit,
     startedAt
 })).AllowAnonymous();
+
+// Otisk TLS certu konzole (veřejná informace, stejný vzor jako API /api/cert-info) – kdo chce
+// zmizet prohlížečové varování natrvalo, naimportuje ho do Trusted Root
+// (`certutil -addstore -f Root <exportovaný .cer>`), žádná CA není potřeba.
+app.MapGet("/api/cert-info", () => Results.Json(new
+{
+    thumbprint = tlsCert.Thumbprint,
+    subject    = tlsCert.Subject,
+    notAfter   = tlsCert.NotAfter
+})).AllowAnonymous();
+
+app.Logger.LogWarning(
+    "=== Admin konzole TLS self-cert (otisk pro Trusted Root import): {Tp} | platí do {Exp} ===",
+    tlsCert.Thumbprint, tlsCert.NotAfter);
 
 // ── Kontroly stavu strojově (/api/health) – dědí FallbackPolicy jako zbytek konzole.
 // 200 = vše OK nebo jen varování, 503 = aspoň jedna kontrola hlásí chybu

@@ -332,24 +332,27 @@ jinak nezměnil žádný `.cs`. Dřív (`BeforeTargets=CoreGenerateAssemblyInfo`
 
 ## Testy a CI
 
-Do 04.09.2026 repo nemělo žádné C# testy (jen jeden JS test na UI). Dnes: **24 testů** ve dvou projektech,
-oba xUnit, bez mock frameworku – buď skutečné instance směrované do dočasného adresáře (agent), nebo čisté
-funkce beze závislosti na infrastruktuře (API):
+Do 04.09.2026 repo nemělo žádné C# testy (jen jeden JS test na UI). Dnes: **70 testů** ve třech projektech,
+všechny xUnit, bez mock frameworku – buď skutečné instance směrované do dočasného adresáře (agent), nebo čisté
+funkce beze závislosti na infrastruktuře (API, konzole):
 
 | Projekt | Co testuje | Počet |
 |---------|-----------|-------|
-| `tests/USBGuardian.Agent.Tests` | `WhitelistChecker`, `PolicyEnforcer` – expirace whitelistu, rozhodovací logika | 8 |
-| `tests/USBGuardian.Api.Tests` | `IncidentSpool` (zápis/čtení/mazání/karanténa poškozeného souboru), dedup klíč (`IncidentQueueWorker.MakeKey`), `CallerIdentity` (parsování Windows identity) | 16 |
+| `tests/USBGuardian.Agent.Tests` | `WhitelistChecker`, `PolicyEnforcer` (expirace whitelistu, rozhodovací logika), `DeviceBlocker` (interpretace výstupu blokovacího skriptu, skutečný timeout/kill zaseknutého PowerShellu), `LocalConsoleService` (CSRF Origin/Referer kontrola) | 20 |
+| `tests/USBGuardian.Api.Tests` | `IncidentSpool` (zápis/čtení/mazání/karanténa poškozeného souboru), dedup klíč a ohraničený exponenciální retry odstup (`IncidentQueueWorker`), `CallerIdentity` (parsování Windows identity) | 21 |
+| `tests/USBGuardian.Admin.Tests` | `StationStatus`, `Reachability`, `DeployResultIngestor` – čistá rozhodovací logika konzole (stav stanic, dostupnost, zpracování výsledků nasazení) | 29 |
 
-API testy sahají na `internal` metody přes `InternalsVisibleTo` (`server/USBGuardian.Api/AssemblyInfo.cs`) –
-řeší se tím, že např. `WindowsIdentity` nejde v testu snadno sestrojit, takže testovaná logika je rozdělená
-na čistou parsovací funkci (testovatelná) a tenký obal nad frameworkem (netestovaný, triviální).
+API i konzole sahají na `internal` metody přes `InternalsVisibleTo` (`AssemblyInfo.cs` v obou projektech) –
+řeší se tím, že např. `WindowsIdentity`/`HttpListenerContext`/reálný `powershell.exe` proces nejdou v testu
+snadno sestrojit, takže testovaná logika je rozdělená na čistou rozhodovací/parsovací funkci (testovatelná)
+a tenký obal nad frameworkem/OS (netestovaný, triviální).
 
 **CI (`.github/workflows/build-and-test.yml`, od 04.09.2026):** na každý push/PR do `main` buildne agenta,
-API i konzoli zvlášť (žádná společná `.sln` je nepokrývá) a spustí oba testovací projekty. Běží na
-`windows-latest` – nutnost, ne volba: agent/API/konzole používají Windows-only API (`WindowsIdentity`/
-`WindowsPrincipal` pro Negotiate auth, `AddWindowsService`, `EventLog` provider), na Linuxu by se to
-vůbec nezrestorovalo.
+API i konzoli zvlášť (žádná společná `.sln` je nepokrývá) a spustí všechny tři testovací projekty – do
+11.09.2026 se `Admin.Tests` jen buildil, ale nikdy nespouštěl (nález oponentury), přestože žádnou DB
+závislost nemá. Běží na `windows-latest` – nutnost, ne volba: agent/API/konzole používají Windows-only API
+(`WindowsIdentity`/`WindowsPrincipal` pro Negotiate auth, `AddWindowsService`, `EventLog` provider), na
+Linuxu by se to vůbec nezrestorovalo.
 
 ## Datový tok – incident
 
@@ -612,7 +615,7 @@ Konzole má na `AppSettings` jen write (ne delete na `Incidents`), proto je enfo
 | Položka | Popis |
 |---------|-------|
 | Per-serial blocklist | Zákaz konkrétního média, near-real-time k agentům (přednost před whitelistem) |
-| Hardening konzole | gMSA místo LocalSystem; dedikovaná `USB-Guardian-Admins`; HTTPS konzole; přesun API na APP_SERVER |
+| Hardening konzole | gMSA místo LocalSystem; dedikovaná `USB-Guardian-Admins`; ~~HTTPS konzole~~ (hotovo 11.09.2026, self-cert jako agent↔API); přesun API na APP_SERVER |
 | **ACL na TLS/RSA klíče** | `api-tls.pfx` a `whitelist_private.pem` na serveru – poslední nedořešená položka z auditu 04.09.2026, server-side zásah (Set-Acl), ne kód |
 | **Retence deníku** | `sp_PurgeActivityLog` existuje, ale **nikdo ji nevolá** – doplnit `activity.retentionDays` do Nastavení a volání do API (vzor: `RetentionService`) |
 | ~~Lokální konzole na fleetu~~ | **Rozhodnuto 04.09.2026: na fleetu ZAPNUTÁ, výhradně pro lokálního admina stanice.** Šablona v repu zůstává `false` (bezpečný default pro jiné prostředí), balíček pro fleet se staví s `true`; build na opačný stav upozorní |

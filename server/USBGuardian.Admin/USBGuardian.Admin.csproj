@@ -29,6 +29,7 @@
     <Compile Include="..\USBGuardian.Api\Models\DbModels.cs" Link="Shared\DbModels.cs" />
     <Compile Include="..\USBGuardian.Api\Data\AppDbContext.cs" Link="Shared\AppDbContext.cs" />
     <Compile Include="..\USBGuardian.Api\Data\ActivityLogger.cs" Link="Shared\ActivityLogger.cs" />
+    <Compile Include="..\USBGuardian.Api\SelfCert.cs" Link="Shared\SelfCert.cs" />
   </ItemGroup>
 
   <ItemGroup>

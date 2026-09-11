@@ -19,10 +19,9 @@
     "DevAllowAll": false
   },
 
-  "Kestrel": {
-    // Port konzole (0.0.0.0 = dostupné na síti)
-    "Endpoints": { "Http": { "Url": "http://0.0.0.0:4200" } }
-  },
+  // Port konzole (0.0.0.0 = dostupné na síti) je od 11.09.2026 pevně :4200 HTTPS (self-signed
+  // cert, viz Program.cs) - Kestrel se tu už nekonfiguruje. Volitelná změna cesty k .pfx:
+  // "tls": { "certPath": "C:\\ProgramData\\USBGuardian\\admin-tls.pfx" },
 
   "AdSync": {
     "Enabled": true,            // časovač AD syncu
