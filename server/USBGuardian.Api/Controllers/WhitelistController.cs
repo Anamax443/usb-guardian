@@ -139,40 +139,30 @@ public class WhitelistController : ControllerBase
         };
 
         _db.WhitelistDevices.Add(device);
-
-        // Vytvoříme novou verzi whitelistu
-        await BumpWhitelistVersion(dto.ApprovedBy);
         await _db.SaveChangesAsync();
 
         _logger.LogInformation(
-            "Přidáno zařízení {VendorId}:{ProductId}:{Serial} od {ApprovedBy}",
+            "Přidáno zařízení {VendorId}:{ProductId}:{Serial} od {ApprovedBy} (katalog, čeká na publikaci)",
             dto.VendorId, dto.ProductId, dto.SerialNumber, dto.ApprovedBy);
         _dennik.Log("whitelist",
-            $"přidáno zařízení {dto.VendorId}:{dto.ProductId}:{dto.SerialNumber} ({dto.Description}), nová verze",
-            ActivityLevel.Info, user: dto.ApprovedBy);
+            $"přidáno zařízení {dto.VendorId}:{dto.ProductId}:{dto.SerialNumber} ({dto.Description}) přes API " +
+            "- NENÍ publikováno, dokud se v konzoli nepotvrdí",
+            ActivityLevel.Warn, user: dto.ApprovedBy);
 
-        return Ok(device);
-    }
-
-    // --------------------------------------------------------
-    // Interní: vytvoření nové verze whitelistu po změně
-    // --------------------------------------------------------
-    private async Task BumpWhitelistVersion(string issuedBy)
-    {
-        // Deaktivujeme starou verzi
-        var old = await _db.WhitelistVersions
-            .Where(v => v.IsActive).ToListAsync();
-        old.ForEach(v => v.IsActive = false);
-
-        // Nová verze
-        var versionString = $"{DateTime.UtcNow:yyyy-MM-dd}-v{old.Count + 1}";
-        _db.WhitelistVersions.Add(new WhitelistVersion
+        // Záměrně NEvytváříme novou WhitelistVersion tady - API nemá přístup k podpisovému
+        // klíči (ten je jen na APP_SERVER, viz WhitelistPublisher.cs), takže by šlo jen
+        // aktivovat NEPODEPSANOU verzi s prázdným Json/Signature. To přesně byl nález
+        // z oponentury 11.09.2026: tenhle endpoint dřív deaktivoval poslední PODEPSANOU
+        // verzi a nahradil ji prázdnou "aktivní" verzí bez Json/Signature - GetWhitelist/
+        // GetSignature na ni sice bezpečně vrátí 404 (fail-secure), ale nově přidané
+        // zařízení se k agentům nedostane, dokud si toho někdo nevšimne a ručně
+        // nepublikuje v konzoli - a mezitím whitelist tiše "zmizel" všem agentům.
+        return Ok(new
         {
-            Version    = versionString,
-            IssuedAt   = DateTime.UtcNow,
-            ValidUntil = DateTime.UtcNow.AddDays(30),
-            IssuedBy   = issuedBy,
-            IsActive   = true
+            device,
+            published = false,
+            note = "Zařízení přidáno do katalogu, ale whitelist NENÍ publikován - otevři konzoli " +
+                   "(Whitelist) a klikni \"Publikovat nyní\", aby se změna dostala k agentům."
         });
     }
 }
