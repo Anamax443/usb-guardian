@@ -433,6 +433,44 @@ zatímco „Auto-enrollment agenta" v ostrém režimu hlásí „žádné stanic
 záměrný opt-in gate (postup „PC-01 → .180 → fleet" z 5.3), ne o chybu. Rozjezd na víc stanic:
 `Nastavení → Auto-enrollment → deploy.includeHosts`, až doběhne GPO důvěra podpisového certu (5.4).
 
+### 5.13 Hlubší oponenturní průchod + náprava P1 (10.–11.09.2026)
+
+Nezávislý hloubkový průchod kódem (ne jen static audit jako 5.12) po enforcementu/authorization/publish
+workflow whitelistu ohodnotil systém **8,1/10** (nápad+architektura 8,8–9/10, dolů táhnou konkrétní
+implementační slabiny). Sedm P1 nálezů, opravují se **jeden krok = jeden commit**, build+testy zeleně
+před pushem:
+
+1. **`95465ab`** – `GET /api/incidents` mělo stejnou (třídní) policy `USBGuardianClients` jako zbytek
+   controlleru → strojový účet LIBOVOLNÉ stanice mohl vytáhnout historii incidentů CELÉ flotily.
+   Autorizace přesunuta z třídy na jednotlivé akce (vzor jako `WhitelistController`). **Nasazeno a
+   ověřeno 10.09.2026** (`/api/version` → `95465ab`).
+2. **`1542bbb`** – hostname v datech (heartbeat i incident batch) byl od 04.09. jen WARN-ONLY (viz
+   5.12) – 6 dní bez jediného falešného poplachu v Aktivitě (ověřeno přímo v DB), takže zpřísněno na
+   tvrdé **403 Forbidden** při neshodě s autentizovanou machine identitou.
+3. **`8da4843`** – `DeviceBlocker.BlockDevice` mohl chybně vyhodnotit blokování jako úspěšné:
+   `Disable-PnpDevice` nebyl obalený v try/catch, takže nedokončující chyba (výchozí
+   `$ErrorActionPreference` je `Continue`) se ztratila a skript stejně vypsal `BLOCKED`. Stejný vzor
+   chyby, jaký už dřív řešil `UnblockDevice` (§8.4). Oprava + `InterpretBlockOutput` vytažená do čisté
+   testovatelné funkce (4 nové testy, `InternalsVisibleTo` poprvé zavedeno i pro agenta).
+
+**Zbývá z P1 seznamu:** wildcard matching PnP ID (`BlockDevice` na rozdíl od `UnblockDevice` nezkouší
+nejdřív přesnou shodu), audit může zapsat `Blocked` dřív, než `HandleBlock` výsledek potvrdí
+(`PolicyEnforcer.HandleDevice` zapíše incident PŘED voláním `HandleBlock`), nekonzistence whitelist
+publish kolem nové aktivní nepodepsané verze, spool retry se po SQL výpadku sám nerozjede bez restartu.
+
+**Vedlejší incident při nasazení kroku 2 (11.09.2026, cca 8:21–8:46):** Po redeployi API na `SQL_SERVER`
+se služba `USB Guardian API` po zastavení staré verze **nerozjela** (deploy task skončil `Last Result: 5`,
+port 5443/5050 neposlouchaly ~25 min – celá flotila hlásila „API nedostupné (offline provoz)"). Event
+Log ukázal, že proces doběhl až k zalogování TLS cert pinu, pak nic – žádná výjimka, žádné potvrzení
+naslouchání. Podezřelé místo: `Program.cs` řádek 210–215, `db.Database.EnsureCreatedAsync()` běží
+synchronně PŘED `app.RunAsync()` – pokud byl SQL Server v tu chvíli pomalý/nedostupný, Windows SCM
+zabil službu na start-timeoutu dřív, než se Kestrel vůbec rozjel (bez zalogované výjimky, protože šlo o
+externí kill, ne pád). **Nesouvisí s kódem opravy** (krok 1–2 se DB/startu netýkají). Ruční
+`Start-Service`/restart přes Services konzoli to spravil, API teď běží na `8da4843`. **Otevřené:** ověřit
+teorii (Event Log zdroj „Service Control Manager" 7000/7009/7011 kolem 8:22), zvážit dělat
+`EnsureCreatedAsync` odolnější vůči pomalému startu SQL Serveru (timeout/retry mimo kritickou cestu
+startu), případně zvýšit service start timeout přes `HKLM\SYSTEM\CurrentControlSet\Control\ServicesPipeTimeout`.
+
 ### 5.5 Roadmapa (pending)
 - **Monitoring expirace podpisového certu** – `CN=powershell.domena.loc` platí do 2028-06-17; alert e-mailem z konzole.
 - **„Vše server na APP_SERVER":** přesun API runtime z SQL_SERVER na APP_SERVER (konzole+API na APP_SERVER, DB na SQL_SERVER, agent repoint na
