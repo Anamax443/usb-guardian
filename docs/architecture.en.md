@@ -660,7 +660,7 @@ The console only has write on `AppSettings` (no delete on `Incidents`), which is
 |------|-------------|
 | Per-serial blocklist | Banning a specific medium, near-real-time to the agents (takes precedence over the whitelist) |
 | Console hardening | gMSA instead of LocalSystem; a dedicated `USB-Guardian-Admins`; ~~HTTPS console~~ (done 2026-09-11, self-cert like agent↔API); move the API to the app server |
-| **ACL on the TLS/RSA keys** | `api-tls.pfx` and `whitelist_private.pem` on the server – the one item left unresolved from the 2026-09-04 audit, a server-side action (Set-Acl), not code |
+| **ACL on the TLS/RSA keys** | `api-tls.pfx`, `admin-tls.pfx` and `whitelist_private.pem` on the server – a server-side action (Set-Acl), not code. Script ready (`scripts/Set-KeyFileAcl.ps1`, disconnects inheritance, SYSTEM+Administrators FullControl, service account Read/Modify), waiting on signing + a run on APP_SERVER |
 | **Activity-log retention** | `sp_PurgeActivityLog` exists but **nothing calls it** – add `activity.retentionDays` to Settings and the call to the API (pattern: `RetentionService`) |
 | ~~Local console on the fleet~~ | **Decided 2026-09-04: ON across the fleet, exclusively for a local admin of the station.** The template in the repo stays `false` (a safe default for other environments), the fleet package is built with `true`; the build warns about the opposite state |
 | Toast privilege separation | A helper process in the user session – one-way pipes SYSTEM → user |

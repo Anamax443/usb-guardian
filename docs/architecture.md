@@ -616,7 +616,7 @@ Konzole má na `AppSettings` jen write (ne delete na `Incidents`), proto je enfo
 |---------|-------|
 | Per-serial blocklist | Zákaz konkrétního média, near-real-time k agentům (přednost před whitelistem) |
 | Hardening konzole | gMSA místo LocalSystem; dedikovaná `USB-Guardian-Admins`; ~~HTTPS konzole~~ (hotovo 11.09.2026, self-cert jako agent↔API); přesun API na APP_SERVER |
-| **ACL na TLS/RSA klíče** | `api-tls.pfx` a `whitelist_private.pem` na serveru – poslední nedořešená položka z auditu 04.09.2026, server-side zásah (Set-Acl), ne kód |
+| **ACL na TLS/RSA klíče** | `api-tls.pfx`, `admin-tls.pfx` a `whitelist_private.pem` na serveru – server-side zásah (Set-Acl), ne kód. Skript hotový (`scripts/Set-KeyFileAcl.ps1`, odpojuje dědičnost, SYSTEM+Administrators FullControl, service account Read/Modify), čeká na podpis + spuštění na APP_SERVER |
 | **Retence deníku** | `sp_PurgeActivityLog` existuje, ale **nikdo ji nevolá** – doplnit `activity.retentionDays` do Nastavení a volání do API (vzor: `RetentionService`) |
 | ~~Lokální konzole na fleetu~~ | **Rozhodnuto 04.09.2026: na fleetu ZAPNUTÁ, výhradně pro lokálního admina stanice.** Šablona v repu zůstává `false` (bezpečný default pro jiné prostředí), balíček pro fleet se staví s `true`; build na opačný stav upozorní |
 | Toast Privilege Separation | Helper process v user session – jednosměrné Pipes SYSTEM → user |
