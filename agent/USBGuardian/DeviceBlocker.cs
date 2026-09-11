@@ -49,8 +49,14 @@ public class DeviceBlocker
 
         _logger.LogInformation("Blokuji zařízení: {PnpId}", pnpDeviceId);
 
-        // Escapujeme PNPDeviceID pro PowerShell
-        var escapedId = pnpDeviceId.Replace("'", "''").Replace("&", "`&");
+        // Pro přesnou shodu escapujeme jen apostrof; pro -like fallback i ampersand (wildcard
+        // engine). Nejdřív přesně (stejný vzor jako UnblockDevice) - substring -like sám o sobě
+        // by mohl zachytit i JINÉ připojené zařízení, jehož InstanceId tenhle řetězec náhodou
+        // obsahuje (VID/PID/sériové číslo si USB zařízení může nastavit libovolně), a zablokovat
+        // tak něco jiného, než bylo zamýšleno. Wildcard zůstává jen jako fallback, kdyby se
+        // InstanceId v PnP stromu mírně lišilo od WMI PNPDeviceID.
+        var exactId = pnpDeviceId.Replace("'", "''");
+        var likeId  = exactId.Replace("&", "`&");
 
         // Disable-PnpDevice obalen v try/catch (-ErrorAction Stop): bez toho je výchozí
         // $ErrorActionPreference 'Continue', takže nedokončující chyba (zařízení nejde
@@ -58,7 +64,8 @@ public class DeviceBlocker
         // Stejný nález/oprava jako dřív u UnblockDevice (§8.4 HANDOFF) - tam BLOCKED/FAILED,
         // tady stejný vzor.
         var script = $@"
-            $device = Get-PnpDevice | Where-Object {{ $_.InstanceId -like '*{escapedId}*' }}
+            $device = Get-PnpDevice -InstanceId '{exactId}'
+            if (-not $device) {{ $device = Get-PnpDevice | Where-Object {{ $_.InstanceId -like '*{likeId}*' }} }}
             if ($device) {{
                 try {{
                     Disable-PnpDevice -InstanceId $device.InstanceId -Confirm:$false -ErrorAction Stop
