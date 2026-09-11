@@ -19,10 +19,20 @@ namespace USBGuardian.Api.Queue;
 
 public class IncidentQueueWorker : BackgroundService
 {
+    private static readonly TimeSpan InitialRetryDelay = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan MaxRetryDelay      = TimeSpan.FromMinutes(5);
+
     private readonly ILogger<IncidentQueueWorker> _logger;
     private readonly IncidentQueue _queue;
     private readonly IncidentSpool _spool;
     private readonly IServiceScopeFactory _scopeFactory;
+
+    // Worker je záměrně sekvenční (viz komentář nahoře souboru - rovnoměrná zátěž na SQL
+    // místo thundering herd). RetrySpoolLoopAsync běží souběžně s hlavním čtením z Channelu
+    // po celou dobu života služby - bez zámku by mohl zkusit přehrát batch, který live smyčka
+    // právě zpracovává (spool soubor se maže AŽ PO úspěšném zápisu do DB), a dvakrát souběžně
+    // zapsat stejný incident dřív, než by ho dedup v ProcessBatch stihl uvidět z prvního zápisu.
+    private readonly SemaphoreSlim _processingLock = new(1, 1);
 
     public IncidentQueueWorker(
         ILogger<IncidentQueueWorker> logger,
@@ -45,9 +55,17 @@ public class IncidentQueueWorker : BackgroundService
         // zpracuje se první, před čerstvým provozem, ať se nepřeskočí pořadí.
         await ReplaySpoolAsync(stoppingToken);
 
+        // Nález oponentury 11.09.2026: ReplaySpoolAsync výš pokrývá jen to, co zbylo PŘED
+        // startem služby. Výpadek SQL UPROSTŘED běžícího provozu nechá batch ve spoolu úplně
+        // stejně (catch níže), ale nic ho samo nezkusí znovu, dokud službu někdo ručně
+        // nerestartuje - dřív to tak dokumentace i přiznávala. RetrySpoolLoopAsync běží
+        // souběžně po celou dobu života služby a spool zkouší přehrát sám.
+        _ = RetrySpoolLoopAsync(stoppingToken);
+
         // Čteme dokud služba běží
         await foreach (var item in _queue.Reader.ReadAllAsync(stoppingToken))
         {
+            await _processingLock.WaitAsync(stoppingToken);
             try
             {
                 await ProcessBatch(item, stoppingToken);
@@ -55,12 +73,13 @@ public class IncidentQueueWorker : BackgroundService
             }
             catch (Exception ex)
             {
-                // Batch NEmažeme ze spoolu – zůstává na disku a přehraje se
-                // při dalším startu služby (ReplaySpoolAsync výš).
+                // Batch NEmažeme ze spoolu – zůstává na disku, RetrySpoolLoopAsync ho zkusí
+                // znovu automaticky (žádný ruční restart potřeba).
                 _logger.LogError(ex,
-                    "Chyba při zpracování batche od {Hostname} – zůstává ve spoolu, přehraje se při dalším startu",
+                    "Chyba při zpracování batche od {Hostname} – zůstává ve spoolu, zkusí se znovu automaticky",
                     item.Request.Hostname);
             }
+            finally { _processingLock.Release(); }
         }
 
         _logger.LogInformation("IncidentQueueWorker zastaven");
@@ -76,19 +95,71 @@ public class IncidentQueueWorker : BackgroundService
             pending.Count);
 
         foreach (var item in pending)
+            await TryProcessSpoolItemAsync(item, ct, "Přehrání spoolu při startu");
+    }
+
+    // --------------------------------------------------------
+    // Nález oponentury 11.09.2026: bez tohohle cyklu se batch zaseklý ve spoolu kvůli výpadku
+    // SQL uprostřed provozu (na rozdíl od pádu procesu, který pokryje ReplaySpoolAsync při
+    // startu) sám od sebe nezpracoval - čekal, až službu někdo ručně restartuje.
+    //
+    // Ohraničený exponenciální odstup: GetStatus() je levný (jen počet souborů, bez
+    // deserializace obsahu), takže časté "je něco ve spoolu?" kontroly nic nestojí - prodlužuje
+    // se až SKUTEČNÝ neúspěšný pokus o zápis do SQL, ať se na spadlý server zbytečně netlačí.
+    // Při prvním úspěchu se odstup vrátí na InitialRetryDelay, ať se zbytek spoolu (pokud SQL
+    // spadl na déle a nastřádalo se víc batchů) zkusí brzy znovu, ne až za MaxRetryDelay.
+    // --------------------------------------------------------
+    private async Task RetrySpoolLoopAsync(CancellationToken ct)
+    {
+        var delay = InitialRetryDelay;
+
+        while (!ct.IsCancellationRequested)
         {
-            try
+            try { await Task.Delay(delay, ct); }
+            catch (OperationCanceledException) { return; }
+
+            if (_spool.GetStatus().PendingCount == 0)
             {
-                await ProcessBatch(item, ct);
-                _spool.Delete(item.SpoolFile);
+                delay = InitialRetryDelay;
+                continue;
             }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex,
-                    "Přehrání spoolu selhalo pro {Hostname} ({File}) – zkusí se zas při dalším startu",
-                    item.Request.Hostname, item.SpoolFile);
-            }
+
+            var pending = _spool.LoadPending();
+            _logger.LogWarning(
+                "IncidentQueueWorker retry: {Count} batchů čeká ve spoolu – zkouším znovu (odstup {Delay})",
+                pending.Count, delay);
+
+            var processedAny = false;
+            foreach (var item in pending)
+                if (await TryProcessSpoolItemAsync(item, ct, "Retry spoolu"))
+                    processedAny = true;
+
+            delay = NextRetryDelay(delay, processedAny);
         }
+    }
+
+    // Čistá rozhodovací funkce (bez I/O) - testovatelná odděleně od Task.Delay/SQL.
+    internal static TimeSpan NextRetryDelay(TimeSpan currentDelay, bool processedAnyThisAttempt) =>
+        processedAnyThisAttempt
+            ? InitialRetryDelay
+            : TimeSpan.FromSeconds(Math.Min(currentDelay.TotalSeconds * 2, MaxRetryDelay.TotalSeconds));
+
+    private async Task<bool> TryProcessSpoolItemAsync(IncidentBatchItem item, CancellationToken ct, string context)
+    {
+        await _processingLock.WaitAsync(ct);
+        try
+        {
+            await ProcessBatch(item, ct);
+            _spool.Delete(item.SpoolFile);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "{Context} zatím neúspěšné pro {Hostname} ({File}) – zkusí se znovu",
+                context, item.Request.Hostname, item.SpoolFile);
+            return false;
+        }
+        finally { _processingLock.Release(); }
     }
 
     // --------------------------------------------------------

@@ -395,6 +395,14 @@ Případné vícenásobné přehrání dělá neškodným existující dedup v `
 rozšířený o `ProductId`/`PnpDeviceId` (viz níže) důležitý i pro tuhle vlastnost, ne jen pro samotnou
 deduplikaci resendů.
 
+> **Retry i BEZ restartu (oponentura 11.09.2026):** `ReplaySpoolAsync` výš běží jen jednou, při startu
+> služby – to řeší pád procesu, ale ne výpadek SQL **uprostřed** běžícího provozu (batch selže v hlavní
+> smyčce, zůstane ve spoolu, a bez restartu by ho nic samo nezkusilo znovu). `RetrySpoolLoopAsync` běží
+> souběžně po celou dobu života služby a spool zkouší přehrát sám – ohraničený exponenciální odstup
+> (5 s → zdvojnásobuje se při neúspěchu → strop 5 min, po prvním úspěchu zpátky na 5 s). `SemaphoreSlim`
+> drží zpracování batchů striktně sekvenční (viz komentář v `IncidentQueueWorker`), ať retry a živý
+> Channel nikdy nezapíšou stejný batch souběžně dvakrát.
+
 Stav spoolu (počet čekajících souborů + stáří nejstaršího) je vidět na `/kontroly` (kontrola „Fronta
 incidentů (spool)") i strojově na `GET /api/incidents/queue/status` (anonymní endpoint, jen počty – bez
 obsahu incidentů, konzole na jiném stroji než API k tomu jinak nemá přístup).

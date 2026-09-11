@@ -417,6 +417,15 @@ Anything left on disk (a process crash, or just a routine service restart before
 is made harmless by the existing dedup in `ProcessBatch` – which is why the dedup key extended with
 `ProductId`/`PnpDeviceId` (see below) matters for this property too, not just for deduplicating resends.
 
+> **Retry without a restart (opponent review, 2026-09-11):** `ReplaySpoolAsync` above runs only once, at
+> service startup – that covers a process crash, but not SQL going down **while the service keeps
+> running** (a batch fails in the main loop, stays in the spool, and without a restart nothing would try
+> it again on its own). `RetrySpoolLoopAsync` runs concurrently for the whole lifetime of the service and
+> keeps trying to replay the spool itself – a bounded exponential backoff (5s → doubles on failure → capped
+> at 5 min, drops back to 5s after the first success). A `SemaphoreSlim` keeps batch processing strictly
+> sequential (see the comment in `IncidentQueueWorker`), so the retry loop and the live Channel can never
+> write the same batch concurrently.
+
 Spool status (pending file count + age of the oldest one) is visible on `/kontroly` (the "Incident queue
 (spool)" check) and machine-readable via `GET /api/incidents/queue/status` (an anonymous endpoint, counts
 only – no incident content; the console runs on a different machine than the API and otherwise has no
