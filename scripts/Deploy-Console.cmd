@@ -39,8 +39,14 @@ if "%SRC%"=="" goto :usage
 if "%APPHOST%"=="" goto :usage
 
 set "SHARE=\\%APPHOST%\C$\Apps\USBGuardianConsole"
-set "LOG=%ProgramData%\USBGuardian\deploy\console-deploy.log"
-if not exist "%ProgramData%\USBGuardian\deploy" mkdir "%ProgramData%\USBGuardian\deploy" >nul 2>&1
+rem Log jde na APPHOST (kde bezi konzole), NE na stroj, ze ktereho se skript spousti - ten
+rem nemusi mit (a typicky nema) pravo zapisovat do C:\ProgramData na sve vlastni strane.
+rem Nedbala verze (11.09.2026) tohle mela na lokalnim %ProgramData% - selhany zapis do
+rem neexistujici/nezapisovatelne slozky pokazil errorlevel az k robocopy prikazu, takze
+rem se hlasilo "uspesne, 0 zkopirovano" i kdyz robocopy ve skutecnosti vubec neprobehl.
+set "LOGDIR=\\%APPHOST%\C$\ProgramData\USBGuardian\deploy"
+set "LOG=%LOGDIR%\console-deploy.log"
+if not exist "%LOGDIR%" mkdir "%LOGDIR%" >nul 2>&1
 
 call :log "=== %DATE% %TIME% :: nasazeni konzole na %APPHOST% (sluzba: %SVC%) ==="
 call :log "zdroj: %SRC%"
@@ -51,7 +57,7 @@ if not exist "%SRC%\" (
   exit /b 2
 )
 
-rem ── 1) zastavit sluzbu ───────────────────────────────────────
+rem -- 1) zastavit sluzbu --------------------------------------
 call :log "zastavuji sluzbu..."
 sc.exe \\%APPHOST% stop "%SVC%" >nul 2>&1
 
@@ -70,7 +76,7 @@ goto :waitstop
 :stopped
 call :log "sluzba zastavena po %TRIES% pokusech"
 
-rem ── 2) zkopirovat ────────────────────────────────────────────
+rem -- 2) zkopirovat ---------------------------------------------
 rem appsettings.local.json zustava na serveru - je v nem skutecny SQL server,
 rem realne AD skupiny a Kestrel binding. PRESNE tohle pole zpusobilo dnesni
 rem vypadek, kdyz se vylouceni vynechalo (viz hlavicka souboru).
@@ -83,7 +89,7 @@ if %RC% GEQ 8 (
   exit /b 4
 )
 
-rem ── 3) nastartovat a overit ──────────────────────────────────
+rem -- 3) nastartovat a overit -------------------------------------
 call :log "startuji sluzbu..."
 sc.exe \\%APPHOST% start "%SVC%" >nul 2>&1
 

@@ -1,7 +1,7 @@
 @echo off
 setlocal enabledelayedexpansion
 rem ============================================================
-rem Deploy-Api.cmd — nasazeni API na jeho server.
+rem Deploy-Api.cmd - nasazeni API na jeho server.
 rem
 rem PROC .cmd A NE .ps1:
 rem   Prostredi vynucuje AllSigned pres GPO. Davka mu nepodleha, takze
@@ -47,7 +47,7 @@ if not exist "%SRC%\" (
   exit /b 2
 )
 
-rem ── 1) zastavit sluzbu ───────────────────────────────────────
+rem -- 1) zastavit sluzbu --------------------------------------
 call :log "zastavuji sluzbu..."
 sc.exe \\%APIHOST% stop "%SVC%" >nul 2>&1
 
@@ -69,7 +69,7 @@ goto :waitstop
 :stopped
 call :log "sluzba zastavena po %TRIES% pokusech"
 
-rem ── 2) zkopirovat ────────────────────────────────────────────
+rem -- 2) zkopirovat ---------------------------------------------
 rem appsettings.local.json zustava na serveru - je v nem pripojeni k DB
 rem a firemni hodnoty, ktere do balicku nepatri.
 robocopy "%SRC%" "%SHARE%" /E /XF appsettings.local.json /R:2 /W:5 /NFL /NDL /NJH /NP >> "%LOG%" 2>&1
@@ -81,7 +81,7 @@ if %RC% GEQ 8 (
   exit /b 4
 )
 
-rem ── 3) nastartovat a overit ──────────────────────────────────
+rem -- 3) nastartovat a overit -------------------------------------
 call :log "startuji sluzbu..."
 sc.exe \\%APIHOST% start "%SVC%" >nul 2>&1
 
