@@ -4,13 +4,18 @@
 // seznamu" nesmí obejít politiku onExpired (viz PolicyEnforcer.HandleDevice
 // a DeviceMonitor.ReEnforceConnectedDevices, oprava 56b4235).
 //
+// DetermineAction (internal, viz PolicyEnforcer.cs) testuje ZAMÝŠLENOU akci
+// čistě z konfigurace/stavu whitelistu, bez enforcementu - přesně to, co
+// tenhle test ověřuje. Jestli se SKUTEČNÁ zapsaná Action v incidentu liší
+// od záměru (Blocked -> Warned při selhání enforcementu), to testuje
+// samostatně Recorded_action_matches_actual_outcome_not_just_intent níž
+// (oprava 11.09.2026 - dřív se do incidentu zapisoval záměr PŘED tím, než
+// HandleBlock vůbec proběhl, takže neúspěšné zablokování se v auditu tvářilo
+// jako úspěšné).
+//
 // Zavislosti (IncidentLogger/NotificationService/DeviceBlocker/PolicyState)
 // nejsou mockovane - berou jen cesty k souborum, takze test pouziva SKUTECNE
-// instance smerovane do docasneho adresare. PnpDeviceId zarizeni je zamerne
-// prazdne: test overuje ROZHODOVACI logiku (jaka Action se zaznamena do
-// incidentu), ne mechanismus blokovani (DeviceBlocker/PowerShell) - prazdne
-// PnpDeviceId drzi HandleBlock na fallbacku bez volani PowerShellu, aniz by
-// to menilo zaznamenanou Action (ta se zapise driv, nez HandleBlock vubec bezi).
+// instance smerovane do docasneho adresare.
 // ============================================================
 
 using System.Text.Json;
@@ -64,6 +69,8 @@ public class PolicyEnforcerExpiryTests : IDisposable
             _notification, _incidentLogger, _deviceBlocker, _policyState,
             mode, onExpired, contactMessage: "test");
 
+    // PnpDeviceId prázdné = enforcement nemá co dělat (fallback na warn) - používá se
+    // v testu níž, který ověřuje přesně tenhle fallback a jeho dopad na zapsanou Action.
     private static DeviceInfo MakeDevice() => new()
     {
         VendorId     = "0951",
@@ -83,21 +90,18 @@ public class PolicyEnforcerExpiryTests : IDisposable
     }
 
     [Theory]
-    [InlineData("block", "Blocked")]
-    [InlineData("warn",  "Warned")]
-    [InlineData("allow", "Allowed")]
-    public void Expired_whitelist_respects_onExpired_even_for_a_listed_device(
-        string onExpired, string expectedAction)
+    [InlineData("block", IncidentAction.Blocked)]
+    [InlineData("warn",  IncidentAction.Warned)]
+    [InlineData("allow", IncidentAction.Allowed)]
+    public void Expired_whitelist_intent_respects_onExpired_even_for_a_listed_device(
+        string onExpired, IncidentAction expectedIntent)
     {
-        // Přesně bug z auditu: zařízení JE na (starém) whitelistu (isAllowed=true),
-        // ale whitelist je EXPIROVANÝ - o výsledku musí rozhodnout onExpired,
-        // ne holé "je na seznamu".
+        // Přesně bug z auditu: zařízení JE na (starém) whitelistu, ale whitelist je
+        // EXPIROVANÝ - o ZAMÝŠLENÉ akci musí rozhodnout onExpired, ne holé "je na seznamu"
+        // (o tom rozhoduje HandleDevice ještě před voláním DetermineAction).
         var enforcer = MakeEnforcer(mode: "warn", onExpired);
 
-        enforcer.HandleDevice(MakeDevice(), whitelistVersion: "v1",
-            isAllowed: true, whitelistStatus: WhitelistStatus.Expired);
-
-        Assert.Equal(expectedAction, ReadLoggedAction());
+        Assert.Equal(expectedIntent, enforcer.DetermineAction(WhitelistStatus.Expired));
     }
 
     [Fact]
@@ -117,6 +121,23 @@ public class PolicyEnforcerExpiryTests : IDisposable
     {
         // Sanity: druhá větev (isAllowed=false) fixem nezměněná.
         var enforcer = MakeEnforcer(mode: "warn", onExpired: "warn");
+
+        enforcer.HandleDevice(MakeDevice(), whitelistVersion: "v1",
+            isAllowed: false, whitelistStatus: WhitelistStatus.Valid);
+
+        Assert.Equal("Warned", ReadLoggedAction());
+    }
+
+    [Fact]
+    public void Recorded_action_matches_actual_outcome_not_just_intent()
+    {
+        // Nález z oponentury 11.09.2026: záměr je Blocked (mode=block), ale zařízení
+        // nemá PNPDeviceId -> HandleBlock spadne na fallback (Warned). Incident MUSÍ
+        // zaznamenat skutečný výsledek (Warned), ne původní záměr (Blocked) - jinak
+        // audit tvrdí, že se médium zablokovalo, i když zůstalo přístupné.
+        var enforcer = MakeEnforcer(mode: "block", onExpired: "warn");
+
+        Assert.Equal(IncidentAction.Blocked, enforcer.DetermineAction(WhitelistStatus.Valid));
 
         enforcer.HandleDevice(MakeDevice(), whitelistVersion: "v1",
             isAllowed: false, whitelistStatus: WhitelistStatus.Valid);

@@ -71,26 +71,27 @@ public class PolicyEnforcer
             "Neautorizované médium: {Device} | Uživatel: {User} | PC: {Host}",
             device, user, Environment.MachineName);
 
-        var action = DetermineAction(whitelistStatus);
+        var intendedAction = DetermineAction(whitelistStatus);
+
+        // Skutečná akce se může lišit od zamýšlené (Blocked -> Warned, když se enforcement
+        // nepovede - chybějící PNPDeviceID nebo selhání Disable-PnpDevice). Audit smí zapsat
+        // jen POTVRZENÝ výsledek, ne pouhý záměr - jinak incident tvrdí "Blocked", i když
+        // médium zůstalo přístupné (nález z oponentury 11.09.2026).
+        var actualAction = intendedAction switch
+        {
+            IncidentAction.Blocked => HandleBlock(device),
+            IncidentAction.Warned  => HandleWarn(device),
+            _                      => intendedAction
+        };
 
         var incident = new Incident
         {
             Device           = device,
-            Action           = action,
+            Action           = actualAction,
             WhitelistVersion = whitelistVersion,
             Username         = user
         };
         _incidentLogger.LogConnection(incident);
-
-        switch (action)
-        {
-            case IncidentAction.Warned:
-                HandleWarn(device);
-                break;
-            case IncidentAction.Blocked:
-                HandleBlock(device);
-                break;
-        }
     }
 
     // --------------------------------------------------------
@@ -101,28 +102,31 @@ public class PolicyEnforcer
         => HandleDevice(device, whitelistVersion, false, whitelistStatus);
 
     // --------------------------------------------------------
-    // Warn mode – zapíše do Toast fronty, médium funguje
+    // Warn mode – zapíše do Toast fronty, médium funguje. Vrací skutečnou akci (vždy Warned) -
+    // volající s tím zapíše do incidentu, ať je to samo (HandleDevice), nebo fallback z HandleBlock.
     // --------------------------------------------------------
-    private void HandleWarn(DeviceInfo device)
+    private IncidentAction HandleWarn(DeviceInfo device)
     {
         _notification.ShowWarningForDevice(
             title:  "Nepovolené paměťové médium",
             device: device,
             action: "Warned");
+        return IncidentAction.Warned;
     }
 
     // --------------------------------------------------------
-    // Block mode – zařízení deaktivováno, zapíše do Toast fronty
+    // Block mode – zařízení deaktivováno, zapíše do Toast fronty. Vrací SKUTEČNOU akci:
+    // Blocked jen při potvrzeném úspěchu, jinak Warned (fallback) - volající to zapíše
+    // do incidentu takové, jaké to doopravdy je.
     // --------------------------------------------------------
-    private void HandleBlock(DeviceInfo device)
+    private IncidentAction HandleBlock(DeviceInfo device)
     {
         if (string.IsNullOrEmpty(device.PnpDeviceId))
         {
             _logger.LogWarning(
                 "Block mode: PNPDeviceID není k dispozici pro {Device} – fallback na warn",
                 device.FriendlyName);
-            HandleWarn(device);
-            return;
+            return HandleWarn(device);
         }
 
         var result = _deviceBlocker.BlockDevice(device.PnpDeviceId,
@@ -135,19 +139,19 @@ public class PolicyEnforcer
                 title:  "Přístup k médiu byl zablokován",
                 device: device,
                 action: "Blocked");
+            return IncidentAction.Blocked;
         }
-        else
-        {
-            _logger.LogError("Blokování selhalo pro {Device}: {Error}",
-                device.FriendlyName, result.ErrorMessage);
-            HandleWarn(device);
-        }
+
+        _logger.LogError("Blokování selhalo pro {Device}: {Error}",
+            device.FriendlyName, result.ErrorMessage);
+        return HandleWarn(device);
     }
 
     // --------------------------------------------------------
-    // Určí akci dle konfigurace a stavu whitelistu
+    // Určí ZAMÝŠLENOU akci dle konfigurace a stavu whitelistu (čistá rozhodovací logika,
+    // bez enforcementu) - internal kvůli testům (viz PolicyEnforcerExpiryTests).
     // --------------------------------------------------------
-    private IncidentAction DetermineAction(WhitelistStatus wlStatus)
+    internal IncidentAction DetermineAction(WhitelistStatus wlStatus)
     {
         if (wlStatus == WhitelistStatus.Expired)
         {
