@@ -200,6 +200,17 @@ jako **autorizace**, ne jako zdroj práv: samotnou akci provádí služba běž�
 volajícího k tomu není potřeba. Odmítnutí vrací stránku, která ukáže **jako kdo** byl požadavek viděn a co je
 potřeba — bez toho se to nedalo diagnostikovat na dálku ani na místě.
 
+### CSRF ochrana zapisujících endpointů
+
+Loopback + Integrated Windows Auth samy o sobě nebrání cizí stránce v prohlížeči přihlášeného admina poslat
+`POST` na `127.0.0.1:<port>` — Windows auth handshake proběhne automaticky, prohlížeč ho udělá za útočnou
+stránku (klasický localhost CSRF). Zapisující endpointy (`/api/override`, `/api/override/clear`,
+`/api/unblock-all`, `/api/restart`, `/api/selfrestart`) proto navíc kontrolují `Origin` (u POST fetch/XHR ho
+prohlížeč posílá vždy, JS ho nemůže přepsat) proti vlastnímu originu konzole; chybí-li, fallback na `Referer`.
+Chybí-li obojí, request se odmítne (fail-closed) — legitimní volání z dashboardu má vždy aspoň `Origin`.
+Čistá funkce `LocalConsoleService.IsSameOrigin` (bez `HttpListenerContext`), testy v
+`LocalConsoleCsrfTests.cs`.
+
 ### Denní restart agenta
 
 `SelfRestart` (výchozí **zapnuto, 04:15**, konfigurovatelné, vypnutelné z lokální konzole) drží agenta svěží —
@@ -249,13 +260,13 @@ Whitelist záznam obsahuje: `vendorId`, `productId`, `serialNumber`, `descriptio
 > už dřív: chráněno je defaultně vše, veřejné jen to, co má explicitní `[AllowAnonymous]`/`.AllowAnonymous()`
 > (`/api/version`, `/api/cert-info`, `IncidentsController.QueueStatus`).
 
-> **Ověření hostname (04.09.2026, warn-only):** agent běží jako SYSTEM = autentizuje se strojovým účtem
-> (`DOMÉNA\HOSTNAME$`). Server proto může porovnat, čím se volající doopravdy prokázal, s tím, za koho se
-> v datech (`Hostname` v incidentech/heartbeatu) vydává – dřív se bralo bez ověření. Záměrně **jen loguje**
-> neshodu (Event Log + `ActivityLog`, kategorie „bezpecnost"), request neodmítá: formát identity v produkci
-> nešlo ověřit naživo, tvrdé odmítnutí při chybném předpokladu by umlčelo celý fleet naráz. Po pár dnech
-> bez falešných poplachů se má zpřísnit na `403` (`CallerIdentity.ParseMachineHostname`, čistá funkce, testy
-> v `tests/USBGuardian.Api.Tests/CallerIdentityTests.cs`).
+> **Ověření hostname (04.09.2026 warn-only → 10.09.2026 tvrdé 403):** agent běží jako SYSTEM = autentizuje se
+> strojovým účtem (`DOMÉNA\HOSTNAME$`). Server proto může porovnat, čím se volající doopravdy prokázal, s tím,
+> za koho se v datech (`Hostname` v incidentech/heartbeatu) vydává – dřív se bralo bez ověření. Od 04.09. do
+> 10.09.2026 se neshoda **jen logovala** (Event Log + `ActivityLog`, kategorie „bezpecnost"), aby se ověřil
+> formát identity v produkci bez rizika umlčení celého fleetu chybným předpokladem – za těch 6 dní 0 nesouhlasů,
+> takže od `1542bbb` je neshoda tvrdé **`403 Forbidden`** (`CallerIdentity.ParseMachineHostname`, čistá funkce,
+> testy v `tests/USBGuardian.Api.Tests/CallerIdentityTests.cs`).
 
 ## Konfigurace – klíčové hodnoty
 
@@ -351,7 +362,7 @@ vůbec nezrestorovalo.
 6. IncidentLogger: uložit do queue/log_MACHINE_DATE.json
 7. IncidentSync (1 min): odeslat na server /api/incidents
 8. IncidentsController: porovnat tvrzený `Hostname` s autentizovanou identitou volajícího (strojový účet) –
-   zatím jen loguje neshodu, request neodmítá (audit 04.09.2026, warn-only – viz níže)
+   při neshodě `403 Forbidden` (od `1542bbb`, 10.09.2026 – viz níže)
 9. IncidentsController: `IncidentSpool` zapíše batch atomicky na disk (přežije pád procesu) → teprve PAK
    zařadit do `IncidentQueue` → vrátit 202 Accepted
 10. IncidentQueueWorker (async): odebrat z fronty, dedup (`timestamp|serial|vendor|ProductId|PnpDeviceId`),
@@ -598,13 +609,14 @@ Konzole má na `AppSettings` jen write (ne delete na `Incidents`), proto je enfo
 | **Retence deníku** | `sp_PurgeActivityLog` existuje, ale **nikdo ji nevolá** – doplnit `activity.retentionDays` do Nastavení a volání do API (vzor: `RetentionService`) |
 | ~~Lokální konzole na fleetu~~ | **Rozhodnuto 04.09.2026: na fleetu ZAPNUTÁ, výhradně pro lokálního admina stanice.** Šablona v repu zůstává `false` (bezpečný default pro jiné prostředí), balíček pro fleet se staví s `true`; build na opačný stav upozorní |
 | Toast Privilege Separation | Helper process v user session – jednosměrné Pipes SYSTEM → user |
-| **Zpřísnění ověření hostname** | dnes warn-only (`CallerIdentity`) – po pár dnech bez falešných poplachů v Aktivitě přepnout na tvrdé odmítnutí (403) |
 
 > Hotovo (dřív pending): Admin UI (Blazor konzole + AD sync), **šifrovaná komunikace agent↔API**
 > (self-cert + pinning), centrální nastavení (vynucování/přístup/e-mail + alerty), **publikační/podpisový
 > workflow whitelistu** (klient = 1:1 kopie serveru, viz níže), **durabilní fronta incidentů** (`IncidentSpool`),
 > **FallbackPolicy na API**, **dedup klíč rozšířený o ProductId/PnpDeviceId**, **první CI**
-> (`.github/workflows/build-and-test.yml` – build + testy na `windows-latest` při každém push/PR).
+> (`.github/workflows/build-and-test.yml` – build + testy na `windows-latest` při každém push/PR),
+> **zpřísnění ověření hostname na tvrdé 403** (`1542bbb`, 10.09.2026), **CSRF ochrana lokální konzole**
+> (Origin/Referer kontrola zapisujících endpointů, viz kapitola „Lokální admin konzole agenta").
 
 ## Publikační/podpisový workflow whitelistu (automatický, klient = 1:1 kopie serveru)
 

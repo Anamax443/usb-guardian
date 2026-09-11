@@ -211,6 +211,17 @@ membership serves as **authorization**, not as the source of rights: the action 
 service running as SYSTEM, no elevated caller token is needed. A refusal returns a page showing **who** the
 request was seen as and what is required — without that it could be diagnosed neither remotely nor on site.
 
+### CSRF protection on the write endpoints
+
+Loopback + Integrated Windows Auth alone do not stop a foreign page in the logged-in admin's browser from
+sending a `POST` to `127.0.0.1:<port>` — the Windows auth handshake happens automatically, the browser does it
+on behalf of the attacking page (classic localhost CSRF). The write endpoints (`/api/override`,
+`/api/override/clear`, `/api/unblock-all`, `/api/restart`, `/api/selfrestart`) therefore also check `Origin`
+(for a POST fetch/XHR the browser always sends it, JS cannot override it) against the console's own origin;
+if missing, fall back to `Referer`. If both are missing the request is rejected (fail-closed) — a legitimate
+call from the dashboard always has at least `Origin`. Pure function `LocalConsoleService.IsSameOrigin`
+(without `HttpListenerContext`), tests in `LocalConsoleCsrfTests.cs`.
+
 ### Daily agent restart
 
 `SelfRestart` (default **on, 04:15**, configurable, switchable from the local console) keeps the agent fresh —
@@ -264,13 +275,13 @@ A whitelist entry contains: `vendorId`, `productId`, `serialNumber`, `descriptio
 > default, public only where explicitly marked `[AllowAnonymous]`/`.AllowAnonymous()` (`/api/version`,
 > `/api/cert-info`, `IncidentsController.QueueStatus`).
 
-> **Hostname verification (2026-09-04, warn-only):** the agent runs as SYSTEM, i.e. it authenticates with
-> the machine account (`DOMAIN\HOSTNAME$`). The server can therefore compare what the caller actually proved
-> against who it claims to be in the data (`Hostname` in incidents/heartbeat) – previously taken on faith.
-> Deliberately **logs only** a mismatch (Event Log + `ActivityLog`, category "bezpecnost"), doesn't reject
-> the request: the real production format of the identity couldn't be verified live, and a hard rejection on
-> a wrong assumption would silence the whole fleet at once. After a few days with no false positives it
-> should be tightened to `403` (`CallerIdentity.ParseMachineHostname`, a pure function, tests in
+> **Hostname verification (2026-09-04 warn-only → 2026-09-10 hard 403):** the agent runs as SYSTEM, i.e. it
+> authenticates with the machine account (`DOMAIN\HOSTNAME$`). The server can therefore compare what the
+> caller actually proved against who it claims to be in the data (`Hostname` in incidents/heartbeat) –
+> previously taken on faith. From 09-04 to 09-10 a mismatch was **logged only** (Event Log + `ActivityLog`,
+> category "bezpecnost"), to verify the real production format of the identity without risking silencing the
+> whole fleet on a wrong assumption – 0 mismatches over those 6 days, so as of `1542bbb` a mismatch is a hard
+> **`403 Forbidden`** (`CallerIdentity.ParseMachineHostname`, a pure function, tests in
 > `tests/USBGuardian.Api.Tests/CallerIdentityTests.cs`).
 
 ## Configuration – key values
@@ -373,7 +384,7 @@ this wouldn't even restore on Linux.
 6. IncidentLogger: store into queue/log_MACHINE_DATE.json
 7. IncidentSync (1 min): send to the server /api/incidents
 8. IncidentsController: compare the claimed Hostname against the caller's authenticated identity (machine
-   account) – currently logs a mismatch only, doesn't reject the request (2026-09-04 audit, warn-only – see below)
+   account) – a mismatch is `403 Forbidden` (since `1542bbb`, 2026-09-10 – see below)
 9. IncidentsController: IncidentSpool writes the batch to disk atomically (survives a process crash) → ONLY
    THEN enqueue into IncidentQueue → return 202 Accepted
 10. IncidentQueueWorker (async): dequeue, dedup (`timestamp|serial|vendor|ProductId|PnpDeviceId`), write into
@@ -642,14 +653,15 @@ The console only has write on `AppSettings` (no delete on `Incidents`), which is
 | **Activity-log retention** | `sp_PurgeActivityLog` exists but **nothing calls it** – add `activity.retentionDays` to Settings and the call to the API (pattern: `RetentionService`) |
 | ~~Local console on the fleet~~ | **Decided 2026-09-04: ON across the fleet, exclusively for a local admin of the station.** The template in the repo stays `false` (a safe default for other environments), the fleet package is built with `true`; the build warns about the opposite state |
 | Toast privilege separation | A helper process in the user session – one-way pipes SYSTEM → user |
-| **Tighten hostname verification** | warn-only today (`CallerIdentity`) – after a few days with no false positives in Activity, switch to a hard rejection (403) |
 
 > Done (previously pending): the admin UI (Blazor console + AD sync), **encrypted agent↔API comms**
 > (self-cert + pinning), central settings (enforcement/access/e-mail + alerts), the **whitelist
 > publishing/signing workflow** (client = a 1:1 copy of the server, see below), the **durable incident
 > queue** (`IncidentSpool`), the **API FallbackPolicy**, the **dedup key extended with
-> ProductId/PnpDeviceId**, and the **first CI** (`.github/workflows/build-and-test.yml` – build + tests on
-> `windows-latest` on every push/PR).
+> ProductId/PnpDeviceId**, the **first CI** (`.github/workflows/build-and-test.yml` – build + tests on
+> `windows-latest` on every push/PR), **tightened hostname verification to a hard 403** (`1542bbb`,
+> 2026-09-10), and **CSRF protection on the local console** (Origin/Referer check on the write endpoints,
+> see "Local admin console of the agent" above).
 
 ## Whitelist publishing/signing workflow (automatic, the client is a 1:1 copy of the server)
 

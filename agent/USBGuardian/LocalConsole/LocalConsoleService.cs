@@ -10,8 +10,11 @@
 //   - Naslouchá VÝHRADNĚ na loopbacku (http://127.0.0.1) – provoz
 //     neopouští stroj, proto je plain HTTP akceptovatelný.
 //   - IntegratedWindowsAuthentication + kontrola, že volající je
-//     lokální administrator → běžný uživatel data nevidí.
-//   - Read-only: žádné mutace stavu, žádný zápis.
+//     lokální administrator → běžný uživatel data nevidí, zapisovat nesmí.
+//   - Zapisující endpointy (break-glass, unblock-all, restart) navíc
+//     kontrolují Origin/Referer proti vlastnímu originu (CSRF ochrana –
+//     loopback + Windows auth samy o sobě nebrání cizí stránce v prohlížeči
+//     přihlášeného admina poslat POST na 127.0.0.1:<port>).
 //   - Ve výchozím configu VYPNUTO (localConsole.enabled=false);
 //     zapíná se přes agent.config.local.json.
 //
@@ -155,6 +158,21 @@ public class LocalConsoleService : BackgroundService
             if (!IsLocalAdmin(ctx.User))
             {
                 HandleUzivatel(ctx, path, method);
+                return;
+            }
+
+            // CSRF ochrana zapisujících endpointů: loopback + Integrated Windows Auth samo o sobě
+            // nebrání cizí stránce v prohlížeči přihlášeného admina poslat POST na 127.0.0.1:<port> –
+            // Windows auth handshake proběhne automaticky, prohlížeč ho udělá za útočnou stránku.
+            // Origin (u POST fetch/XHR ho prohlížeč posílá vždy, JS ho nemůže přepsat) musí sedět na
+            // vlastní origin konzole; když chybí, fallback na Referer. Bez obojího → odmítnout
+            // (fail-closed) – legitimní volání z dashboardu ho vždy má.
+            if (method == "POST" && IsWriteEndpoint(path) && !IsSameOriginWrite(ctx))
+            {
+                _logger.LogWarning(
+                    "Lokální konzole: odmítnut zapisující požadavek {Method} {Path} bez platného Origin/Referer ({User}) – možný CSRF",
+                    method, path, ctx.User?.Identity?.Name ?? "?");
+                WriteText(ctx, 403, "Forbidden: chybí nebo neplatný Origin/Referer");
                 return;
             }
 
@@ -611,6 +629,33 @@ public class LocalConsoleService : BackgroundService
         </body>
         </html>
         """;
+
+    // --------------------------------------------------------
+    // CSRF ochrana (viz komentář v HandleRequest)
+    // --------------------------------------------------------
+    private static bool IsWriteEndpoint(string path) => path.Equals("/api/override", StringComparison.OrdinalIgnoreCase)
+        || path.Equals("/api/override/clear", StringComparison.OrdinalIgnoreCase)
+        || path.Equals("/api/unblock-all", StringComparison.OrdinalIgnoreCase)
+        || path.Equals("/api/restart", StringComparison.OrdinalIgnoreCase)
+        || path.Equals("/api/selfrestart", StringComparison.OrdinalIgnoreCase);
+
+    private bool IsSameOriginWrite(HttpListenerContext ctx)
+        => IsSameOrigin(ctx.Request.Headers["Origin"], ctx.Request.Headers["Referer"], $"http://127.0.0.1:{_port}");
+
+    // --------------------------------------------------------
+    // Čistá verze (bez HttpListenerContext, který se v testu nedá snadno sestrojit) -
+    // testovatelná odděleně, stejný vzor jako DeviceBlocker.InterpretBlockOutput.
+    // --------------------------------------------------------
+    internal static bool IsSameOrigin(string? originHeader, string? refererHeader, string expectedOrigin)
+    {
+        if (!string.IsNullOrEmpty(originHeader))
+            return string.Equals(originHeader, expectedOrigin, StringComparison.OrdinalIgnoreCase);
+
+        if (!string.IsNullOrEmpty(refererHeader))
+            return refererHeader.StartsWith(expectedOrigin + "/", StringComparison.OrdinalIgnoreCase);
+
+        return false;
+    }
 
     // --------------------------------------------------------
     // HTTP odpovědi
