@@ -252,7 +252,14 @@ Whitelist záznam obsahuje: `vendorId`, `productId`, `serialNumber`, `descriptio
 > **Kde je podpisový klíč:** privátní klíč whitelistu **je na app serveru** (`Whitelist:PrivateKeyPath`).
 > Je to vědomý kompromis za plně automatickou publikaci — ruční offline podpis po každé změně katalogu byl
 > provozně neúnosný. Klíč je interní klíč nástroje (agenti mají jen veřejnou část), ne firemní CA; chrání ho
-> ACL na serveru. Offline `WhitelistSigner` zůstává pro generování klíčů a ruční ověření.
+> ACL na serveru (`scripts/Set-KeyFileAcl.ps1`). Offline `WhitelistSigner` zůstává pro generování klíčů
+> a ruční ověření.
+>
+> **`Whitelist:SigningRequired` (default `true`, oponentura 11.09.2026):** dřív chybějící
+> `PrivateKeyPath` a vědomě vypnutý auto-podpis vypadaly na `/kontroly` identicky (oboje `Off`) — přesně
+> tohle nastalo v produkci na APP_SERVER, appsettings.local.json cestu ztratil a nikdo si toho nevšiml.
+> Bez výslovného `SigningRequired: false` je teď chybějící klíč `Bad`, ne `Off` — mlčení configu se už
+> neinterpretuje jako záměr. `HealthService.EvaluateSigningKey`, testy v `HealthServiceSigningKeyTests.cs`.
 
 > **FallbackPolicy (04.09.2026):** do té doby stálo zabezpečení API jen na tom, že si autor nezapomene napsat
 > `[Authorize]` na každou novou akci – přesně tenhle typ chyby už jednou našel audit (`POST /api/whitelist/devices`
@@ -332,7 +339,7 @@ jinak nezměnil žádný `.cs`. Dřív (`BeforeTargets=CoreGenerateAssemblyInfo`
 
 ## Testy a CI
 
-Do 04.09.2026 repo nemělo žádné C# testy (jen jeden JS test na UI). Dnes: **76 testů** ve třech projektech,
+Do 04.09.2026 repo nemělo žádné C# testy (jen jeden JS test na UI). Dnes: **81 testů** ve třech projektech,
 všechny xUnit, bez mock frameworku – buď skutečné instance směrované do dočasného adresáře (agent), nebo čisté
 funkce beze závislosti na infrastruktuře (API, konzole):
 
@@ -340,7 +347,7 @@ funkce beze závislosti na infrastruktuře (API, konzole):
 |---------|-----------|-------|
 | `tests/USBGuardian.Agent.Tests` | `WhitelistChecker`, `PolicyEnforcer` (expirace whitelistu, rozhodovací logika), `DeviceBlocker` (interpretace výstupu blokovacího skriptu, skutečný timeout/kill zaseknutého PowerShellu), `LocalConsoleService` (CSRF Origin/Referer kontrola) | 20 |
 | `tests/USBGuardian.Api.Tests` | `IncidentSpool` (zápis/čtení/mazání/karanténa poškozeného souboru), dedup klíč a ohraničený exponenciální retry odstup (`IncidentQueueWorker`), `CallerIdentity` (parsování Windows identity) | 21 |
-| `tests/USBGuardian.Admin.Tests` | `StationStatus`, `Reachability`, `DeployResultIngestor` – čistá rozhodovací logika konzole (stav stanic, dostupnost, zpracování výsledků nasazení); `HealthService.EvaluateSigningKey` – kontrola „Podpisový klíč whitelistu" (nenastaveno/chybí soubor/nelze přečíst/OK) | 35 |
+| `tests/USBGuardian.Admin.Tests` | `StationStatus`, `Reachability`, `DeployResultIngestor` – čistá rozhodovací logika konzole (stav stanic, dostupnost, zpracování výsledků nasazení); `HealthService.EvaluateSigningKey` – kontrola „Podpisový klíč whitelistu" vč. `Whitelist:SigningRequired` (nenastaveno×vyžadováno, chybí soubor, nelze přečíst, OK) | 40 |
 
 API i konzole sahají na `internal` metody přes `InternalsVisibleTo` (`AssemblyInfo.cs` ve všech třech projektech) –
 řeší se tím, že např. `WindowsIdentity`/`HttpListenerContext`/reálný `powershell.exe` proces nejdou v testu

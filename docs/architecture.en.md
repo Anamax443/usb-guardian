@@ -265,8 +265,16 @@ A whitelist entry contains: `vendorId`, `productId`, `serialNumber`, `descriptio
 > **Where the signing key lives:** the whitelist private key **is on the app server**
 > (`Whitelist:PrivateKeyPath`). This is a deliberate trade-off for fully automatic publishing — signing
 > offline by hand after every catalog change proved operationally unworkable. It is the tool's own internal
-> key (agents hold only the public part), not a company CA; it is protected by ACLs on the server. The offline
-> `WhitelistSigner` remains for key generation and manual verification.
+> key (agents hold only the public part), not a company CA; it is protected by ACLs on the server
+> (`scripts/Set-KeyFileAcl.ps1`). The offline `WhitelistSigner` remains for key generation and manual
+> verification.
+>
+> **`Whitelist:SigningRequired` (default `true`, opponent review 2026-09-11):** a missing
+> `PrivateKeyPath` and a deliberately disabled auto-sign used to look identical on `/kontroly` (both
+> `Off`) — exactly that happened in production on APP_SERVER, the path fell out of
+> appsettings.local.json and nobody noticed. Without an explicit `SigningRequired: false` a missing key
+> is now `Bad`, not `Off` — config silence is no longer read as intent.
+> `HealthService.EvaluateSigningKey`, tests in `HealthServiceSigningKeyTests.cs`.
 
 > **FallbackPolicy (2026-09-04):** until then, API security relied entirely on nobody forgetting to write
 > `[Authorize]` on a new action – exactly the kind of mistake the audit already caught once
@@ -353,7 +361,7 @@ is reliable** – a generated source file `GitCommit.g.cs` is rewritten only whe
 
 ## Tests and CI
 
-Until 2026-09-04 the repo had no C# tests at all (just one JS test for the UI). Today: **76 tests** across
+Until 2026-09-04 the repo had no C# tests at all (just one JS test for the UI). Today: **81 tests** across
 three projects, all xUnit, no mock framework – either real instances routed into a temp directory (agent) or
 pure functions with no infrastructure dependency (API, console):
 
@@ -361,7 +369,7 @@ pure functions with no infrastructure dependency (API, console):
 |---------|---------------|-------|
 | `tests/USBGuardian.Agent.Tests` | `WhitelistChecker`, `PolicyEnforcer` (whitelist expiry, decision logic), `DeviceBlocker` (interpreting the block script's output, actually timing out and killing a stuck PowerShell), `LocalConsoleService` (CSRF Origin/Referer check) | 20 |
 | `tests/USBGuardian.Api.Tests` | `IncidentSpool` (write/read/delete/quarantine of a corrupt file), the dedup key and bounded exponential retry backoff (`IncidentQueueWorker`), `CallerIdentity` (parsing a Windows identity) | 21 |
-| `tests/USBGuardian.Admin.Tests` | `StationStatus`, `Reachability`, `DeployResultIngestor` – the console's pure decision logic (station state, reachability, deploy-result processing); `HealthService.EvaluateSigningKey` – the "Whitelist signing key" check (unset/missing file/unreadable/OK) | 35 |
+| `tests/USBGuardian.Admin.Tests` | `StationStatus`, `Reachability`, `DeployResultIngestor` – the console's pure decision logic (station state, reachability, deploy-result processing); `HealthService.EvaluateSigningKey` – the "Whitelist signing key" check incl. `Whitelist:SigningRequired` (unset×required, missing file, unreadable, OK) | 40 |
 
 The API and console tests reach into `internal` methods via `InternalsVisibleTo` (`AssemblyInfo.cs` in all three
 projects) – this works around the fact that, e.g., a `WindowsIdentity`/`HttpListenerContext`/a real

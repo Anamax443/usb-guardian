@@ -23,6 +23,15 @@
   // cert, viz Program.cs) - Kestrel se tu už nekonfiguruje. Volitelná změna cesty k .pfx:
   // "tls": { "certPath": "C:\\ProgramData\\USBGuardian\\admin-tls.pfx" },
 
+  "Whitelist": {
+    // Privátní RSA klíč, kterým konzole podepisuje vydané verze whitelistu (agent bez podpisu
+    // odmítne). BEZ TÉHLE CESTY je auto-podpis vypnutý - kontrola "Podpisový klíč whitelistu"
+    // na /kontroly to od 11.09.2026 hlásí jako BAD (ne jen Off), pokud níže výslovně
+    // nenastavíš SigningRequired: false - viz nález 11.09.2026 v HANDOFF.md.
+    "PrivateKeyPath": "C:\\Apps\\USBGuardianConsole\\whitelist_private.pem"
+    // "SigningRequired": false   // jen pokud je vypnutý auto-podpis skutečně záměr
+  },
+
   "AdSync": {
     "Enabled": true,            // časovač AD syncu
     "IntervalMinutes": 60,

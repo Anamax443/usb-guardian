@@ -168,7 +168,10 @@ public sealed class HealthService
 
         new(GWhitelist, "Podpisový klíč whitelistu",
             "Privátní RSA klíč, kterým konzole podepisuje vydané verze whitelistu. "
-          + "Bez něj vznikne nepodepsaná verze, kterou agent odmítne.",
+          + "Bez něj vznikne nepodepsaná verze, kterou agent odmítne. Chybějící klíč je BAD (ne jen "
+          + "Off), pokud appsettings.local.json nemá výslovně Whitelist:SigningRequired=false – "
+          + "nález 11.09.2026: appsettings.local.json na APP_SERVER v produkci PrivateKeyPath ztratil "
+          + "a nikdo si toho nevšiml, protože 'nenastaveno' vypadalo stejně jako záměrně vypnuté.",
             false, CheckSigningKeyAsync),
 
         new(GWhitelist, "Vynucování (blokování)",
@@ -520,20 +523,31 @@ public sealed class HealthService
             changedAfter == 0 ? "" : "Whitelist → Publikovat nyní.");
     }
 
-    private static Task<CheckOutcome> CheckSigningKeyAsync(Ctx c, CancellationToken ct) =>
-        Task.FromResult(EvaluateSigningKey(c.Config["Whitelist:PrivateKeyPath"]));
+    private static Task<CheckOutcome> CheckSigningKeyAsync(Ctx c, CancellationToken ct)
+    {
+        // Default = vyžadovaný (fail-secure, stejně jako zbytek projektu - hostname 403, CSRF
+        // fail-closed, FallbackPolicy). Nález oponentury 11.09.2026: "chybí klíč" a "záměrně
+        // vypnutý auto-podpis" vypadaly na /kontroly identicky (obojí Off) - přesně tenhle stav
+        // nastal v produkci na APP_SERVER a nikdo si toho nevšiml. Explicitní opt-out
+        // (SigningRequired=false) dává administrátorovi možnost říct "vím o tom, je to záměr" -
+        // mlčení configu se už NEinterpretuje jako souhlas.
+        var signingRequired = !string.Equals(
+            c.Config["Whitelist:SigningRequired"], "false", StringComparison.OrdinalIgnoreCase);
+        return Task.FromResult(EvaluateSigningKey(c.Config["Whitelist:PrivateKeyPath"], signingRequired));
+    }
 
-    // Vytazeno z CheckSigningKeyAsync jako testovatelna jednotka (nález 11.09.2026: appsettings.local.json
-    // na APP_SERVER v produkci Whitelist:PrivateKeyPath ztratil - tahle kontrola by to na /kontroly ukazala
-    // jako "nenastaveno", kdyby se na ni někdo podíval; regresní test má hlídat, že to i nadál pozná).
-    // Skutečné File.Exists/File.OpenRead nejsou mockované - stejný vzor jako IncidentSpoolTests
-    // (reálný dočasný soubor), ne umělá abstrakce nad souborovým systémem jen kvůli testu.
-    internal static CheckOutcome EvaluateSigningKey(string? path)
+    // Vytazeno z CheckSigningKeyAsync jako testovatelna jednotka - skutečné File.Exists/File.OpenRead
+    // nejsou mockované, stejný vzor jako IncidentSpoolTests (reálný dočasný soubor), ne umělá
+    // abstrakce nad souborovým systémem jen kvůli testu.
+    internal static CheckOutcome EvaluateSigningKey(string? path, bool signingRequired)
     {
         if (string.IsNullOrWhiteSpace(path))
         {
-            return new CheckOutcome(HealthState.Off, "nenastaveno",
-                "Doplň Whitelist:PrivateKeyPath do appsettings.local.json na serveru konzole.");
+            return signingRequired
+                ? new CheckOutcome(HealthState.Bad, "nenastaveno",
+                    "Whitelist:PrivateKeyPath chybí v appsettings.local.json na serveru konzole. "
+                  + "Pokud je vypnutý auto-podpis skutečně záměr, nastav navíc Whitelist:SigningRequired=false.")
+                : new CheckOutcome(HealthState.Off, "nenastaveno (Whitelist:SigningRequired=false)");
         }
 
         if (!File.Exists(path))
