@@ -100,16 +100,14 @@ builder.Services.AddAuthorization(options =>
 builder.Services.AddCascadingAuthenticationState();
 
 // ── AD sync ──────────────────────────────────────────────────
-// Runner je volatelný i z UI ("Aktualizovat z AD"); časovač běží jen
-// když AdSync:Enabled=true. Vyžaduje write na Computers (účet služby).
+// Runner je volatelný i z UI ("Aktualizovat z AD"); časovač běží vždy a čte
+// adsync.enabled/adsync.intervalMinutes z AppSettings při každém tiku (ne jen
+// jednou při startu) – jde tak zapnout/vypnout přímo v Nastavení, bez editace
+// appsettings.local.json a restartu konzole (nález 11.09.2026).
+// Vyžaduje write na Computers (účet služby). SearchBase/IncludeDisabled
+// zůstávají v appsettings.local.json – mění se výjimečně, na rozdíl od zapnutí.
 builder.Services.AddSingleton<AdSyncRunner>();
-if (bool.Parse(builder.Configuration["AdSync:Enabled"] ?? "false"))
-{
-    builder.Services.AddHostedService(sp => new AdSyncService(
-        sp.GetRequiredService<AdSyncRunner>(),
-        sp.GetRequiredService<ILogger<AdSyncService>>(),
-        int.Parse(builder.Configuration["AdSync:IntervalMinutes"] ?? "60")));
-}
+builder.Services.AddHostedService<AdSyncService>();
 
 // ── E-mailové alerty nad incidenty (běží, jen když je e-mail zapnutý) ──
 builder.Services.AddHostedService<USBGuardian.Admin.Notifications.IncidentAlertService>();

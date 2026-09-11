@@ -590,13 +590,18 @@ public sealed class HealthService
                 ? "Úklid dělá API — ověř, že běží aktuální verze API (kontrola Verze komponent)." : "");
     }
 
-    private static Task<CheckOutcome> CheckAdSyncAsync(Ctx c, CancellationToken ct)
+    private static async Task<CheckOutcome> CheckAdSyncAsync(Ctx c, CancellationToken ct)
     {
-        var enabled = c.Config.GetValue<bool>("AdSync:Enabled");
-        return Task.FromResult(new CheckOutcome(
+        // adsync.enabled/adsync.intervalMinutes jsou od 11.09.2026 v AppSettings (editovatelné
+        // v Nastavení), ne v appsettings.local.json - viz AdSyncService.cs.
+        var enabled  = string.Equals(await Get(c.Db!, "adsync.enabled", ct), "true", StringComparison.OrdinalIgnoreCase);
+        var interval = await Get(c.Db!, "adsync.intervalMinutes", ct);
+        if (string.IsNullOrWhiteSpace(interval)) interval = "60";
+
+        return new CheckOutcome(
             enabled ? HealthState.Ok : HealthState.Off,
-            enabled ? $"zapnuto, každých {c.Config["AdSync:IntervalMinutes"] ?? "60"} min" : "vypnuto",
-            enabled ? "" : "Zapni AdSync:Enabled v appsettings.local.json (vyžaduje restart konzole)."));
+            enabled ? $"zapnuto, každých {interval} min" : "vypnuto",
+            enabled ? "" : "Zapni v Nastavení → AD sync.");
     }
 
     private static async Task<CheckOutcome> CheckAutoDeployAsync(Ctx c, CancellationToken ct)

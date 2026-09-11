@@ -253,9 +253,21 @@ při prvním zapnutí se nastaví baseline (historie se neposílá).</p>
 denní souhrn) je další krok.</p>
 
 <h2>AD sync</h2>
+<p class="muted">Pravidelný import stanic z Active Directory (mimo ruční tlačítko „Aktualizovat z AD" na
+    Stanicích, které funguje vždy nezávisle na tomhle přepínači). SearchBase (OU) se mění výjimečně,
+    zůstává v <span class="mono">appsettings.local.json</span> na serveru (vyžaduje restart konzole).</p>
 <dl class="cfg">
-    <dt>Zapnuto</dt><dd>@(Config.GetValue<bool>("AdSync:Enabled") ? "ano" : "ne")</dd>
-    <dt>Interval (min)</dt><dd>@(Config["AdSync:IntervalMinutes"] ?? "60")</dd>
+    <dt>Zapnuto (časovač)</dt>
+    <dd>
+        @if (_adSyncEnabled) { <span class="pill ok">ZAPNUTO</span> } else { <span class="pill warn">vypnuto</span> }
+        &nbsp;<button class="btn" @onclick="ToggleAdSync" disabled="@_busy">@(_adSyncEnabled ? "Vypnout" : "Zapnout")</button>
+    </dd>
+    <dt>Interval (min)</dt>
+    <dd>
+        <input class="inp" style="min-width:90px" @bind="_adSyncInterval" />
+        &nbsp;<button class="btn" @onclick="SaveAdSyncInterval" disabled="@_busy">Uložit</button>
+        @if (_adSyncMsg is not null) { <span class="muted">&nbsp;@_adSyncMsg</span> }
+    </dd>
     <dt>SearchBase (OU)</dt><dd>@(string.IsNullOrWhiteSpace(Config["AdSync:SearchBase"]) ? "(celá doména)" : Config["AdSync:SearchBase"])</dd>
 </dl>
 
@@ -369,6 +381,10 @@ denní souhrn) je další krok.</p>
     private string _pingInterval = "5";
     private string? _pingMsg;
 
+    private bool _adSyncEnabled;
+    private string _adSyncInterval = "60";
+    private string? _adSyncMsg;
+
     private bool _deployEnabled, _deployDryRun = true, _deployDefaultEnroll = true, _deployBad;
     private string _deployInterval = "30", _deployMaxPerRun = "10",
                    _deployAllow = "", _deployTargets = "", _deployLastRun = "";
@@ -431,6 +447,9 @@ denní souhrn) je další krok.</p>
             _emailRecipients = await Get(db, "email.recipients");
             _emailStarttls   = !string.Equals(await Get(db, "email.starttls"), "false", StringComparison.OrdinalIgnoreCase);
             var ai = await Get(db, "email.alertIntervalMinutes"); _emailInterval = string.IsNullOrEmpty(ai) ? "15" : ai;
+
+            _adSyncEnabled = string.Equals(await Get(db, "adsync.enabled"), "true", StringComparison.OrdinalIgnoreCase);
+            var asi = await Get(db, "adsync.intervalMinutes"); _adSyncInterval = string.IsNullOrEmpty(asi) ? "60" : asi;
 
             _deployEnabled  = string.Equals(await Get(db, "deploy.enabled"), "true", StringComparison.OrdinalIgnoreCase);
             _deployDryRun   = !string.Equals(await Get(db, "deploy.dryRun"), "false", StringComparison.OrdinalIgnoreCase);
@@ -521,6 +540,37 @@ denní souhrn) je další krok.</p>
             _pingMsg = "Uloženo.";
         }
         catch (Exception ex) { _pingMsg = "Chyba: " + ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task ToggleAdSync()
+    {
+        _busy = true;
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            await Set(db, "adsync.enabled", (!_adSyncEnabled).ToString().ToLowerInvariant());
+            await Load();
+        }
+        catch (Exception ex) { _dbError = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task SaveAdSyncInterval()
+    {
+        _adSyncMsg = null;
+        if (!int.TryParse(_adSyncInterval?.Trim(), out var min) || min < 5)
+        { _adSyncMsg = "Zadej aspoň 5 minut."; return; }
+
+        _busy = true;
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            await Set(db, "adsync.intervalMinutes", min.ToString());
+            _adSyncInterval = min.ToString();
+            _adSyncMsg = "Uloženo.";
+        }
+        catch (Exception ex) { _adSyncMsg = "Chyba: " + ex.Message; }
         finally { _busy = false; }
     }
 
