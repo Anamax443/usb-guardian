@@ -222,10 +222,17 @@ public class DeviceBlocker
         catch (Exception ex) { _logger.LogWarning(ex, "Nelze uložit seznam zablokovaných médií"); }
     }
 
+    private const int DefaultTimeoutMs = 10_000;
+
     // --------------------------------------------------------
     // Interní: spuštění PowerShell skriptu
     // --------------------------------------------------------
-    private string RunPowerShell(string script)
+    private string RunPowerShell(string script) => RunPowerShell(script, DefaultTimeoutMs);
+
+    // timeoutMs jako parametr kvůli testovatelnosti (test nemůže čekat 10 reálných sekund
+    // na ověření, že zaseknutý proces skutečně zabijeme) - volající kód v tomhle souboru vždy
+    // jede s výchozím DefaultTimeoutMs.
+    internal string RunPowerShell(string script, int timeoutMs)
     {
         try
         {
@@ -240,9 +247,32 @@ public class DeviceBlocker
             };
 
             using var proc = Process.Start(psi)!;
-            var output = proc.StandardOutput.ReadToEnd();
-            var error  = proc.StandardError.ReadToEnd();
-            proc.WaitForExit(10_000);
+
+            // Nález z oponentury 11.09.2026: dřív se čekalo synchronně na ReadToEnd() PŘED
+            // WaitForExit(10_000) - tím pádem timeout níže nikdy nic reálně neomezoval
+            // (ReadToEnd zůstane viset, dokud dítě nezavře handle, tj. dokud neskončí samo)
+            // a zaseknutý powershell.exe blokoval Block/UnblockDevice navěky. Čteme proto
+            // asynchronně HNED po startu (obě roury zároveň, žádný sync blok na jedné z nich
+            // dřív než na druhé - klasický pipe-buffer deadlock), takže WaitForExit(timeoutMs)
+            // je konečně skutečný strop.
+            var stdOutTask = proc.StandardOutput.ReadToEndAsync();
+            var stdErrTask = proc.StandardError.ReadToEndAsync();
+
+            if (!proc.WaitForExit(timeoutMs))
+            {
+                _logger.LogError(
+                    "PowerShell (PID {Pid}) překročil timeout {TimeoutMs} ms – zabíjím proces (i případné děti)",
+                    proc.Id, timeoutMs);
+                try { proc.Kill(entireProcessTree: true); }
+                catch (Exception killEx)
+                {
+                    _logger.LogWarning(killEx, "Nelze zabít zaseknutý PowerShell proces {Pid}", proc.Id);
+                }
+                return string.Empty;
+            }
+
+            var output = stdOutTask.GetAwaiter().GetResult();
+            var error  = stdErrTask.GetAwaiter().GetResult();
 
             if (!string.IsNullOrEmpty(error))
                 _logger.LogDebug("PowerShell stderr: {Error}", error);

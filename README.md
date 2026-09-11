@@ -53,6 +53,7 @@ technické opatření pro **NIS2 / zákon 181/2014 Sb. / ISO 27001**.
 | 43 | **Hlubší oponenturní průchod + náprava P1** (10.–11.09.2026) – 6 ze 7 nálezů opraveno: autorizace `GET /api/incidents`, hostname ověření zpřísněno na tvrdé 403, `DeviceBlocker` false-success + exact-match fix, audit zaznamenává skutečný výsledek enforcementu (ne záměr), `POST /api/whitelist/devices` už nevytváří nepodepsanou aktivní verzi | ✅ 6/7 |
 | 44 | **Zmlklý agent = potvrzený ping** – `PingMonitorService` na pozadí ověřuje dostupnost jen u stanic, co hlásí agenta a nejsou čerstvé; „zmlklý" (stojí za pozornost) odlišeno od „vypnuto?" (ping neodpovídá, bez akce) na Stanicích i v Kontrolách | ✅ |
 | 45 | **AD sync přepínatelný z Nastavení** – dřív jen úpravou `appsettings.local.json` + restart konzole, teď skutečný přepínač + interval v DB (`AdSyncService` běží vždy, čte příznak při každém tiku) | ✅ |
+| 46 | **Druhá vlna oponentury (11.09.2026)** – CSRF ochrana zapisujících endpointů lokální konzole (Origin/Referer, fail-closed); `DeviceBlocker.RunPowerShell` čtení asynchronní PŘED `WaitForExit` (starý kód mohl na zaseknutém `powershell.exe` viset navěky bez ohledu na deklarovaný timeout) + skutečné zabití procesu (i dětí) po vypršení; oprava zastaralé dokumentace (`architecture.md` ještě popisovala hostname ověření jako warn-only, ačkoli tvrdé 403 běží od 10.09.) | ✅ |
 | – | Per-serial **blocklist** + blokace už-připojeného média | 🔜 |
 | – | Monitoring expirace podpisového certu | 🔜 |
 | – | **Retence deníku** – `sp_PurgeActivityLog` existuje, ale nikdo ji nevolá | 🔜 |
