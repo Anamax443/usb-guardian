@@ -52,7 +52,10 @@ public class DeviceBlockerTimeoutTests : IDisposable
     [Fact]
     public void Fast_script_still_returns_full_output_within_timeout()
     {
-        // Strop 30 s, ne 5 s: první start powershell.exe na studeném CI runneru trval 11.09. i 14.09.2026 přes 5 s        // (stejný test padl ve dvou nezávislých bězích a při pouhém rerunu prošel). Rychlý skript se vrátí hned,        // takže delší strop zdravý běh nezpomalí - jen odliší "pomalý start" od "zaseknutý proces" (test výš).        var result = _blocker.RunPowerShell("Write-Output 'BLOCKED:test'", timeoutMs: 30_000);
+        // Strop 30 s, ne 5 s: první start powershell.exe na studeném CI runneru trval 11.09. i 14.09.2026 přes 5 s
+        // (stejný test padl ve dvou nezávislých bězích a při pouhém rerunu prošel). Rychlý skript se vrátí hned,
+        // takže delší strop zdravý běh nezpomalí - jen odliší "pomalý start" od "zaseknutý proces" (test výš).
+        var result = _blocker.RunPowerShell("Write-Output 'BLOCKED:test'", timeoutMs: 30_000);
 
         Assert.Contains("BLOCKED:test", result);
     }
