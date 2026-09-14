@@ -26,7 +26,7 @@ Serverová konzole agreguje data, drží inventář stanic z AD a ukazuje, kam c
 | **Autorizace konzole** | AD `DOMENA\IT-Admins` + whitelist `DOMENA\it-admin` (+ DB seznam z Nastavení) |
 | **Šifrování agent↔API** | HTTPS + **pinning otisku** (bez CA) — ověřeno end-to-end (heartbeat OK z PC-01) |
 | **AD sync** | zapnutý (`adsync.enabled=true` v DB), 60 min + on-demand; přepínatelné z Nastavení od 11.09.2026 (viz 5.15) |
-| **Live commit** (11.09.2026, konec dne) | **konzole `00cebc3`** (ping-gated zmlklý agent + PingMonitorService + AD sync přepínatelný z UI + oprava Deploy-Console.cmd/Deploy-Api.cmd, viz 5.14/5.15) · **API `8da4843`** (P1 kroky 1–2 nasazené – GET /api/incidents jen adminům, hostname 403; kroky 3–6 buď agent-only nebo bez urgence k nasazení, viz 5.13/5.15) · **agent beta+stable `924b9b8`** (nezměněno – kroky 3–5 z P1 seznamu čekají na společnou beta vlnu). Bezpečnostní audit + náprava 04.09 — viz 5.12; hlubší průchod 10.–11.09 — viz 5.13/5.15 |
+| **Live commit** (14.09.2026) | **konzole `00cebc3`** (ping-gated zmlklý agent + PingMonitorService + AD sync přepínatelný z UI + oprava Deploy-Console.cmd/Deploy-Api.cmd, viz 5.14/5.15; HTTPS z `ff53654` zatím nenasazeno) · **API `65b2235`** (nasazeno 14.09.2026 – spool retry `befbeb0`, whitelist endpoint bez nepodepsané verze `11734f2`, sloupce LastPing `4defcfe`; viz 5.16) · **agent beta+stable `924b9b8`** (nezměněno – kroky 3–5 z P1 seznamu čekají na společnou beta vlnu). Bezpečnostní audit + náprava 04.09 — viz 5.12; hlubší průchod 10.–11.09 — viz 5.13/5.15; externí oponentura ověřená proti živému stavu 14.09 — viz 5.16 |
 | **Rozvoz agenta – osvědčený postup** | balíček → archiv `…\USBGuardianAgentVersions\<commit>` → **beta na jednu stanici** (dočasně přepsaný `update-beta.txt`) → ověřit → beta na zbytek → teprve pak **stable**. Log `…\deploy\update-agent.log`; „Agent verze" v konzoli se projeví až dalším heartbeatem (≤2 min), takže hned po rozvozu tam ještě chvíli svítí stará verze |
 | **Konzole – stránky** | Přehled (filtr+kumulace+řazení, kapacita, **export CSV + manažerský report s grafy**), Stanice (AD inventář + „Zmlklo agentů" + „Vyžádat data" + **Nasazení / hromadné vyřadit-zařadit**), Whitelist (**kapacita + filtr katalogu + auto-publish podepsané verze**), Nastavení (vynucování/přístup/email/alerty/dohled/auto-enrollment+default PC/retence/**Údržba: reload nastavení**), **Databáze**, **Kontroly** (health checks), Dokumentace (+HTML animace) |
 | **Enforcement (F1-3)** | **whitelist 1:1** (auto-podpis serverem, interní RSA klíč na APP_SERVER) → **vynucování** server→agent (`policy.enforce` v heartbeatu) → **break-glass** (lokální konzole 5080, offline, logováno, zruší se při sync) + **auto-re-enable** + reconciliace s whitelistem. Lokální konzole: restart služby, break-glass, seznam whitelistu |
@@ -518,7 +518,7 @@ Pokračování 5.13/5.14 týž den:
    odpovědi, že publikace je samostatný krok v konzoli. Endpoint dnes nemá žádného volajícího (konzole
    jde přímo přes `WhitelistPublisher`), takže bez urgentního nasazení.
 
-**Zbývá z P1 seznamu:** krok 7 – spool retry se po SQL výpadku sám nerozjede bez restartu.
+**Zbývá z P1 seznamu:** krok 7 – spool retry se po SQL výpadku sám nerozjede bez restartu. *(Opraveno ještě týž den v `befbeb0`, ale na SQL_SERVER nasazeno až 14.09.2026 – do té doby tenhle dokument tvrdil „zbývá", zatímco kód tvrdil „hotovo"; viz 5.16.)*
 
 **Konzistence „Zmlklí agenti" (6e5d6d2):** kontrola na stránce Kontroly počítala silent čistě z
 `LastSeen`, nezávisle na opravě 5.14 na Stanicích – druhé, nezávislé místo se stejnou chybou (nález
@@ -554,7 +554,57 @@ Po nasazení nastaveno `adsync.enabled=true` v DB ručně (SQL), aby zapnutí z 
 kroku 2 – kroky 4–6 se API/konzole enforcementu netýkají kromě již zmíněného 11734f2, který nebyl
 urgentní k nasazení), agent `924b9b8` (stable+beta, nezměněno – kroky 3–5 čekají na společnou beta vlnu).
 
+### 5.16 Externí oponentura ověřená proti živému stavu + nasazení API `65b2235` (14.09.2026)
+
+Uživatel přinesl externí oponenturu (čtenou jen z GitHubu: `architecture.md`, `HANDOFF.md`, `README.md`) s podezřením,
+že „část informací z klientů nedorazí do centrální konzole". Každé tvrzení ověřeno proti repu **a živému prostředí**,
+ne jen proti dokumentaci:
+
+| Tvrzení oponentury | Ověření 14.09.2026 |
+|---|---|
+| Živé API běží na `8da4843`, `RetrySpoolLoopAsync` v produkci není | **Potvrzeno** – `/api/version` → `8da4843`; retry přišel až v `befbeb0`, sedm commitů po živé verzi |
+| Dokumentace je napřed před produkcí | **Potvrzeno** – HANDOFF naposledy měněn v `b39f6e1` (před opravou) a stále tvrdil „zbývá krok 7"; README měl o téže věci řádek 47 ✅ a řádek 63 🔜 |
+| `EnsureCreatedAsync` běží před `app.RunAsync()`, API nemá `/health` | **Potvrzeno** (`Program.cs`) – zůstává otevřené, viz další kroky |
+| Konzole nerozliší heartbeat od doručení incidentů | **Potvrzeno** – `Computer` má jen `LastSeen`, plní ho `HeartbeatController` i `IncidentQueueWorker`. Uživatel nezávisle týž den: „nikde v konzoli nevidím, kdy se naposled stáhl JSON od klientů" |
+| Agent nemá sequence number ani server ACK | **Potvrzeno** |
+| Deploy hlásí úspěch jen podle „služba běží" | **Potvrzeno** – `Deploy-Api.cmd` po startu commit neověřuje |
+| Něco vězí ve spoolu | **Nepotvrzeno** – `queue/status` 0/0 před i po nasazení. Scénář je reálný, ale neprobíhal |
+
+Co oponentura z GitHubu vidět nemohla: kontrola „Verze komponent" v `HealthService` už existuje (varuje při více verzích
+agentů, ale bez očekávané verze a počtů); migrace `10_ping_status.sql` už v DB byla (konzole `00cebc3` na ní běžela).
+
+**Nasazení API `65b2235`** – delta proti `8da4843` v API jsou tři commity (`befbeb0` spool retry, `11734f2` whitelist
+endpoint bez nepodepsané verze, `4defcfe` sloupce `LastPingOk/LastPingAt`); testy API 21/21, CI zelené.
+- `dotnet publish -c Release -r win-x64 --self-contained` → `D:\deploy\USBGuardianApi` → `robocopy /MIR` do stagingu
+  `\\APP_SERVER\C$\Apps\USBGuardianApiPublish` (433 souborů; zrcadlení odstranilo 17 zbytkových souborů `runtimes\*`
+  z dřívějšího nesplácnutého publishe; `appsettings.local.json` deploy skript vylučuje přes `/XF`).
+- Uživatel spustil `schtasks /S APP_SERVER /Run /TN "\USBGuardian\USBGuardian-ApiDeploy"` (9:59:56) → `Last Result: 0`,
+  log „HOTOVO: sluzba bezi (1 pokusu)". Startovní incident z 11.09. (5.13) se neopakoval.
+- **Ověřeno:** `/api/version` → `{"commit":"65b2235","startedAt":"2026-09-14T08:00:10Z"}`; `queue/status` 0/0;
+  konzole `/api/health` → 0 bad · 1 warn (pokrytí stanic 16/205) · 13 ok · 3 off, z toho „API pro agenty" ok (514 ms),
+  „Fronta incidentů" prázdná, „Zmlklí agenti" 0 z 16, „Verze komponent" konzole `00cebc3` · API `65b2235` · agenti `924b9b8`.
+
+**Vedlejší nález téhož dne:** auto-enrollment (ostrý režim) zapsal 10 cílů a `Deploy-AgentFleet.ps1` je dopoledne celé
+prošvihl – 5 cílů `Access denied` (jsou to **servery**, kde deploy gMSA není lokální admin – je jen ve skupině adminů
+klientských stanic), 5 stanic offline. Nic se nezkopírovalo, audit v `deploy\last.csv`. Otevřené: auto-enrollment
+nefiltruje servery (OU / `OperatingSystem`), takže se je bude pokoušet instalovat pořád dokola.
+
+**Kde dnes zjistit „kdy naposled dorazila data ze stanice":** jen Aktivita → hledat hostname → záznam zdroje `incidents`
+„přijato N incidentů (soubor …)". Na Stanicích ani v Kontrolách per-stanice údaj není – to je první bod níže.
+
+**Další kroky z oponentury (jeden bod = jedno nasazení + jedno ověření, v tomto pořadí):**
+1. Per-stanice „poslední přijatá dávka" (`Computer.LastIncidentBatchAt` + počet) oddělená od `LastSeen`, na Stanicích
+   i v Kontrolách (semafor heartbeat × data). Ověření: stanice s heartbeatem, ale bez dávky, svítí jinak než zdravá.
+2. `EnsureCreatedAsync` mimo kritickou cestu startu (Kestrel nahoru hned, DB init s retry na pozadí) + `/health/live`
+   a `/health/ready` na API. Ověření: start API se zastaveným SQL → port 5443 poslouchá, `/health/ready` vrací 503.
+3. `Deploy-Api.cmd`: úspěch = služba běží **a** `/api/version` vrátí očekávaný commit. Ověření: deploy se špatným
+   stagingem skončí nenulově.
+4. „Verze komponent": očekávaná stable verze + počty stanic per verze. Ověření: jedna stanice na jiné verzi = warn s počtem.
+5. Per-agent sequence + server ACK (klient ví, po které číslo server potvrdil zápis do DB).
+6. Integrační test agent → API → výpadek SQL → obnova (100 dávek, 0 ztrát, 0 duplicit).
+
 ### 5.5 Roadmapa (pending)
+- **Z oponentury 14.09.2026 (viz 5.16, v tomto pořadí):** per-stanice „poslední přijatá dávka" oddělená od `LastSeen`; `EnsureCreatedAsync` mimo kritickou cestu startu + `/health/live`; `Deploy-Api.cmd` ověří commit po startu; očekávaná verze + počty v „Verze komponent"; sequence/ACK agent↔server; e2e test výpadku SQL.
 - **Monitoring expirace podpisového certu** – `CN=powershell.domena.loc` platí do 2028-06-17; alert e-mailem z konzole.
 - **„Vše server na APP_SERVER":** přesun API runtime z SQL_SERVER na APP_SERVER (konzole+API na APP_SERVER, DB na SQL_SERVER, agent repoint na
   `https://APP_SERVER_IP:5443`) → PC-01 fakt netřeba. **Build/deploy artefakty jsou na D:\deploy (lokálně), ne na PC-01.**

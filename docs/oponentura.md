@@ -2511,7 +2511,7 @@ Stav nasazení: commit `11734f2`. Endpoint dnes nemá žádného volajícího (k
 `WhitelistPublisher`), takže bez urgentní potřeby okamžitého nasazení — oprava je hotová v kódu a čeká na
 běžný deploy cyklus API.
 
-### 35.7 Spool retry po výpadku SQL Serveru (otevřeno)
+### 35.7 Spool retry po výpadku SQL Serveru (opraveno 11.09., nasazeno 14.09.2026)
 
 Co: `IncidentSpool` (viz Příloha A, přidán 4. 9. 2026 — 34.7.6) přežije pád procesu, ale jeho retry logika
 se po výpadku SQL Serveru sama nerozjede — potřebuje manuální restart služby.
@@ -2520,8 +2520,12 @@ Proč to vadí: pokud SQL Server spadne na delší dobu, spool na disku poroste,
 API bez restartu samo nezačne odbavovat. Odolnost proti výpadku databáze je tak jen částečná — data se
 neztratí, ale obnovení toku vyžaduje lidský zásah.
 
-Stav: **jediný nedořešený bod ze sedmi P1 nálezů.** Zůstává na roadmapě (viz kapitola 20 / HANDOFF §5.5) —
-automatický restart retry smyčky po obnovené konektivitě k SQL, bez nutnosti restartovat celou službu.
+Stav: **opraveno** v `befbeb0` (11.09.2026) – `RetrySpoolLoopAsync` v `IncidentQueueWorker` běží souběžně po celou dobu
+života služby a spool zkouší přehrát s ohraničeným exponenciálním odstupem (5 s → strop 5 min, reset po úspěchu),
+`SemaphoreSlim` drží zpracování sekvenční; čistá funkce `NextRetryDelay` je pokrytá testy (`IncidentQueueWorkerRetryTests`).
+**Nasazeno na SQL_SERVER až 14.09.2026** jako API `65b2235` – tři dny běžela produkce na `8da4843` bez opravy, zatímco
+README i architecture.md ji už popisovaly jako hotovou. Na rozpor upozornila až externí oponentura čtená z GitHubu
+(HANDOFF §5.16). Poučení: „hotovo v repu" ≠ „hotovo v produkci" – živý stav se ověřuje přes `/api/version`, ne z dokumentace.
 
 ### 35.8 Dva vedlejší provozní vylepšení téhož dne
 

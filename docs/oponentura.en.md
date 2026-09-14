@@ -2613,7 +2613,7 @@ Deployment status: commit `11734f2`. The endpoint currently has no caller (the c
 `WhitelistPublisher`), so there was no urgency to redeploy immediately — the fix is complete in the code and
 awaits the API's normal deploy cycle.
 
-### 35.7 Spool retry after a SQL Server outage (open)
+### 35.7 Spool retry after a SQL Server outage (fixed 2026-09-11, deployed 2026-09-14)
 
 What: `IncidentSpool` (see Appendix A, added 4 Sep 2026 — 34.7.6) survives a process crash, but its retry
 logic does not automatically resume after a SQL Server outage — it needs a manual service restart.
@@ -2622,9 +2622,13 @@ Why it matters: if SQL Server goes down for an extended period, the on-disk spoo
 is back the API will not start draining it on its own without a restart. Resilience against a database
 outage is therefore only partial — no data is lost, but resuming the flow needs a human action.
 
-Status: **the one item of the seven P1 findings that remains unresolved.** It stays on the roadmap (see
-chapter 20 / HANDOFF §5.5) — automatically resuming the retry loop once SQL connectivity returns, without
-needing to restart the whole service.
+Status: **fixed** in `befbeb0` (2026-09-11) – `RetrySpoolLoopAsync` in `IncidentQueueWorker` runs concurrently for the
+service's whole lifetime and retries the spool with a bounded exponential backoff (5 s → capped at 5 min, reset on
+success), a `SemaphoreSlim` keeps processing sequential; the pure `NextRetryDelay` function is covered by tests
+(`IncidentQueueWorkerRetryTests`). **Deployed to SQL_SERVER only on 2026-09-14** as API `65b2235` – for three days
+production ran on `8da4843` without the fix while README and architecture.md already described it as done. The gap was
+pointed out only by an external review read from GitHub (HANDOFF §5.16). Lesson: "done in the repo" ≠ "done in
+production" – the live state is verified via `/api/version`, not from the documentation.
 
 ### 35.8 Two side improvements from the same day
 

@@ -54,13 +54,12 @@ Unapproved media are warned or blocked. Designed as a technical control for
 | 44 | **Silent agent = confirmed by ping** – a background `PingMonitorService` checks reachability only for stations that report an agent but are not fresh; "silent" (worth a look) is now distinguished from "off?" (ping doesn't answer, no action) on both Stations and Health checks | ✅ |
 | 45 | **AD sync toggle moved to Settings** – previously only via editing `appsettings.local.json` + restarting the console, now a real switch + interval in the DB (`AdSyncService` always runs, reads the flag on every tick) | ✅ |
 | 46 | **Second opponent-review wave (2026-09-11)** – CSRF protection on the local console's write endpoints (Origin/Referer, fail-closed); `DeviceBlocker.RunPowerShell` now reads streams asynchronously BEFORE `WaitForExit` (the old code could hang forever on a stuck `powershell.exe` regardless of the declared timeout) plus actually kills the process (and its children) on timeout; fixed stale documentation (`architecture.md` still described hostname verification as warn-only, even though the hard 403 has been live since 09-10) | ✅ |
-| 47 | **Third opponent-review wave (2026-09-11)** – `IncidentQueueWorker` no longer needs a manual restart after a SQL outage: `RetrySpoolLoopAsync` runs concurrently for the service's whole lifetime, retries the spool with a bounded exponential backoff (5s → capped at 5 min, resets on success), a `SemaphoreSlim` keeps processing sequential so the retry loop never writes the same batch concurrently with the live queue | ✅ |
+| 47 | **Third opponent-review wave (2026-09-11)** – `IncidentQueueWorker` no longer needs a manual restart after a SQL outage: `RetrySpoolLoopAsync` runs concurrently for the service's whole lifetime, retries the spool with a bounded exponential backoff (5s → capped at 5 min, resets on success), a `SemaphoreSlim` keeps processing sequential so the retry loop never writes the same batch concurrently with the live queue · **deployed to SQL_SERVER 2026-09-14** (API `65b2235`, see HANDOFF 5.16) | ✅ |
 | 48 | **Fourth opponent-review wave (2026-09-11)** – Admin console HTTPS self-cert (no CA, same pattern as agent↔API) + `Admin.Tests` finally runs in CI; `Whitelist:SigningRequired` (default `true`) – a missing signing key is now `Bad`, not just `Off` (found on APP_SERVER: appsettings.local.json had lost the path and nobody noticed); **whitelist rollback/replay protection** – `WhitelistSync` refuses to save a downloaded blob whose `issuedAt` is older than the local copy's (a valid signature protects integrity, not freshness) | ✅ |
 | – | Per-serial **blocklist** + blocking of an already-connected device | 🔜 |
 | – | Signing certificate expiry monitoring | 🔜 |
 | – | **Activity-log retention** – `sp_PurgeActivityLog` exists but nothing calls it | 🔜 |
 | – | ACLs on the server's TLS/RSA keys (last open item from the audit) | 🔜 |
-| – | Spool retry doesn't come back on its own after a SQL outage without a restart (the last remaining P1 finding, 2026-09-10/11) | 🔜 |
 
 ## Architecture
 
@@ -393,8 +392,8 @@ GRANT INSERT, UPDATE ON dbo.WhitelistVersions TO [DOMENA\APP_SERVER$];          
   `GET /api/incidents` (admins only, not every station), `DeviceBlocker` could wrongly report blocking as
   successful (missing try/catch around `Disable-PnpDevice`) and did not try an exact PnP ID match before the
   wildcard fallback, the audit could record `Blocked` before enforcement had actually happened,
-  `POST /api/whitelist/devices` could activate an unsigned whitelist version. One remains (spool retry after a
-  SQL outage needs a manual restart) — see `docs/oponentura.en.md` §35.
+  `POST /api/whitelist/devices` could activate an unsigned whitelist version. The seventh (spool retry after a
+  SQL outage) was fixed in `befbeb0` and deployed 2026-09-14 — see `docs/oponentura.en.md` §35.7.
 
 ## Repo structure
 

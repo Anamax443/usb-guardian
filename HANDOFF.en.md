@@ -26,7 +26,7 @@ The server console aggregates data, keeps a station inventory from AD and shows 
 | **Console authorization** | AD `DOMENA\IT-Admins` + whitelist `DOMENA\it-admin` (+ DB list from Settings) |
 | **Agent↔API encryption** | HTTPS + **thumbprint pinning** (no CA) — verified end-to-end (heartbeat OK from PC-01) |
 | **AD sync** | enabled (`adsync.enabled=true` in DB), 60 min + on-demand; toggleable from Settings since 2026-09-11 (see 5.15) |
-| **Live commit** (2026-09-11, end of day) | **console `00cebc3`** (ping-gated silent agent + PingMonitorService + AD sync toggleable from the UI + fix for Deploy-Console.cmd/Deploy-Api.cmd, see 5.14/5.15) · **API `8da4843`** (P1 steps 1–2 deployed – GET /api/incidents admins-only, hostname 403; steps 3–6 either agent-only or not urgent to deploy, see 5.13/5.15) · **agent beta+stable `924b9b8`** (unchanged – steps 3–5 of the P1 list are waiting for a joint beta wave). Security audit + remediation 2026-09-04 — see 5.12; deeper review pass 2026-09-10–11 — see 5.13/5.15 |
+| **Live commit** (2026-09-14) | **console `00cebc3`** (ping-gated silent agent + PingMonitorService + AD sync toggleable from the UI + fix for Deploy-Console.cmd/Deploy-Api.cmd, see 5.14/5.15; HTTPS from `ff53654` not deployed yet) · **API `65b2235`** (deployed 2026-09-14 – spool retry `befbeb0`, whitelist endpoint no longer creates an unsigned version `11734f2`, LastPing columns `4defcfe`; see 5.16) · **agent beta+stable `924b9b8`** (unchanged – steps 3–5 of the P1 list are waiting for a joint beta wave). Security audit + remediation 2026-09-04 — see 5.12; deeper review pass 2026-09-10–11 — see 5.13/5.15; external review verified against the live state 2026-09-14 — see 5.16 |
 | **Agent rollout – the routine that works** | package → archive `…\USBGuardianAgentVersions\<commit>` → **beta to a single station** (temporarily overwritten `update-beta.txt`) → verify → beta to the rest → only then **stable**. Log `…\deploy\update-agent.log`; the console's "Agent version" only catches up on the next heartbeat (≤2 min), so right after a rollout it still shows the old one |
 | **Console – pages** | Overview (filter+aggregation+sort, capacity, **CSV export + manager report with charts**), Stations (AD inventory + "Agents gone silent" + "Request data" + **Deployment / bulk exclude-include**), Whitelist (**capacity + catalog filter + auto-published signed version**), Settings (enforcement/access/email/alerts/monitoring/auto-enrollment+default PC/retention/**Maintenance: reload settings**), **Database**, **Health checks**, Documentation (+HTML animation) |
 | **Enforcement (P1-3)** | **whitelist 1:1** (server-side auto-sign, internal RSA key on APP_SERVER) → **enforcement** server→agent (`policy.enforce` in heartbeat) → **break-glass** (local console 5080, offline, logged, cleared on sync) + **auto-re-enable** + whitelist reconciliation. Local console: service restart, break-glass, whitelist list |
@@ -546,7 +546,7 @@ Continuing from 5.13/5.14 the same day:
    deploy this.
 
 **Still remaining from the P1 list:** step 7 – the spool retry does not restart itself after a SQL
-outage without a service restart.
+outage without a service restart. *(Fixed the same day in `befbeb0`, but deployed to SQL_SERVER only on 2026-09-14 – until then this document said "remaining" while the code said "done"; see 5.16.)*
 
 **"Silent agents" consistency (`6e5d6d2`):** the check on the Health checks page computed silence
 purely from `LastSeen`, independently of the 5.14 fix on Stations – a second, independent spot with
@@ -586,7 +586,64 @@ since step 2 – steps 4–6 don't affect API/console enforcement apart from the
 `11734f2`, which was not urgent to deploy), agent `924b9b8` (stable+beta, unchanged – steps 3–5 are
 waiting for a joint beta wave).
 
+### 5.16 External review verified against the live state + API `65b2235` deployment (2026-09-14)
+
+The user brought an external review (read from GitHub only: `architecture.md`, `HANDOFF.md`, `README.md`) suspecting
+that "some of the information from clients does not reach the central console". Every claim was verified against the
+repo **and the live environment**, not just against the documentation:
+
+| Review claim | Verification 2026-09-14 |
+|---|---|
+| Live API runs `8da4843`, `RetrySpoolLoopAsync` is not in production | **Confirmed** – `/api/version` → `8da4843`; the retry arrived only in `befbeb0`, seven commits after the live version |
+| Documentation is ahead of production | **Confirmed** – HANDOFF last changed in `b39f6e1` (before the fix) and still said "step 7 remaining"; README had row 47 ✅ and row 63 🔜 about the same thing |
+| `EnsureCreatedAsync` runs before `app.RunAsync()`, the API has no `/health` | **Confirmed** (`Program.cs`) – still open, see next steps |
+| The console cannot tell a heartbeat from incident delivery | **Confirmed** – `Computer` only has `LastSeen`, written by both `HeartbeatController` and `IncidentQueueWorker`. The user independently the same day: "nowhere in the console can I see when the JSON from clients was last pulled" |
+| The agent has no sequence number nor server ACK | **Confirmed** |
+| Deploy reports success only from "service running" | **Confirmed** – `Deploy-Api.cmd` does not verify the commit after start |
+| Something is stuck in the spool | **Not confirmed** – `queue/status` 0/0 before and after the deployment. The scenario is real, but was not happening |
+
+What the review could not see from GitHub: the "Component versions" check in `HealthService` already exists (warns on
+multiple agent versions, but without an expected version or counts); migration `10_ping_status.sql` was already in the
+DB (console `00cebc3` was running on it).
+
+**API `65b2235` deployment** – the API delta against `8da4843` is three commits (`befbeb0` spool retry, `11734f2`
+whitelist endpoint no longer creates an unsigned version, `4defcfe` `LastPingOk/LastPingAt` columns); API tests 21/21,
+CI green.
+- `dotnet publish -c Release -r win-x64 --self-contained` → `D:\deploy\USBGuardianApi` → `robocopy /MIR` into the staging
+  folder `\\APP_SERVER\C$\Apps\USBGuardianApiPublish` (433 files; mirroring removed 17 leftover `runtimes\*` files from
+  an earlier non-flattened publish; the deploy script excludes `appsettings.local.json` via `/XF`).
+- The user ran `schtasks /S APP_SERVER /Run /TN "\USBGuardian\USBGuardian-ApiDeploy"` (9:59:56) → `Last Result: 0`,
+  log "HOTOVO: sluzba bezi (1 pokusu)". The 2026-09-11 start incident (5.13) did not repeat.
+- **Verified:** `/api/version` → `{"commit":"65b2235","startedAt":"2026-09-14T08:00:10Z"}`; `queue/status` 0/0;
+  console `/api/health` → 0 bad · 1 warn (station coverage 16/205) · 13 ok · 3 off, including "API for agents" ok
+  (514 ms), "Incident queue" empty, "Silent agents" 0 of 16, "Component versions" console `00cebc3` · API `65b2235` ·
+  agents `924b9b8`.
+
+**Side finding the same day:** auto-enrollment (live mode) wrote 10 targets and `Deploy-AgentFleet.ps1` missed all of
+them in the morning – 5 targets `Access denied` (they are **servers**, where the deploy gMSA is not a local admin – it is
+only in the workstation admins group), 5 stations offline. Nothing was copied, audit in `deploy\last.csv`. Open:
+auto-enrollment does not filter out servers (OU / `OperatingSystem`), so it will keep trying to install on them.
+
+**Where to find "when did data last arrive from a station" today:** only Activity → search the hostname → the
+`incidents` source entry "přijato N incidentů (soubor …)". Neither Stations nor Health checks have a per-station value –
+that is item 1 below.
+
+**Next steps from the review (one item = one deployment + one verification, in this order):**
+1. Per-station "last received batch" (`Computer.LastIncidentBatchAt` + count) separate from `LastSeen`, on Stations and
+   in Health checks (heartbeat × data traffic light). Verification: a station with a heartbeat but no batch lights up
+   differently from a healthy one.
+2. `EnsureCreatedAsync` out of the critical startup path (Kestrel up immediately, DB init with retry in the background)
+   + `/health/live` and `/health/ready` on the API. Verification: start the API with SQL stopped → port 5443 listens,
+   `/health/ready` returns 503.
+3. `Deploy-Api.cmd`: success = service running **and** `/api/version` returns the expected commit. Verification: a deploy
+   with a wrong staging folder ends non-zero.
+4. "Component versions": expected stable version + station counts per version. Verification: one station on another
+   version = warn with the count.
+5. Per-agent sequence + server ACK (the client knows up to which number the server confirmed the DB write).
+6. Integration test agent → API → SQL outage → recovery (100 batches, 0 lost, 0 duplicates).
+
 ### 5.5 Roadmap (pending)
+- **From the 2026-09-14 review (see 5.16, in this order):** per-station "last received batch" separate from `LastSeen`; `EnsureCreatedAsync` out of the startup critical path + `/health/live`; `Deploy-Api.cmd` verifies the commit after start; expected version + counts in "Component versions"; agent↔server sequence/ACK; e2e SQL-outage test.
 - **Monitoring of signing cert expiry** – `CN=powershell.domena.loc` valid until 2028-06-17; alert via e-mail from the console.
 - **"Everything on the server APP_SERVER":** move the API runtime from SQL_SERVER to APP_SERVER (console+API on APP_SERVER, DB on SQL_SERVER, agent repoint to
   `https://APP_SERVER_IP:5443`) → PC-01 really not needed. **Build/deploy artifacts are on D:\deploy (locally), not on PC-01.**

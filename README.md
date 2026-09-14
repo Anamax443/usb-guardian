@@ -54,13 +54,12 @@ technické opatření pro **NIS2 / zákon 181/2014 Sb. / ISO 27001**.
 | 44 | **Zmlklý agent = potvrzený ping** – `PingMonitorService` na pozadí ověřuje dostupnost jen u stanic, co hlásí agenta a nejsou čerstvé; „zmlklý" (stojí za pozornost) odlišeno od „vypnuto?" (ping neodpovídá, bez akce) na Stanicích i v Kontrolách | ✅ |
 | 45 | **AD sync přepínatelný z Nastavení** – dřív jen úpravou `appsettings.local.json` + restart konzole, teď skutečný přepínač + interval v DB (`AdSyncService` běží vždy, čte příznak při každém tiku) | ✅ |
 | 46 | **Druhá vlna oponentury (11.09.2026)** – CSRF ochrana zapisujících endpointů lokální konzole (Origin/Referer, fail-closed); `DeviceBlocker.RunPowerShell` čtení asynchronní PŘED `WaitForExit` (starý kód mohl na zaseknutém `powershell.exe` viset navěky bez ohledu na deklarovaný timeout) + skutečné zabití procesu (i dětí) po vypršení; oprava zastaralé dokumentace (`architecture.md` ještě popisovala hostname ověření jako warn-only, ačkoli tvrdé 403 běží od 10.09.) | ✅ |
-| 47 | **Třetí vlna oponentury (11.09.2026)** – `IncidentQueueWorker` už nepotřebuje ruční restart po výpadku SQL: `RetrySpoolLoopAsync` běží souběžně po celou dobu provozu, zkouší přehrát spool s ohraničeným exponenciálním odstupem (5 s → strop 5 min, reset po úspěchu), `SemaphoreSlim` drží zpracování sekvenční, ať retry nikdy nezapíše stejný batch souběžně s živou frontou | ✅ |
+| 47 | **Třetí vlna oponentury (11.09.2026)** – `IncidentQueueWorker` už nepotřebuje ruční restart po výpadku SQL: `RetrySpoolLoopAsync` běží souběžně po celou dobu provozu, zkouší přehrát spool s ohraničeným exponenciálním odstupem (5 s → strop 5 min, reset po úspěchu), `SemaphoreSlim` drží zpracování sekvenční, ať retry nikdy nezapíše stejný batch souběžně s živou frontou · **nasazeno na SQL_SERVER 14.09.2026** (API `65b2235`, viz HANDOFF 5.16) | ✅ |
 | 48 | **Čtvrtá vlna oponentury (11.09.2026)** – Admin konzole HTTPS self-cert (bez CA, stejný vzor jako agent↔API) + `Admin.Tests` konečně běží v CI; `Whitelist:SigningRequired` (default `true`) – chybějící podpisový klíč je teď `Bad`, ne jen `Off` (nález na APP_SERVER: appsettings.local.json cestu ztratil, nikdo si toho nevšiml); **rollback/replay ochrana whitelistu** – `WhitelistSync` odmítne uložit stažený blob se starším `issuedAt`, než má lokální kopie (platný podpis chrání integritu, ne čerstvost) | ✅ |
 | – | Per-serial **blocklist** + blokace už-připojeného média | 🔜 |
 | – | Monitoring expirace podpisového certu | 🔜 |
 | – | **Retence deníku** – `sp_PurgeActivityLog` existuje, ale nikdo ji nevolá | 🔜 |
 | – | ACL na TLS/RSA klíče na serveru (poslední otevřená položka z auditu 04.09.) | 🔜 |
-| – | Spool retry se po SQL výpadku sám nerozjede bez restartu (poslední P1 nález, 10.–11.09.) | 🔜 |
 
 ## Architektura
 
@@ -385,8 +384,8 @@ GRANT INSERT, UPDATE ON dbo.WhitelistVersions TO [DOMENA\APP_SERVER$];          
   `GET /api/incidents` (jen admini, ne každá stanice), `DeviceBlocker` mohl chybně vyhodnotit blokování
   jako úspěšné (chybějící try/catch kolem `Disable-PnpDevice`) a nezkoušel přesnou shodu PnP ID před
   wildcard fallbackem, audit mohl zaznamenat `Blocked` dřív, než enforcement doopravdy proběhl,
-  `POST /api/whitelist/devices` mohl aktivovat nepodepsanou verzi whitelistu. Jeden zbývá (spool retry
-  po SQL výpadku vyžaduje ruční restart) — viz `docs/oponentura.md` kap. 35.
+  `POST /api/whitelist/devices` mohl aktivovat nepodepsanou verzi whitelistu. Sedmý (spool retry
+  po SQL výpadku) opraven v `befbeb0` a nasazen 14.09.2026 — viz `docs/oponentura.md` kap. 35.7.
 
 ## Repo struktura
 
