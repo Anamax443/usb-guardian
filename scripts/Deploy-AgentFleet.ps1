@@ -115,7 +115,12 @@ $perHost = {
                 $stq = (& sc.exe "\\$h" query $ServiceName 2>&1 | Out-String)
             } while ($stq -notmatch 'STOPPED' -and $stopTries -lt 20)
             if ($stq -notmatch 'STOPPED') {
-                throw "sluzba se pred reinstalem do 10 s nezastavila - nekopiruji (zustala by pulka nove verze)"
+                # Text se ukazuje technikovi v konzoli (Poslední nasazení / Aktivita) - musí říct
+                # nejen CO se stalo, ale i CO S TÍM: zaseklý proces na stanici řeší jen zásah přímo
+                # tam, žádné čekání v tomhle skriptu to samo nespraví.
+                throw "sluzba se do 10 s nezastavila (mozna zasekly proces USBGuardian.exe) - postup: " +
+                      "pripoj se na stanici, v Sprave uloh ukonci USBGuardian.exe (nebo stanici restartuj), " +
+                      "pak zkus Nasadit ted znovu; nekopirovalo se nic, aby nezustala pulka verze"
             }
             # Od tady je sluzba vedome zastavena - kdyby cokoliv nize (robocopy, sc config, ...)
             # spadlo, catch nize se MUSI pokusit ji znovu nastartovat. Jinak byl reinstall stanici,
