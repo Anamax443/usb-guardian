@@ -181,7 +181,7 @@ else
                         @* Jen u stanic, co teď agenta nemají - jakmile Reports(c), poslední pokus je
                            stará historie (třeba SKIP z doby, než se dneska nainstaloval jinak) a jako
                            varování jen plete, viz CERNYSW11 (16.09.2026). *@
-                        @{ var dep = Reports(c) ? null : DeployInfo(c); }
+                        @{ var dep = DeployOutcome.ShouldShowHistory(Reports(c)) ? DeployInfo(c) : null; }
                         @if (dep is null)
                         {
                             <span class="muted">—</span>
@@ -367,15 +367,10 @@ else
     private int _deployErrors;
 
     private DeployStatus? DeployInfo(Computer c) => _lastDeploy.GetValueOrDefault(c.Hostname);
-    // Chyba se počítá jen dokud stanice agenta nemá - jakmile Reports(c), i kdyby poslední
-    // pokus skončil FAIL/SKIP, dneska tam agent evidentně běží a historie už nic neříká.
-    private bool DeployFailed(Computer c) => !Reports(c) && DeployInfo(c)?.Level == "error";
-    private static string DeployPillClass(DeployStatus d) => d.Level switch
-    {
-        "error" => "bad",
-        "warn"  => "warn",
-        _       => "ok",
-    };
+    // Čisté rozhodnutí (reports() → potlačit starou historii) žije v DeployOutcome.cs -
+    // testovatelné odděleně, viz DeployOutcomeTests.cs.
+    private bool DeployFailed(Computer c) => DeployOutcome.IsRelevantError(Reports(c), DeployInfo(c)?.Level);
+    private static string DeployPillClass(DeployStatus d) => DeployOutcome.PillClass(d.Level);
     private static string Kratce(string s, int max = 60) => s.Length <= max ? s : s[..max] + "…";
 
     // Hláška ze skriptu radí "-ReinstallExisting" - to je CLI přepínač, ne něco, co jde v konzoli
