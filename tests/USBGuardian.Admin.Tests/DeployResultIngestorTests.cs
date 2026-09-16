@@ -65,7 +65,7 @@ public class DeployResultIngestorTests
     [InlineData("SKIP", ActivityLevel.Warn)]
     [InlineData("STARTED?", ActivityLevel.Warn)]
     [InlineData("FAIL", ActivityLevel.Error)]
-    [InlineData("OFFLINE", ActivityLevel.Error)]
+    [InlineData("OFFLINE", ActivityLevel.Warn)]
     public void Maps_each_deploy_status_to_the_right_activity_level(string status, ActivityLevel expected)
     {
         Assert.Equal(expected, DeployResultIngestor.LevelForStatus(status));

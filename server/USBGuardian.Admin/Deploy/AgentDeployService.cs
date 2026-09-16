@@ -87,6 +87,12 @@ public class AgentDeployService : BackgroundService
             cfg.ExcludeHosts.Contains(h, StringComparer.OrdinalIgnoreCase) ? false :
             cfg.DefaultEnroll).ToList();
 
+        // Zamichat PRED Take(): SQL dotaz vyse nema ORDER BY, takze bez zamichani
+        // vraci porad stejnych prvnich N stanic. Kdyz je nektera z nich trvale
+        // nedostupna/rozbita, natrvalo blokuje vsechny MaxPerRun sloty a zbytek
+        // flotily se nikdy nedostane na radu (hlaseno 16.09.2026 - "porad dokola
+        // zkousi nektere, ktere maji problem").
+        ShuffleInPlace(targets, Random.Shared);
         targets = targets.Take(Math.Max(1, cfg.MaxPerRun)).ToList();
 
         if (targets.Count == 0)
@@ -131,6 +137,18 @@ public class AgentDeployService : BackgroundService
         catch (Exception ex)
         {
             return $"{Stamp()} CHYBA zápisu targets souboru: {ex.Message}";
+        }
+    }
+
+    // ── čisté, testovatelné ────────────────────────────────────
+    // Fisher-Yates in-place. Random je injektovany kvuli testum (seedovatelny),
+    // v RunOnceAsync se pouziva Random.Shared.
+    public static void ShuffleInPlace<T>(IList<T> list, Random rng)
+    {
+        for (var i = list.Count - 1; i > 0; i--)
+        {
+            var j = rng.Next(i + 1);
+            (list[i], list[j]) = (list[j], list[i]);
         }
     }
 

@@ -98,11 +98,14 @@ public static class DeployResultIngestor
 
     // ── čisté, testovatelné ──────────────────────────────────────
 
+    // OFFLINE neni chyba nasazeni - stanice jen zrovna neodpovida na ping (vypnuta,
+    // mimo VPN...), nic se nepokazilo. Skutecna chyba je FAIL (napr. chybejici
+    // opravneni - "access denied" na cilovem sdileni), tu resit tridit jako Error.
     public static ActivityLevel LevelForStatus(string status) => status switch
     {
-        "OK" or "WOULD-DEPLOY" => ActivityLevel.Info,
-        "SKIP" or "STARTED?"   => ActivityLevel.Warn,
-        _                      => ActivityLevel.Error,   // FAIL, OFFLINE, cokoliv neznámého
+        "OK" or "WOULD-DEPLOY"            => ActivityLevel.Info,
+        "SKIP" or "STARTED?" or "OFFLINE" => ActivityLevel.Warn,
+        _                                 => ActivityLevel.Error,   // FAIL, cokoliv neznámého
     };
 
     public static string? ExtractThrowLine(string transcript)
