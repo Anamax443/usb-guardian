@@ -72,6 +72,7 @@ $perHost = {
 
     $r = [ordered]@{ Host = $h; Status = ''; Detail = ''; Ts = (Get-Date -Format 'HH:mm:ss') }
     $share = "\\$h\C`$\Program Files\USBGuardian"
+    $stoppedForReinstall = $false
 
     # Vysvetleni robocopy exit kodu (bitova maska, funguje bez ohledu na jazyk
     # OS - robocopy sam pise hlasky v lokalizaci serveru, tohle ne).
@@ -116,6 +117,11 @@ $perHost = {
             if ($stq -notmatch 'STOPPED') {
                 throw "sluzba se pred reinstalem do 10 s nezastavila - nekopiruji (zustala by pulka nove verze)"
             }
+            # Od tady je sluzba vedome zastavena - kdyby cokoliv nize (robocopy, sc config, ...)
+            # spadlo, catch nize se MUSI pokusit ji znovu nastartovat. Jinak byl reinstall stanici,
+            # ktera predtim fungovala, horsi nez zadny zasah (predtim reinstall sluzbu vubec
+            # nezastavoval, takze selhany robocopy nechal bezet PUVODNI funkcni sluzbu dal).
+            $stoppedForReinstall = $true
         }
 
         # Vystup se NEzahazuje (drivejsi | Out-Null) - je to jediny zdroj informace PROC
@@ -175,7 +181,15 @@ $perHost = {
         if ($st -match 'RUNNING') { $r.Status = 'OK'; $r.Detail = ($(if ($exists) { 'reinstalled' } else { 'installed' }) + '; ' + $extra) }
         else                      { $r.Status = 'STARTED?'; $r.Detail = 'sluzba vytvorena, stav nepotvrzen RUNNING; ' + $extra }
     }
-    catch { $r.Status = 'FAIL'; $r.Detail = $_.Exception.Message }
+    catch {
+        $r.Status = 'FAIL'; $r.Detail = $_.Exception.Message
+        if ($stoppedForReinstall) {
+            # Best-effort znovunastartovani - at uz na disku zustal stary nebo pulka
+            # noveho balicku, stanice bez bezici sluzby vubec je horsi nez tohle.
+            & sc.exe "\\$h" start $ServiceName 2>&1 | Out-Null
+            $r.Detail += '; po chybe zkusen restart sluzby'
+        }
+    }
     return [pscustomobject]$r
 }
 
