@@ -178,7 +178,10 @@ else
                     <td>@(string.IsNullOrEmpty(c.AgentVersion) ? "—" : c.AgentVersion)</td>
                     <td>@(c.LastSeen is null ? "—" : c.LastSeen.Value.ToLocalTime().ToString("dd.MM.yyyy HH:mm"))</td>
                     <td>
-                        @{ var dep = DeployInfo(c); }
+                        @* Jen u stanic, co teď agenta nemají - jakmile Reports(c), poslední pokus je
+                           stará historie (třeba SKIP z doby, než se dneska nainstaloval jinak) a jako
+                           varování jen plete, viz CERNYSW11 (16.09.2026). *@
+                        @{ var dep = Reports(c) ? null : DeployInfo(c); }
                         @if (dep is null)
                         {
                             <span class="muted">—</span>
@@ -364,7 +367,9 @@ else
     private int _deployErrors;
 
     private DeployStatus? DeployInfo(Computer c) => _lastDeploy.GetValueOrDefault(c.Hostname);
-    private bool DeployFailed(Computer c) => DeployInfo(c)?.Level == "error";
+    // Chyba se počítá jen dokud stanice agenta nemá - jakmile Reports(c), i kdyby poslední
+    // pokus skončil FAIL/SKIP, dneska tam agent evidentně běží a historie už nic neříká.
+    private bool DeployFailed(Computer c) => !Reports(c) && DeployInfo(c)?.Level == "error";
     private static string DeployPillClass(DeployStatus d) => d.Level switch
     {
         "error" => "bad",
