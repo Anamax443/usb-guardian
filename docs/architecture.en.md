@@ -106,6 +106,8 @@ must not affect admin use). Reads/writes SQL_SERVER, models reused from the API 
 | `AdSyncService` | Timer over `AdSyncRunner` – **always runs** as a hosted service, reads `adsync.enabled`/`adsync.intervalMinutes` from `AppSettings` on every tick (previously from config at startup only, see [AD sync](#ad-sync)) |
 | `PingMonitorService` | Timer (`ping.intervalMinutes`, default 5 min) – pings only stations that report an agent but aren't fresh; stores the result into `Computer.LastPingOk`/`LastPingAt` (see [Silent agent vs. a powered-off PC](#silent-agent-vs-a-powered-off-pc-ping)) |
 | `StationStatus` | Pure, tested classification of a station's status (Silent/ProbablyOff) from three signals – shared between the Stations page and the "Silent agents" check |
+| `DeployOutcome` | Pure, tested logic for "does the latest deploy-run record still count as an error, or is it just stale history for a station that has come back to life" – shared between the "Deploy errors" tile and the "Last deployment" column on Stations (see [Deploy errors and the last attempt](#deploy-errors-and-the-last-attempt-stations)) |
+| `IncidentDateRange` | Pure, tested function for the incident **From–To** range – shared between the Overview page and both export endpoints, so the CSV/report always see exactly the same period as the screen |
 | `AppInfo` | Build commit hash (MSBuild `git rev-parse` stamp) → footer + `:4200/api/version` |
 
 **Authorization:** Windows Auth (Negotiate). Access only for members of `Authorization:AdminGroups`
@@ -153,6 +155,39 @@ The classification is factored into a pure, unit-tested `StationStatus.cs` – u
 (the "Silent agents" tile + the communication pill) **and** by the "Silent agents" check on the Health checks
 page, so the two necessarily agree (previously each computed its own, independent – and inconsistent – logic
 straight off `LastSeen`).
+
+### Deploy errors and the last attempt (Stations)
+
+After every run on `APP_SERVER`, `Deploy-AgentFleet.ps1` writes `last.csv`/`last.log` (a manual "Deploy now" run
+writes to `manual-last.csv`/`.log` instead – separate files so auto-enrollment and a manual click never
+overwrite each other's result). `DeployResultIngestor` reads them and writes each row into the **activity log**
+(`Source="deploy-run"`, `Hostname` = the target station) – the same place the Activity page reads its history
+from. The Stations page takes only the **latest** record per station out of that:
+
+```
+last.csv (Deploy-AgentFleet.ps1)      last.log (a transcript – only when the script crashed BEFORE Export-Csv)
+        ↓ DeployResultIngestor
+dbo.ActivityLog (Source="deploy-run", Hostname, Level, Message)
+        ↓ the newest record PER station
+Computers.razor: "Last deployment" column · "Deploy errors" tile
+```
+
+**OFFLINE is not a deploy error (2026-09-16):** `DeployResultIngestor.LevelForStatus` used to map `OFFLINE` (the
+station simply isn't answering ping right now – nothing actually broke) to `Error`, the same as a real `FAIL`
+(e.g. missing permissions on the target share). The "Deploy errors" tile ended up full of powered-off laptops
+instead of real problems. `OFFLINE` (along with `SKIP`/`STARTED?`) is now `Warn`; `Error` stays reserved for
+`FAIL`/anything unrecognized.
+
+**History hides itself once a station reports an agent (real incident CERNYSW11, 2026-09-16):** the column and
+the tile used to show the latest `deploy-run` record regardless of whether the agent had since come up normally
+– stale `SKIP`/`FAIL` history confused an operator looking at a station that was, in fact, fine.
+`DeployOutcome.ShouldShowHistory` returns `false` as soon as a station `Reports(c)` (reports an agent); the
+column then shows "—" and the record no longer counts toward the "Deploy errors" tile. The pure decision logic
+lives in `DeployOutcome.cs` (kept apart from `Computers.razor`), tests in `DeployOutcomeTests.cs`.
+
+Both tiles – "Missing agent" (Overview and Stations) and "Deploy errors" (Stations) – also exclude permanently
+ignored stations (`DeployIgnored`, the "Ignore" column): a deliberate exclusion by an operator should not count
+as an open problem.
 
 ## Agent local admin console
 
@@ -361,7 +396,7 @@ is reliable** – a generated source file `GitCommit.g.cs` is rewritten only whe
 
 ## Tests and CI
 
-Until 2026-09-04 the repo had no C# tests at all (just one JS test for the UI). Today: **90 tests** across
+Until 2026-09-04 the repo had no C# tests at all (just one JS test for the UI). Today: **111 tests** across
 three projects, all xUnit, no mock framework – either real instances routed into a temp directory (agent) or
 pure functions with no infrastructure dependency (API, console):
 
@@ -369,7 +404,7 @@ pure functions with no infrastructure dependency (API, console):
 |---------|---------------|-------|
 | `tests/USBGuardian.Agent.Tests` | `WhitelistChecker`, `PolicyEnforcer` (whitelist expiry, decision logic), `DeviceBlocker` (interpreting the block script's output, actually timing out and killing a stuck PowerShell), `LocalConsoleService` (CSRF Origin/Referer check), `WhitelistSync` (rollback/replay protection – `IsRollback`/`TryGetIssuedAt`) | 29 |
 | `tests/USBGuardian.Api.Tests` | `IncidentSpool` (write/read/delete/quarantine of a corrupt file), the dedup key and bounded exponential retry backoff (`IncidentQueueWorker`), `CallerIdentity` (parsing a Windows identity) | 21 |
-| `tests/USBGuardian.Admin.Tests` | `StationStatus`, `Reachability`, `DeployResultIngestor` – the console's pure decision logic (station state, reachability, deploy-result processing); `HealthService.EvaluateSigningKey` – the "Whitelist signing key" check incl. `Whitelist:SigningRequired` (unset×required, missing file, unreadable, OK) | 40 |
+| `tests/USBGuardian.Admin.Tests` | `StationStatus`, `Reachability`, `DeployResultIngestor` – the console's pure decision logic (station state, reachability, deploy-result processing); `HealthService.EvaluateSigningKey` – the "Whitelist signing key" check incl. `Whitelist:SigningRequired` (unset×required, missing file, unreadable, OK); `AgentDeployService.ShuffleInPlace` (shuffling auto-enrollment targets); `DeployOutcome` (when the latest deploy-run record still counts as an error); `IncidentDateRange.Resolve` (the From–To range incl. `9999-12-31` without crashing) | 61 |
 
 The API and console tests reach into `internal` methods via `InternalsVisibleTo` (`AssemblyInfo.cs` in all three
 projects) – this works around the fact that, e.g., a `WindowsIdentity`/`HttpListenerContext`/a real
@@ -503,10 +538,33 @@ would fail, and the station would be left with a **mix of versions** while the d
 
 | Step | Script | Task on `APP_SERVER` | Account |
 |------|--------|----------------|---------|
-| Clean install on stations without an agent | `Deploy-AgentFleet.ps1` | `USBGuardian-AutoDeploy` | `gmsa-deploy$` |
+| Clean install on stations without an agent (auto-enrollment) | `Deploy-AgentFleet.ps1` | `USBGuardian-AutoDeploy` | `gmsa-deploy$` |
+| Manual "Deploy now" (install or reinstall an existing service) | `Deploy-AgentFleet.ps1 -ReinstallExisting` | `USBGuardian-ManualInstall` | `gmsa-deploy$` |
 | Update of a deployed agent | `Update-Agent.cmd` | `USBGuardian-UpdateAgent` (+ `-UpdateAgentBeta`) | `gmsa-deploy$` |
 | Deployment of the API to its server | `Deploy-Api.cmd` | `USBGuardian-ApiDeploy` | `gmsa-srvdeploy$` |
 | Deployment of the console to `APP_SERVER` | `Deploy-Console.cmd` | — (run manually over UNC, no scheduled task) | a personal admin account with access to `APP_SERVER` |
+
+> **Reinstalling an existing service (2026-09-16):** `Deploy-AgentFleet.ps1` used to just `SKIP` a station with
+> an existing service ("sluzba uz existuje (pouzij -ReinstallExisting)") – the flag existed, but nothing in the
+> console ever passed it, so a reinstall only worked from the command line. The "Deploy now" button on Stations
+> now **always** sends it; the UI message "SKIP: use -ReinstallExisting" was confusing (it named a CLI flag, not
+> something clickable in the console) – reworded into a pointer at the button itself (`FriendlyDeployMessage` in
+> `Computers.razor`). The reinstall itself now **stops** the running service first (`sc stop`, waits for
+> `STOPPED` for up to 10 s) **BEFORE** copying – previously it went straight to `robocopy`, which on a locked
+> `.exe` could leave a station with a mix of old and new files.
+>
+> **A security regression in the same change (2026-09-16):** stopping the service with no safety net was a step
+> backwards – if `robocopy` then failed, the catch block never restarted the service, leaving the station with
+> **no running protection at all**, worse than not attempting the reinstall in the first place (previously the
+> service was never stopped, so a failed copy left the ORIGINAL working version still running). The catch block
+> now makes a **best-effort `sc start`** whenever the reinstall managed to stop the service, whether the disk
+> ended up with the old package or only half of the new one. If the service does not stop within 10 s (a stuck
+> process), the message now gives the technician a **concrete next step** (log on to the station, kill
+> `USBGuardian.exe` or reboot it, try again) instead of just a technical description.
+>
+> Outside git (production, 2026-09-16): the `USBGuardian-ManualInstall` scheduled task on `APP_SERVER` was
+> reconfigured to always pass `-ReinstallExisting`; the script was re-signed through the internal signing tool
+> (see "PS scripts must be signed" above – this one is a `.ps1`, unlike the `.cmd` scripts below).
 
 All three `.cmd` scripts follow the same pattern: **stop the service → wait for `STOPPED` → copy (without
 `*.local.json`) → start → verify `RUNNING`**; the log lives in `C:\ProgramData\USBGuardian\deploy\`.
@@ -604,8 +662,8 @@ The `AppSettings` table (key/value, migration 06) managed from Settings; `Access
 ```
 AdSync → Computers (who has no agent)
 AgentDeployService (24/7, default OFF + dry-run)
-   ↓ live mode
-deploy.targetsFile (the list of stations without an agent)   [console = machine account, write only]
+   ↓ live mode: filter (allow/include/exclude, see below) → shuffle (Fisher-Yates) → Take(deploy.maxPerRun)
+deploy.targetsFile (the shuffled pick of stations without an agent)  [console = machine account, write only]
    ↓ read by
 Scheduled task on APP_SERVER under gMSA gmsa-deploy$              [least-privilege: admin on clients only]
    ↓ Deploy-AgentFleet.ps1
@@ -617,17 +675,31 @@ by a separate task under the deploy account. **Environment (AXIMA): PS scripts m
 with the prod cert `CN=powershell.domena.loc` + the publisher in `LocalMachine\TrustedPublisher`; before
 signing, CRLF + UTF-8 BOM. Setup: [auto-deploy-setup.en.md](auto-deploy-setup.en.md).
 
+> **Shuffling targets before `Take` (2026-09-16):** the SQL query for stations without an agent has no
+> `ORDER BY` – without shuffling, `Take(deploy.maxPerRun)` returned the **same first N** stations on every run
+> (every `deploy.intervalMinutes`). A handful of permanently broken stations at the front of that order
+> therefore forever occupied every slot, and the rest of the fleet never got a turn – 188 of 228 stations had
+> no agent in practice, reported 2026-09-16 ("it keeps trying the same broken ones over and over").
+> `AgentDeployService.ShuffleInPlace` (Fisher-Yates, `Random.Shared` in production) shuffles the list **before**
+> `Take`, so the odds of being picked spread across the whole queue over time. A pure function; `Random` is
+> injected so tests can seed it (`AgentDeployServiceTests.cs`).
+
 ## Console – what the pages do
 
 - **Overview** – a cross-page tile summary + filter (period/action/full-text) + aggregation (GroupBy over an
-  anonymous type → in-memory map) + an "Approved" column per the active whitelist. The "Detailed" table has
-  **sortable headers** (sorting in the DB via a query string, before `Take(200)`).
+  anonymous type → in-memory map) + an "Approved" column per the active whitelist. An explicit **From–To**
+  calendar-date range takes precedence over the "last N days" chips – for a reproducible audit/compliance
+  export ("records for March"), see below. The "Detailed" table has **sortable headers** (sorting in the DB via
+  a query string, before `Take(200)`).
 - **Stations** – AD inventory, filter, AD path (OU), a communication icon/pill (by the freshness of `LastSeen`
   **and** a confirmed ping, see [Silent agent vs. a powered-off PC](#silent-agent-vs-a-powered-off-pc-ping)),
   the "Silent agents" tile (reports an agent, isn't fresh, **and** a ping confirms the PC is up – otherwise just
-  the "off?" pill, no action needed), the "Request data" button (row/bulk) → ReportNow. The **"Deployment"**
-  column on stations without an agent = include/exclude from auto-enrollment (an exception to
-  `deploy.defaultEnroll`); in bulk via "Exclude/Include all".
+  the "off?" pill, no action needed), the "Deploy errors" tile + the "Last deployment" column (the outcome of
+  the latest install attempt for that station, suppressed for stations that already report an agent – see
+  [Deploy errors and the last attempt](#deploy-errors-and-the-last-attempt-stations)), the "Request data" button
+  (row/bulk) → ReportNow. The **"Deployment"** column on stations without an agent = include/exclude from
+  auto-enrollment (an exception to `deploy.defaultEnroll`) plus a "Deploy now" button (installs/reinstalls
+  immediately, regardless of the enrollment setting); in bulk via "Exclude/Include all".
 - **Whitelist** – serial-only entry + VID/PID backfill from incidents + import + inline edit + the `IsActive`
   checkbox. Media **capacity** is pulled from incidents (max `SizeBytes` per serial, display-only – it is not
   kept on the whitelist).
@@ -645,14 +717,25 @@ signing, CRLF + UTF-8 BOM. Setup: [auto-deploy-setup.en.md](auto-deploy-setup.en
   "How it works" animation, a **mind map**, a **flowchart** and a **management summary (A4)**. All four are
   bilingual (a CS/EN toggle in the page header).
 
-**Overview – capacity & export:** both the aggregated and the detailed listing show the media size. Two export
-buttons (inheriting the active period/action/search filter):
+**Overview – capacity & export:** both the aggregated and the detailed listing show the media size. The period
+filter is two-layered (`IncidentDateRange.Resolve`): an explicit **From–To** range (from `<input type="date">`,
+a local calendar date) overrides the relative "last N days"/"all" chips as soon as either field is filled in.
+The screen and both export buttons inherit **exactly the same** range – no separate code path just for export:
 - `GET /export/incidents.csv` – raw data (CSV, UTF-8 BOM + `;` → Excel), up to 50,000 rows.
 - `GET /export/manager` – the **management report** (printable HTML → PDF, deliberately **1–2 A4 pages**):
   KPIs + **charts (inline SVG, no libraries):** incidents over time (a stacked bar per day/week), a donut of
   the action breakdown, horizontal bars of top users/stations; a table of unapproved media; a **Incident
   database** section (total count, unique media/stations, the data range for a retention check). The endpoints
   inherit the FallbackPolicy (auth).
+
+> **An open-ended upper bound used to crash the export (2026-09-16):** the upper bound of a day is the
+> *exclusive* midnight of the next day (`ToUtcExclusiveEnd`) – an ordinary date is just `+1 day`. But a date
+> field in the browser with no upper limit can send `do=9999-12-31` (`DateOnly.MaxValue`), where `+1 day` is
+> not a representable `DateTime` and `AddDays` threw an `ArgumentOutOfRangeException` – unguarded, this broke
+> the Overview page (HTTP 500) and **both** export endpoints (CSV and the management report returned 500
+> instead of a file). The fix returns `DateTime.MaxValue` directly for `9999-12-31`, instead of attempting the
+> `+1 day` arithmetic. A pure function, `IncidentDateRange.Resolve` (shared by the Overview page and both
+> exports, see above), tests in `IncidentDateRangeTests.cs`.
 
 ## Data retention (NIS2)
 

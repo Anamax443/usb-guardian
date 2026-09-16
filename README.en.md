@@ -56,6 +56,11 @@ Unapproved media are warned or blocked. Designed as a technical control for
 | 46 | **Second opponent-review wave (2026-09-11)** – CSRF protection on the local console's write endpoints (Origin/Referer, fail-closed); `DeviceBlocker.RunPowerShell` now reads streams asynchronously BEFORE `WaitForExit` (the old code could hang forever on a stuck `powershell.exe` regardless of the declared timeout) plus actually kills the process (and its children) on timeout; fixed stale documentation (`architecture.md` still described hostname verification as warn-only, even though the hard 403 has been live since 09-10) | ✅ |
 | 47 | **Third opponent-review wave (2026-09-11)** – `IncidentQueueWorker` no longer needs a manual restart after a SQL outage: `RetrySpoolLoopAsync` runs concurrently for the service's whole lifetime, retries the spool with a bounded exponential backoff (5s → capped at 5 min, resets on success), a `SemaphoreSlim` keeps processing sequential so the retry loop never writes the same batch concurrently with the live queue · **deployed to SQL_SERVER 2026-09-14** (API `65b2235`, see HANDOFF 5.16) | ✅ |
 | 48 | **Fourth opponent-review wave (2026-09-11)** – Admin console HTTPS self-cert (no CA, same pattern as agent↔API) + `Admin.Tests` finally runs in CI; `Whitelist:SigningRequired` (default `true`) – a missing signing key is now `Bad`, not just `Off` (found on APP_SERVER: appsettings.local.json had lost the path and nobody noticed); **whitelist rollback/replay protection** – `WhitelistSync` refuses to save a downloaded blob whose `issuedAt` is older than the local copy's (a valid signature protects integrity, not freshness) | ✅ |
+| 49 | **Auto-enrollment no longer stalls the fleet** (2026-09-16) – `AgentDeployService` shuffles the stations without an agent (Fisher-Yates) BEFORE trimming to `deploy.maxPerRun`; without shuffling, the SQL query (no `ORDER BY`) kept returning the same first N stations every run – a handful of permanently broken stations at the front of that order starved the rest of the fleet forever (found live: 188 of 228 stations had no agent). `OFFLINE` in the activity log reclassified from Error to Warn (the station just isn't answering ping right now, nothing broke) – `FAIL` (e.g. missing permissions) stays Error | ✅ |
+| 50 | **Deployment visible per station** (2026-09-16) – new **"Deploy errors"** tile + **"Last deployment"** column on Stations (the latest install-attempt outcome, read from the Activity log, source `deploy-run`); both the "Missing agent" and "Deploy errors" tiles now exclude permanently-ignored stations; the last-attempt history is **not shown** for a station that is currently reporting a working agent (stale SKIP/FAIL was confusing an operator looking at a station that had since started working – real incident: CERNYSW11); the decision logic was extracted into tested `DeployOutcome.cs` (matching the existing `StationStatus.cs` convention) | ✅ |
+| 51 | **Safer agent reinstall** (2026-09-16) – `Deploy-AgentFleet.ps1` reinstalling an existing service now **stops it and waits for STOPPED** before copying files – otherwise a locked, still-running `.exe` left the station with a mix of old and new files; the UI message "SKIP: use -ReinstallExisting" (a CLI flag, meaningless in the console) was replaced with "SKIP: service already exists — click 'Deploy now'", and the message shown when a service won't stop now also gives **concrete next steps** (RDP to the station, end `USBGuardian.exe` or reboot, then retry Deploy now) | ✅ |
+| 52 | **SECURITY fix for the regression in #51** (2026-09-16, fixed same day) – stopping the service before copying had a gap: if the subsequent copy then failed, the script threw straight into its catch block and **never restarted the service** – a station that had been actively protecting USB ports was left with NO running protection at all, worse than before fix #51. The catch block now makes a **best-effort `sc start`** before reporting FAIL | ✅ |
+| 53 | **Exact From–To range on the Overview page** (2026-09-16) – alongside the rolling "last N days" chips, an explicit calendar **From–To** range can now be entered, flowing through to the CSV export and the manager report too (answers a compliance/regulator request like "records for March", which a rolling window can't reproduce); the edge value `do=9999-12-31` (the max a browser `<input type="date">` can produce) used to crash the Overview page and both export endpoints (HTTP 500) via an overflow computing the exclusive upper bound – fixed | ✅ |
 | – | Per-serial **blocklist** + blocking of an already-connected device | 🔜 |
 | – | Signing certificate expiry monitoring | 🔜 |
 | – | **Activity-log retention** – `sp_PurgeActivityLog` exists but nothing calls it | 🔜 |
@@ -108,16 +113,23 @@ dark/light toggle `axima.theme` without FOUC, print = light, status traffic-ligh
 
 - **Overview** – cross-page tile summary (Stations in AD / Missing agent / Approved media /
   Deactivated / Incidents / Blocked / Warned, click-through to lists). **Filter** (period
-  30/90/year/all, action, full-text) + **aggregation** (group by media+station+user with count) +
-  device identifiers **VID/PID/serial** + **media capacity** + **"Approved"** column (currently per whitelist).
-  The **"Detailed" table has sortable headers**. **Export:** `⬇ CSV` (Excel) and `📊 Report` =
-  **manager summary** (KPIs + charts: incident trend, action donut, top users/stations + Database section;
-  inline SVG, printable on **1–2 A4**) – both inherit the active filter.
-- **Stations** – inventory from AD; tiles filter (all / reporting / **silent agents** / missing agent),
-  **search**, **AD path** (OU) next to hostname, **communication icon** (green ≤ threshold / amber silent /
-  grey no contact; threshold `comm.silentAfterMinutes` in Settings), **Refresh from AD** button
-  and **"Request data"** (per row / bulk). A **"Deployment"** column + bulk **"Exclude / Include all"** =
-  per-station auto-enrollment control (an exception to the default `deploy.defaultEnroll`).
+  30/90/year/all, exact calendar **From–To** range for audits/compliance, action, full-text) +
+  **aggregation** (group by media+station+user with count) + device identifiers **VID/PID/serial** +
+  **media capacity** + **"Approved"** column (currently per whitelist). The **"Detailed" table has
+  sortable headers**. **Export:** `⬇ CSV` (Excel) and `📊 Report` = **manager summary** (KPIs + charts:
+  incident trend, action donut, top users/stations + Database section; inline SVG, printable on
+  **1–2 A4**) – both inherit the active filter **including From–To** (for an exact answer to a request
+  like "records for March").
+- **Stations** – inventory from AD; tiles filter (all / reporting / **silent agents** / missing agent /
+  **deploy errors**), **search**, **AD path** (OU) next to hostname, **communication icon** (green ≤
+  threshold / amber silent / grey no contact; threshold `comm.silentAfterMinutes` in Settings),
+  **Refresh from AD** button and **"Request data"** (per row / bulk). A **"Deployment"** column + bulk
+  **"Exclude / Include all"** = per-station auto-enrollment control (an exception to the default
+  `deploy.defaultEnroll`). A **"Last deployment"** column + a **"Deploy errors"** tile show the outcome
+  of the latest install attempt (from the Activity log, source `deploy-run`) right on the station row –
+  both tiles ("Missing agent" and "Deploy errors") exclude permanently-ignored stations, and the history
+  is hidden for a station that is currently reporting an agent (stale history would otherwise confuse
+  the operator).
 - **Whitelist** – approved media; **enter just the serial number** (VID/PID/name autofill from
   incidents, retroactively too), **capacity** (from incidents), **bulk import**, **inline field edit**,
   **Active checkbox** (temporary deactivation without deletion).
@@ -223,9 +235,17 @@ Stations without an agent are visible under **Stations** (the "Missing agent" ti
 - **Bulk:** `scripts\Deploy-AgentFleet.ps1 -TargetsFile … -SourcePath …` – parallel rollout via
   `\\HOST\C$` + `sc.exe \\HOST create`; registers **PS-free** scheduled tasks (watchdog every 3 min `sc start`
   + **ToastHelper** logon/unlock via `schtasks /XML`); skips offline/already-installed; audit CSV. (PS 5.1 and 7.)
+  **Reinstalling an existing service** (`-ReinstallExisting`, also used under the hood by the **"Deploy now"**
+  button in the console) now **stops it and waits for STOPPED** before copying files – otherwise a locked,
+  still-running `.exe` left the station with a mix of old and new files. If the copy then fails anyway, the
+  script makes a **best-effort attempt to restart the service**, so a failed reinstall doesn't leave the
+  station completely unprotected.
 - **Auto-enrollment (the console deploys on its own):** `AgentDeployService`, after AD sync, finds stations without an agent,
-  applies the **default `deploy.defaultEnroll` + exceptions** (`includeHosts`/`excludeHosts` managed in Stations) and
-  (in live mode) writes the targets into `deploy.targetsFile`; the install is performed by a **scheduled task on APP_SERVER under a
+  applies the **default `deploy.defaultEnroll` + exceptions** (`includeHosts`/`excludeHosts` managed in Stations),
+  **shuffles the order** (Fisher-Yates) and only then trims to `deploy.maxPerRun` – without shuffling, the SQL
+  query (no `ORDER BY`) kept returning the same first N stations every run, so a handful of permanently broken
+  stations at the front of that order starved the rest of the fleet forever – and (in live mode) writes the
+  targets into `deploy.targetsFile`; the install is performed by a **scheduled task on APP_SERVER under a
   dedicated gMSA** (least-privilege). **Default OFF + dry-run.** Account setup: [docs/auto-deploy-setup.en.md](docs/auto-deploy-setup.en.md).
 - **Updating a deployed agent:** `scripts\Update-Agent.cmd <SOURCE> <HOST|FILE> [SERVICE]` – stops the service,
   **waits for `STOPPED`**, copies, and **verifies `RUNNING`**. Without that the running `.exe` is locked, only part
@@ -394,6 +414,12 @@ GRANT INSERT, UPDATE ON dbo.WhitelistVersions TO [DOMENA\APP_SERVER$];          
   wildcard fallback, the audit could record `Blocked` before enforcement had actually happened,
   `POST /api/whitelist/devices` could activate an unsigned whitelist version. The seventh (spool retry after a
   SQL outage) was fixed in `befbeb0` and deployed 2026-09-14 — see `docs/oponentura.en.md` §35.7.
+- **Agent-reinstall regression, fixed the same day** (2026-09-16) – the fix that stops the service before
+  copying files (to stop a locked running `.exe` from leaving a half-overwritten package) had a gap: if the
+  subsequent `robocopy` then failed, the script threw straight into its catch block and **never restarted the
+  service** – a station that had been actively protecting USB ports was left with NO running protection at
+  all, worse than the state before that fix. `Deploy-AgentFleet.ps1`'s catch block now makes a **best-effort
+  `sc start`** before reporting FAIL.
 
 ## Repo structure
 
@@ -410,7 +436,8 @@ usb-guardian/
 │       ├── Components/        # Pages (Home, Computers, Whitelist, Settings, Database, Docs), Layout
 │       ├── AdSync/            # AdSyncRunner + AdSyncService
 │       ├── Deploy/            # AgentDeployService (auto-enrollment), PingMonitorService,
-│       │                      #   StationStatus (Silent/ProbablyOff classification), DeployTrigger
+│       │                      #   StationStatus (Silent/ProbablyOff classification),
+│       │                      #   DeployOutcome (deploy-error classification), DeployTrigger
 │       ├── Export/            # ExportEndpoints (CSV + manager report)
 │       ├── Notifications/     # IncidentAlertService + EmailSender
 │       └── appsettings.local.json.example

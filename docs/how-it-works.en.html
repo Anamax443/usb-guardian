@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="cs">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>USB Guardian — jak to funguje (animace)</title>
+<title>USB Guardian — how it works (animated)</title>
 <style>
   :root{
     --bg:#0d1117; --panel:#161b22; --panel2:#1c2333; --line:#30363d; --ink:#e6edf3; --muted:#8b949e;
@@ -73,8 +73,8 @@
     <span><b style="background:var(--bad)"></b><span data-cs="blok" data-en="block"></span></span>
   </div>
   <div class="lang">
-    <button id="lang-cs" class="on">Čeština</button>
-    <button id="lang-en">English</button>
+    <button id="lang-cs">Čeština</button>
+    <button id="lang-en" class="on">English</button>
   </div>
 </header>
 
@@ -136,7 +136,7 @@
 <script>
 (function(){
   "use strict";
-  var LANG = 'cs';
+  var LANG = 'en';
 
   var steps = [
     { nodes:["n_usb","n_mon"], edge:["n_usb","n_mon"],

@@ -103,6 +103,8 @@ od 500+ agentů nesmí ovlivnit adminní použití). Čte/píše SQL_SERVER, mod
 | `AdSyncService` | Časovač nad `AdSyncRunner` – **běží vždy** jako hosted service, `adsync.enabled`/`adsync.intervalMinutes` čte z `AppSettings` při každém tiku (dřív jen z configu při startu, viz [AD sync](#ad-sync)) |
 | `PingMonitorService` | Časovač (`ping.intervalMinutes`, default 5 min) – pinguje jen stanice, co hlásí agenta a nejsou čerstvé; výsledek do `Computer.LastPingOk`/`LastPingAt` (viz [Zmlklý agent vs. vypnuté PC](#zmlklý-agent-vs-vypnuté-pc-ping)) |
 | `StationStatus` | Čistá, testovaná klasifikace stavu stanice (Silent/ProbablyOff) ze tří signálů – sdílená mezi stránkou Stanice a kontrolou „Zmlklí agenti" |
+| `DeployOutcome` | Čistá, testovaná logika „počítá se poslední deploy-run záznam ještě jako chyba, nebo je to jen stará historie stanice, co mezitím ožila" – sdílená mezi dlaždicí „Chyby nasazení" a sloupcem „Poslední nasazení" na Stanicích (viz [Chyby nasazení a poslední pokus](#chyby-nasazení-a-poslední-pokus-stanice)) |
+| `IncidentDateRange` | Čistá, testovaná funkce pro rozsah **Od–Do** incidentů – sdílená mezi Přehledem a oběma export endpointy, aby CSV/report viděly přesně to samé období jako obrazovka |
 | `AppInfo` | Commit hash buildu (MSBuild `git rev-parse` stamp z gitu) → patička + `:4200/api/version` |
 
 **Autorizace:** Windows Auth (Negotiate). Přístup jen členům `Authorization:AdminGroups`
@@ -147,6 +149,38 @@ StationStatus.ProbablyOff = hlásí agenta ∧ není čerstvý ∧ LastPingOk = 
 Klasifikace je vytažená do čisté, jednotkově testované `StationStatus.cs` – používá ji **jak** stránka Stanice
 (dlaždice „Zmlklo agentů" + sloupec „Kom."), **tak** kontrola „Zmlklí agenti" na stránce Kontroly, takže obě
 místa nutně souhlasí (dřív počítala vlastní, nezávislou – a nekonzistentní – logiku jen z `LastSeen`).
+
+### Chyby nasazení a poslední pokus (Stanice)
+
+`Deploy-AgentFleet.ps1` po každém běhu na `APP_SERVER` zapíše `last.csv`/`last.log` (ruční „Nasadit teď" do
+`manual-last.csv`/`.log` – vlastní soubory, ať si auto-enrollment a ruční klik navzájem nepřepisují výsledek).
+`DeployResultIngestor` je čte a každý řádek zapíše do **Deníku aktivity** (`Source="deploy-run"`, `Hostname` =
+cílová stanice) – stejné místo, odkud čte historii stránka Aktivita. Stránka Stanice si z toho pro každou
+stanici bere jen **nejnovější** záznam:
+
+```
+last.csv (Deploy-AgentFleet.ps1)      last.log (transkript – jen když skript spadl PŘED Export-Csv)
+        ↓ DeployResultIngestor
+dbo.ActivityLog (Source="deploy-run", Hostname, Level, Message)
+        ↓ nejnovější záznam PER stanice
+Computers.razor: sloupec „Poslední nasazení" · dlaždice „Chyby nasazení"
+```
+
+**OFFLINE ≠ chyba nasazení (16.09.2026):** `DeployResultIngestor.LevelForStatus` dřív mapoval `OFFLINE`
+(stanice zrovna neodpovídá na ping – nic se nepokazilo) na `Error` stejně jako skutečné `FAIL` (např. chybějící
+oprávnění na cílovém sdílení). Dlaždice „Chyby nasazení" tak byla plná vypnutých notebooků místo skutečných
+problémů. `OFFLINE` (spolu s `SKIP`/`STARTED?`) je teď `Warn`, `Error` zůstal jen `FAIL`/neznámému stavu.
+
+**Historie se skryje, jakmile stanice hlásí agenta (real incident CERNYSW11, 16.09.2026):** sloupec i dlaždice
+dřív ukazovaly poslední `deploy-run` záznam bez ohledu na to, jestli agent mezitím normálně naběhl – stará
+`SKIP`/`FAIL` historie tak pletla operátora u stanice, která ve skutečnosti běží. `DeployOutcome.ShouldShowHistory`
+vrátí `false`, jakmile stanice `Reports(c)` (hlásí agenta); sloupec pak ukáže „—" a záznam se nepočítá do
+dlaždice „Chyby nasazení". Čistá rozhodovací logika je v `DeployOutcome.cs` (odděleně od `Computers.razor`),
+testy v `DeployOutcomeTests.cs`.
+
+Obě dlaždice – „Chybí agent" (Přehled i Stanice) i „Chyby nasazení" (Stanice) – navíc vylučují trvale
+ignorované stanice (`DeployIgnored`, sloupec „Ignorovat"): vědomé vyřazení operátorem se nemá počítat jako
+otevřený problém.
 
 ## Lokální admin konzole agenta
 
@@ -339,7 +373,7 @@ jinak nezměnil žádný `.cs`. Dřív (`BeforeTargets=CoreGenerateAssemblyInfo`
 
 ## Testy a CI
 
-Do 04.09.2026 repo nemělo žádné C# testy (jen jeden JS test na UI). Dnes: **90 testů** ve třech projektech,
+Do 04.09.2026 repo nemělo žádné C# testy (jen jeden JS test na UI). Dnes: **111 testů** ve třech projektech,
 všechny xUnit, bez mock frameworku – buď skutečné instance směrované do dočasného adresáře (agent), nebo čisté
 funkce beze závislosti na infrastruktuře (API, konzole):
 
@@ -347,7 +381,7 @@ funkce beze závislosti na infrastruktuře (API, konzole):
 |---------|-----------|-------|
 | `tests/USBGuardian.Agent.Tests` | `WhitelistChecker`, `PolicyEnforcer` (expirace whitelistu, rozhodovací logika), `DeviceBlocker` (interpretace výstupu blokovacího skriptu, skutečný timeout/kill zaseknutého PowerShellu), `LocalConsoleService` (CSRF Origin/Referer kontrola), `WhitelistSync` (rollback/replay ochrana – `IsRollback`/`TryGetIssuedAt`) | 29 |
 | `tests/USBGuardian.Api.Tests` | `IncidentSpool` (zápis/čtení/mazání/karanténa poškozeného souboru), dedup klíč a ohraničený exponenciální retry odstup (`IncidentQueueWorker`), `CallerIdentity` (parsování Windows identity) | 21 |
-| `tests/USBGuardian.Admin.Tests` | `StationStatus`, `Reachability`, `DeployResultIngestor` – čistá rozhodovací logika konzole (stav stanic, dostupnost, zpracování výsledků nasazení); `HealthService.EvaluateSigningKey` – kontrola „Podpisový klíč whitelistu" vč. `Whitelist:SigningRequired` (nenastaveno×vyžadováno, chybí soubor, nelze přečíst, OK) | 40 |
+| `tests/USBGuardian.Admin.Tests` | `StationStatus`, `Reachability`, `DeployResultIngestor` – čistá rozhodovací logika konzole (stav stanic, dostupnost, zpracování výsledků nasazení); `HealthService.EvaluateSigningKey` – kontrola „Podpisový klíč whitelistu" vč. `Whitelist:SigningRequired` (nenastaveno×vyžadováno, chybí soubor, nelze přečíst, OK); `AgentDeployService.ShuffleInPlace` (zamíchání cílů auto-enrollmentu); `DeployOutcome` (kdy poslední deploy-run záznam ještě znamená chybu); `IncidentDateRange.Resolve` (rozsah Od–Do vč. `9999-12-31` bez pádu) | 61 |
 
 API i konzole sahají na `internal` metody přes `InternalsVisibleTo` (`AssemblyInfo.cs` ve všech třech projektech) –
 řeší se tím, že např. `WindowsIdentity`/`HttpListenerContext`/reálný `powershell.exe` proces nejdou v testu
@@ -473,10 +507,31 @@ robocopy" by na běžícím agentovi přepsala část DLL, kopie zamčeného `.e
 
 | Krok | Skript | Úloha na `APP_SERVER` | Účet |
 |------|--------|-----------------|------|
-| Čistá instalace na stanice bez agenta | `Deploy-AgentFleet.ps1` | `USBGuardian-AutoDeploy` | `gmsa-deploy$` |
+| Čistá instalace na stanice bez agenta (auto-enrollment) | `Deploy-AgentFleet.ps1` | `USBGuardian-AutoDeploy` | `gmsa-deploy$` |
+| Ruční „Nasadit teď" (instalace i reinstall existující služby) | `Deploy-AgentFleet.ps1 -ReinstallExisting` | `USBGuardian-ManualInstall` | `gmsa-deploy$` |
 | Aktualizace nasazeného agenta | `Update-Agent.cmd` | `USBGuardian-UpdateAgent` (+ `-UpdateAgentBeta`) | `gmsa-deploy$` |
 | Nasazení API na jeho server | `Deploy-Api.cmd` | `USBGuardian-ApiDeploy` | `gmsa-srvdeploy$` |
 | Nasazení konzole na `APP_SERVER` | `Deploy-Console.cmd` | — (ruční spuštění přes UNC, ne scheduled task) | osobní admin účet s přístupem na `APP_SERVER` |
+
+> **Reinstall existující služby (16.09.2026):** dřív `Deploy-AgentFleet.ps1` na stanici s existující službou jen
+> `SKIP`-oval („sluzba uz existuje (pouzij -ReinstallExisting)") – přepínač existoval, ale nic ho z konzole
+> nevolalo, takže reinstall šel jen ručně z příkazové řádky. Tlačítko „Nasadit teď" na Stanicích ho teď **vždy**
+> posílá; hláška „SKIP: use -ReinstallExisting" v UI byla matoucí (radila CLI přepínač, ne něco, co jde v
+> konzoli zmáčknout) – přepsána na odkaz na tlačítko (`FriendlyDeployMessage` v `Computers.razor`). Samotný
+> reinstall teď nejdřív **zastaví** běžící službu (`sc stop`, čeká na `STOPPED` do 10 s) **PŘED** kopírováním –
+> dřív šel rovnou na `robocopy`, což na zamčeném `.exe` mohlo nechat na stanici směs starých a nových souborů.
+>
+> **Bezpečnostní regrese ve stejné změně (16.09.2026):** zastavení bez pojistky byl krok zpět – když pak
+> `robocopy` selhal, catch blok službu znovu nenastartoval a stanice zůstala **bez běžící ochrany**, tedy hůř,
+> než reinstall vůbec nezkoušet (dřív se služba nezastavovala, takže selhaná kopie nechala běžet PŮVODNÍ funkční
+> verzi dál). Catch teď dělá **best-effort `sc start`**, kdykoli reinstall stihl službu zastavit, ať už na disku
+> zůstal starý balíček nebo jen jeho polovina. Nepodaří-li se zastavit do 10 s (zaseklý proces), hláška
+> technikovi radí **konkrétní další krok** (přihlásit se na stanici, ukončit `USBGuardian.exe` nebo ji
+> restartovat, zkusit znovu) místo jen technického popisu.
+>
+> Mimo git (produkce, 16.09.2026): úloha `USBGuardian-ManualInstall` na `APP_SERVER` byla přenastavena, aby
+> `-ReinstallExisting` posílala vždy; skript byl přepodepsaný interním podepisovacím nástrojem (viz „PS skripty
+> musí být podepsané" výše – jde o `.ps1`, na rozdíl od `.cmd` skriptů níže).
 
 Všechny tři `.cmd` skripty drží stejný vzor: **zastav službu → počkej na `STOPPED` → zkopíruj (bez `*.local.json`) →
 nastartuj → ověř `RUNNING`**; log v `C:\ProgramData\USBGuardian\deploy\`. `Deploy-Api.cmd`/`Update-Agent.cmd` běží
@@ -564,8 +619,8 @@ Tabulka `AppSettings` (key/value, migrace 06) spravovaná z Nastavení; `AccessC
 ```
 AdSync → Computers (kdo nemá agenta)
 AgentDeployService (24/7, default VYPNUTO + dry-run)
-   ↓ ostrý režim
-deploy.targetsFile (seznam stanic bez agenta)         [konzole = APP_SERVER$, jen zápis]
+   ↓ ostrý režim: filtr (allow/include/exclude, viz níže) → zamíchat (Fisher-Yates) → Take(deploy.maxPerRun)
+deploy.targetsFile (zamíchaný výběr stanic bez agenta)         [konzole = APP_SERVER$, jen zápis]
    ↓ čte
 Scheduled task na APP_SERVER pod gMSA gmsa-deploy$         [least-privilege: admin jen na klientech]
    ↓ Deploy-AgentFleet.ps1
@@ -577,16 +632,29 @@ oddělený task pod deploy účtem. **Prostředí (AXIMA): PS skripty musí být
 `CN=powershell.domena.loc` + publisher v `LocalMachine\TrustedPublisher`; před podpisem CRLF+UTF-8 BOM.
 Nastavení: [auto-deploy-setup.md](auto-deploy-setup.md).
 
+> **Zamíchání cílů před `Take` (16.09.2026):** SQL dotaz na stanice bez agenta nemá `ORDER BY` – bez zamíchání
+> tak `Take(deploy.maxPerRun)` každý běh (à `deploy.intervalMinutes`) vracel **stejných prvních N** stanic.
+> Pár trvale rozbitých stanic na začátku pořadí tak navždy zabíralo všechny sloty a zbytek flotily se nikdy
+> nedostal na řadu – reálně 188 z 228 stanic bez agenta, nahlášeno 16.09.2026 („pořád dokola zkouší některé,
+> co mají problém"). `AgentDeployService.ShuffleInPlace` (Fisher-Yates, `Random.Shared` v provozu) promíchá
+> seznam **před** `Take`, takže se šance na výběr časem rozloží na celou frontu. Čistá funkce, `Random` je
+> injektovaný kvůli seedovatelnosti v testech (`AgentDeployServiceTests.cs`).
+
 ## Konzole – funkce stránek
 
 - **Přehled** – dlaždicový souhrn napříč listy + filtr (období/akce/fulltext) + kumulace (GroupBy přes
-  anonymní typ → in-memory map) + sloupec „Schváleno" dle aktivního whitelistu. Tabulka „Detailně" má
-  **řaditelné hlavičky** (řazení v DB přes query-string, před `Take(200)`).
+  anonymní typ → in-memory map) + sloupec „Schváleno" dle aktivního whitelistu. Přesný rozsah **Od–Do**
+  (kalendářní data) má přednost před chipy „posledních N dní" – pro reprodukovatelný audit/kontrolní export
+  („záznamy za březen"), viz níže. Tabulka „Detailně" má **řaditelné hlavičky** (řazení v DB přes query-string,
+  před `Take(200)`).
 - **Stanice** – AD inventář, filtr, cesta v AD (OU), ikona/pill komunikace (dle čerstvosti `LastSeen` **a**
   potvrzeného pingu, viz [Zmlklý agent vs. vypnuté PC](#zmlklý-agent-vs-vypnuté-pc-ping)), dlaždice „Zmlklo agentů"
-  (hlásí agenta, není čerstvý **a** ping potvrzuje, že PC běží – jinak jen pill „vypnuto?", žádná akce),
+  (hlásí agenta, není čerstvý **a** ping potvrzuje, že PC běží – jinak jen pill „vypnuto?", žádná akce), dlaždice
+  „Chyby nasazení" + sloupec „Poslední nasazení" (výsledek posledního pokusu o instalaci agenta na danou
+  stanici, potlačený u stanic, co už hlásí – viz [Chyby nasazení a poslední pokus](#chyby-nasazení-a-poslední-pokus-stanice)),
   tlačítko „Vyžádat data" (řádek/hromadně) → [ReportNow](#vyžádání-dat-na-klik-reportnow). Sloupec **„Nasazení"** u stanic
-  bez agenta = přepínač zařadit/vyřadit z auto-enrollmentu (výjimka proti `deploy.defaultEnroll`); hromadně „Vyřadit/Zařadit vše".
+  bez agenta = přepínač zařadit/vyřadit z auto-enrollmentu (výjimka proti `deploy.defaultEnroll`) + tlačítko
+  „▶ Nasadit teď" (nainstaluje/reinstaluje ihned, bez ohledu na zařazení); hromadně „Vyřadit/Zařadit vše".
 - **Whitelist** – serial-only zadání + backfill VID/PID z incidentů + import + inline edit + `IsActive` checkbox.
   **Kapacita** média se dotahuje z incidentů (max `SizeBytes` dle sériáku, display-only – na whitelistu se nedrží).
 - **Kontroly** – health checks serveru i klientů. Seznam kontrol se ukáže **dopředu** a odškrtává se s průběžnými
@@ -602,13 +670,23 @@ Nastavení: [auto-deploy-setup.md](auto-deploy-setup.md).
   animace „Jak to funguje", **myšlenková mapa**, **vývojový diagram** a **shrnutí pro vedení (A4)**.
   Všechny čtyři jsou dvojjazyčné (přepínač CS/EN v hlavičce stránky).
 
-**Přehled – kapacita & export:** kumulovaný i detailní výpis ukazují velikost média. Dvě tlačítka exportu (dědí
-aktivní filtr období/akce/hledání):
+**Přehled – kapacita & export:** kumulovaný i detailní výpis ukazují velikost média. Filtr období je dvouvrstvý
+(`IncidentDateRange.Resolve`): explicitní **Od–Do** (z `<input type="date">`, místní kalendářní datum) přebije
+relativní „posledních N dní"/„vše" chipy, jakmile je vyplněné aspoň jedno z polí. Obrazovka i obě tlačítka
+exportu dědí přesně **ten samý** rozsah – žádná zvláštní cesta jen pro export:
 - `GET /export/incidents.csv` – surová data (CSV, UTF-8 BOM + `;` → Excel CZ), max 50 000 řádků.
 - `GET /export/manager` – **manažerský report** (tisknutelné HTML → PDF, cíleně na **1–2 A4**): KPI + **grafy
   (inline SVG, bez knihoven):** vývoj incidentů v čase (stacked bar po dnech/týdnech), donut rozpadu podle akce,
   horizontální pruhy top uživatelé/stanice; tabulka neschválených médií; sekce **Databáze incidentů** (celkový počet,
   unikátní média/stanice, rozsah dat pro kontrolu retence). Endpointy dědí FallbackPolicy (auth).
+
+> **Otevřený horní konec rozsahu shazoval export (16.09.2026):** horní hranice dne je *vyloučená* půlnoc
+> následujícího dne (`ToUtcExclusiveEnd`) – běžné datum stačí `+1 den`. Datumové pole v prohlížeči bez horního
+> limitu ale umí poslat `do=9999-12-31` (`DateOnly.MaxValue`), kde `+1 den` není reprezentovatelný `DateTime` a
+> `AddDays` shodil `ArgumentOutOfRangeException` – nechráněně na Přehledu (HTTP 500) i na **obou** export
+> endpointech (CSV i manažerský report vracely 500 místo souboru). Oprava pro `9999-12-31` vrátí rovnou
+> `DateTime.MaxValue` bez počítání, místo aby se o `+1 den` pokoušela. Čistá funkce `IncidentDateRange.Resolve`
+> (sdílená Přehledem i oběma exporty, viz výše), testy v `IncidentDateRangeTests.cs`.
 
 ## Retence dat (NIS2)
 

@@ -21,6 +21,12 @@ Console (machine account, unchanged) → finds stations without an agent → wri
 Scheduled task on the app server (as gmsa-deploy$) → Deploy-AgentFleet.ps1 -TargetsFile … → installation
 ```
 
+> **The selection for one run is shuffled:** the SQL query has no `ORDER BY`, so without shuffling
+> the console would keep offering the same first `MaxPerRun` stations every time – one permanently
+> broken/unreachable station could then block the rest of the fleet forever. The list is therefore
+> shuffled (Fisher–Yates) before being capped at `MaxPerRun`, so later runs give the rest of the
+> fleet a turn too (found 2026-09-16: "keeps retrying the same few that have a problem").
+
 ## Steps
 
 ### 1. (DC, Domain Admin) A group for local admin on the clients
@@ -66,6 +72,12 @@ add the `USB-Guardian-Deployers` group into **local Administrators** on the OU h
 #   C:\Apps\USBGuardianConsole\scripts\Watch-USBGuardian.ps1
 ```
 
+> **`Deploy-AgentFleet.ps1` on the app server is NOT a `dotnet publish` output** – it is a manual
+> copy of the one in `scripts\` in git; the console's build does not overwrite it. After every edit
+> to the script it must be re-signed (Authenticode, the company cert `CN=powershell.domena.loc`)
+> and copied by hand into `C:\Apps\USBGuardianConsole\scripts\` on the app server, otherwise the
+> old signed version keeps running there.
+
 ### 6. (on the app server) A scheduled task under the gMSA
 
 ```powershell
@@ -80,11 +92,47 @@ Register-ScheduledTask -TaskName "USBGuardian-AutoDeploy" -TaskPath "\USBGuardia
     -Action $action -Principal $principal -Trigger $trigger -Force
 ```
 
+> **Reinstalling a broken, already-registered service (`-ReinstallExisting`):** the script now
+> stops it and waits for STOPPED BEFORE copying – previously it went straight to `robocopy`, which
+> on a locked/running exe could overwrite only part of the package. If anything fails AFTER that
+> stop (e.g. robocopy), the `catch` block makes a best-effort attempt to start the service again
+> (`sc start`), so a failed reinstall doesn't leave the station with no running protection at all –
+> previously it could stay "stopped, with nothing restarting it". If the service won't stop within
+> 10 s, the error message says exactly what to do next: RDP to the station, end
+> `USBGuardian.exe` in Task Manager (or reboot the station), then retry.
+>
+> The `USBGuardian-AutoDeploy` task above deliberately does NOT get `-ReinstallExisting` – it runs
+> unattended against the whole fleet, so it just SKIPs an existing-but-broken service instead of
+> touching it. Reinstalling is left to the human-triggered `USBGuardian-ManualInstall` task (below).
+
 ### 7. Switch it on in the console (Settings → Agent auto-enrollment)
 
 First **master ON + dry-run ON** → check the report "N stations would be deployed" →
 then **turn dry-run OFF** → the console starts writing `deploy-targets.txt` and the task installs.
 Pilot: an allowlist of a single machine first, then a second one, then an empty allowlist = the whole fleet.
+
+## Deploying a single station by hand: `USBGuardian-ManualInstall`
+
+The **"Deploy now"** button next to a station (`DeployTrigger.cs`) is a sibling of the
+`USBGuardian-AutoDeploy` task above – it runs under the **same** `gmsa-deploy$`, no separate
+account or GPO. It does have its **own** targets file and **own** task, though, so a manual click
+and the automatic cycle can't overwrite each other's targets mid-run (incident 2026-09-10: a click
+on one station produced a result for a different one from auto-enrollment):
+
+```
+Target: C:\ProgramData\USBGuardian\deploy\manual-targets.txt   (the one chosen station only)
+Task:   \USBGuardian\USBGuardian-ManualInstall
+```
+
+It is created the same way as in step 6 (`schtasks /Create /XML`, `LogonType=Password` under
+`gmsa-deploy$`) – the same S4U trap described below under `USBGuardian-ApiDeploy` applies to it too.
+
+> **With `-ReinstallExisting` since 2026-09-16:** the task's argument was edited directly on the
+> app server (`schtasks /Query ... /XML` → a targeted replace in the `-Command` string →
+> `schtasks /Create ... /XML ... /F`, preserving the existing `Principal`/`LogonType=Password`) –
+> clicking "Deploy now" on a station with an existing-but-broken registration now stops and
+> reinstalls it (see step 6 above) instead of permanently SKIPping it. `USBGuardian-AutoDeploy`
+> (unattended, whole fleet) deliberately still does not have `-ReinstallExisting`.
 
 ## The second deploy account: `gmsa-srvdeploy$` (API deployment)
 
@@ -115,7 +163,8 @@ cmd /c C:\Apps\USBGuardianConsole\scripts\Deploy-Api.cmd "C:\Apps\USBGuardianApi
 > **Creating a task under a gMSA:** `schtasks /Create /RU "…gmsa$"` without a password produces
 > `LogonType=InteractiveToken` → the task never runs (event 332). S4U (`/NP`) has no network credentials and
 > cannot reach `\\HOST\C$`. The only thing that works is **XML with `LogonType=Password` saved as UTF-16**
-> and created via `schtasks /Create /XML`. The same trap applies to `USBGuardian-UpdateAgent`.
+> and created via `schtasks /Create /XML`. The same trap applies to `USBGuardian-UpdateAgent` and
+> `USBGuardian-ManualInstall`.
 
 ## Alternative: running the console under the deploy account
 

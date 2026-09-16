@@ -746,6 +746,35 @@ seznam z Nastavení.
 - **Databáze** — read-only přehled obsahu DB (počty, rozsah incidentů, výpis `AppSettings`).
 - **Dokumentace** — render `.md` (Markdig) + interaktivní animace „Jak to funguje".
 
+> **Dlaždice a sloupec „Chyby nasazení" (16.09.2026):** stránka Stanice dostala novou dlaždici „Chyby
+> nasazení" + filtr a sloupec „Poslední nasazení" — poslední výsledek pokusu o instalaci přímo u stanice
+> (z Deníku aktivity, zdroj `deploy-run`), se zvýrazněním chyby a tooltipem s časem a plnou hláškou.
+> Dlaždice „Chybí agent" i nová „Chyby nasazení" teď navíc vylučují trvale ignorované stanice (servery,
+> kam se agent záměrně neinstaluje) — jejich vyřazení je vědomé rozhodnutí operátora, ne mezera ve
+> flotile. Týž den se na novém sloupci ukázal reálný nedostatek: bral poslední záznam bez ohledu na to,
+> jestli stanice dnes funguje — CERNYSW11 se mezitím ozvala (10:35), ale sloupec pořád ukazoval starý
+> `SKIP` z dřívějšího pokusu a vypadalo to jako aktuální problém. Oprava: historie se ukazuje/počítá jen
+> u stanic BEZ funkčního agenta — jakmile stanice hlásí, staré `FAIL`/`SKIP` už nic neříká. Rozhodnutí
+> „kdy je poslední deploy-run ještě relevantní chyba" žilo jen inline v Razor `@code`, bez testů — na
+> rozdíl od analogického rozhodnutí u „zmlklých agentů" (`StationStatus.cs`, §35.8a), které testovací
+> konvenci má. Vytaženo do `DeployOutcome.cs` + pokryto testy (`DeployOutcomeTests`), aby budoucí
+> nechtěné smazání/obrácení podmínky „dokud nehlásí" neprošlo zeleným `dotnet test` a neprojevilo se až
+> živě — přesně to, co se stalo u CERNYSW11. Nález i oprava vzešly z adversariální multi-agent revize
+> vlastních změn této session (§18.5).
+
+> **Přesný rozsah Od/Do pro export incidentů (16.09.2026):** dosavadní filtr období na Přehledu znal jen
+> „posledních N dní od teď" nebo „vše" — pro kontrolu orgánu dozoru, který se zeptá na konkrétní měsíc,
+> to nestačí (nejde reprodukovat „1.3.–31.3.", jen odhadnout, kolik dní to dnes zpátky je). Přidán
+> explicitní Od/Do (místní kalendářní datum z `<input type="date">`), má přednost před dlaždicemi
+> 30/90/365/vše a prosakuje beze změny do CSV i manažerského reportu (sdílené `IncidentDateRange`,
+> testováno) — Přehled a oba export endpointy tak vždy vidí přesně stejné období. Adversariální revize
+> vlastních změn této session (§18.5) na tuhle novou logiku ještě týž den našla reálnou chybu:
+> `do=9999-12-31` (maximum zadatelné do `<input type="date">`) shazovalo výpočet vyloučené horní hranice
+> (`+1 den` mimo reprezentovatelný rozsah `DateTime` → `ArgumentOutOfRangeException`) — na Přehledu
+> schované za zavádějící „nelze načíst data z databáze" (databáze se přitom vůbec nedotkla), na obou
+> export endpointech nechycené vůbec (HTTP 500, žádný try/catch). Opraveno stráží, která pro
+> `DateOnly.MaxValue` vrátí rovnou `DateTime.MaxValue` místo počítání za hranici.
+
 ### 10.2 `AdSyncRunner` / `AdSyncService`
 
 Načte počítače z AD (`new DirectoryEntry()` — ambient doména, nic natvrdo), upsert do `Computers`
@@ -762,6 +791,18 @@ uložení `Json`+`Signature`, aktivace. Viz §6.7, §11.
 (`InActiveDirectory && LastSeen==null && AgentVersion==""`), uplatní `defaultEnroll` + include/exclude
 výjimky a (v ostrém režimu) zapíše cíle do `deploy.targetsFile`. Instalaci provede scheduled task na
 APP_SERVER pod gMSA (viz §6.12, §15).
+
+> **Chybějící řazení kandidátů natrvalo hladovělo flotilu (nalezeno a opraveno 16.09.2026):** dotaz na
+> kandidáty výše nemá `ORDER BY` — SQL bez řazení spolehlivě vrací pořád STEJNÉ pořadí řádků, takže
+> následné `Take(MaxPerRun)` bralo pořád stejnou hrstku prvních stanic. Pár trvale nedostupných/rozbitých
+> stanic na začátku tohoto pořadí tak natrvalo obsadilo všechny sloty a zbytek flotily se do výběru
+> nikdy nedostal — v praxi 188 z 228 stanic bez agenta, přičemž se opakovaně zkoušelo pořád jen stejných
+> ~10 a zbylých ~178 nebylo vyzkoušeno ani jednou. Oprava: `AgentDeployService.ShuffleInPlace`
+> (Fisher-Yates, `Random.Shared`) zamíchá kandidáty PŘED `Take()`, takže se v každém běhu dostanou na
+> řadu i ty za rozbitými stanicemi. Vedlejší oprava téhož dne v `DeployResultIngestor.LevelForStatus`:
+> `OFFLINE` (stanice jen neodpovídá na ping) se nově hlásí jako `Warn`, ne `Error` — nic se nepokazilo,
+> stanice může být prostě vypnutá; skutečná chyba nasazení (`FAIL`, např. odepřený přístup) zůstává
+> `Error`.
 
 ### 10.5 `IncidentAlertService` + `EmailSender`
 
@@ -972,13 +1013,37 @@ Aktuálně je čistě automatizována jen **čerstvá instalace**; **update** b�
 roadmapy. Navržený postup (reuse stávající pipeline):
 
 1. **Update-safe `Deploy-AgentFleet.ps1 -ReinstallExisting`:** `sc stop` → počkat na `STOPPED` →
-   `robocopy` → `sc start`, s **dočasným vypnutím watchdog tasku** během kopie (jinak watchdog do 3 min
-   nahodí starou službu a zamkne exe). (Stávající `-ReinstallExisting` zatím nezastavuje službu před
-   kopií — to je známá mezera, viz §19.)
+   `robocopy` → `sc start` — tahle základní část je **opravena 16.09.2026** (detail níže). Zbývá ještě
+   **dočasné vypnutí watchdog tasku** během kopie: watchdog dnes běží po celou dobu stop/copy okna, jinak
+   by do 3 min nahodil starou/zamčenou verzi. Riziko je nízké (kopie trvá řádově vteřiny, watchdog má
+   cyklus 3 min), ale formálně to není vyloučené — zůstává otevřené.
 2. **Verzové cílení v konzoli:** porovnat `Computers.AgentVersion` (z heartbeatu) s cílovým commitem;
    zastaralé stanice → update-targets → gMSA task spustí reinstall. Stejný least-privilege model.
 3. **Řízený rollout:** dry-run/opt-in, ring deployment, audit CSV; commit stamp slouží jako potvrzení
    úspěchu (konzole ukáže, kdo je aktuální).
+
+> **Reinstall zastavuje službu PŘED kopírováním (opraveno 16.09.2026):** dosud šel `-ReinstallExisting`
+> rovnou na `robocopy` bez zastavení služby — přesně ten „stávající nedostatek" popsaný výše a v §19.6
+> (běžící/zamčené `USBGuardian.exe` mohlo způsobit, že se přepíše jen část balíčku). Oprava (`91a2fe6`):
+> `sc stop` → čekání na `STOPPED` (max 10 s, 500ms polling) → teprve pak kopie, stejný vzor jako
+> `Deploy-Console.cmd` používá pro konzoli samotnou.
+>
+> Vlastní adversariální multi-agent revize této opravy (§18.5), spuštěná ještě týž den, v ní odhalila
+> BEZPEČNOSTNĚ RELEVANTNÍ regresi: pokud po zastavení služby selhal následný `robocopy` (zamčený soubor,
+> ACL, výpadek sítě, plný disk), skript skočil rovnou do `catch` a službu už nikdy znovu nenastartoval —
+> stanice, která předtím aktivně chránila porty, skončila BEZ běžící služby a bez jakéhokoli pokusu o
+> návrat. To bylo HORŠÍ než chování před opravou `91a2fe6` (kdy se služba vůbec nezastavovala, takže
+> neúspěšný `robocopy` aspoň nechal běžet původní funkční službu dál). Opraveno (`f9f8727`): `catch`
+> blok teď při selhání po zastavení služby zkusí `sc start` jako poslední záchranu (na tom, co zrovna je
+> na disku), než nahlásí `FAIL` — stanice bez běžící ochrany je pořád horší výsledek než cokoli jiného.
+>
+> Vedlejší dobová oprava (`72ae744`): hláška „služba už existuje (použij -ReinstallExisting)" radila CLI
+> přepínač, který operátor u konzole nemá čím zmáčknout. Text teď místo toho odkazuje na tlačítko
+> „Nasadit teď" — jeho úloha na APP_SERVERu (`USBGuardian-ManualInstall`) `-ReinstallExisting` od téhož
+> dne skutečně přeposílá dál (vyžadovalo přepodepsání skriptu a úpravu definice úlohy na serveru). Poslední
+> hláška o nezastavené službě (`d86b381`) navíc technikovi rovnou říká další krok (RDP na stanici, ukončit
+> `USBGuardian.exe` ve Správě úloh nebo stanici restartovat, pak znovu „Nasadit teď"), místo aby jen
+> konstatovala, co se stalo.
 
 **Alternativa „self-update" agentem** (stažení a přepsání vlastní exe) byla zvážena a **zamítnuta** jako
 rizikovější (služba přepisující vlastní binárku, nutnost hostovaného a podepsaného buildu); push z APP_SERVER
@@ -1084,6 +1149,40 @@ oddělené API, fronta) je **navržena**, ale **plně ověřena pod zátěží 5
 otevřený bod (viz §19). Automatizované testy (unit/integ) jsou omezené; těžiště ověření je na živém
 end-to-end testu — což je vědomé a v dokumentu uvedené.
 
+### 18.5 Adversariální multi-agent revize vlastních změn (16.09.2026)
+
+Doplněk k metodice z §18.1: po ladicí session, která našla a opravila hladovění auto-enrollmentu
+(§10.4) a navazující práci na Stanicích a Přehledu (§10.1), proběhla ještě samostatná revize VLASTNÍCH
+změn té samé session — ne živé ověření výsledného chování (to řeší §18.1–18.2), ale systematická snaha
+najít v čerstvém diffu chybu dřív, než ji najde produkce nebo oponent.
+
+Postup: N nezávislých „finder" agentů prošlo diff session ve třech dimenzích — korektnost, provozní
+bezpečnost, pokrytí testy. Každý jejich nález pak samostatně přezkoumaly 3 další „skeptik" agenti
+s výslovnou instrukcí zkusit ho VYVRÁTIT; nález se přijal, jen když ho většina skeptiků vyvrátit
+nedokázala. Tenhle adversariální krok je záměrně oddělený od hledání — agent, který nález sám navrhl, ho
+sám neobhajuje.
+
+Výsledek: **5 reálných, netriviálních nálezů (2 vysoké závažnosti)**, každý ověřený proti aktuálnímu
+kódu před opravou, ne jen převzatý:
+
+- **Bezpečnostně relevantní regrese ve vlastní opravě ze stejné session** — commit `91a2fe6` (zastavení
+  služby agenta před kopií při reinstalaci, §15.4) při selhání následného `robocopy` nechal stanici bez
+  běžící služby a bez pokusu o restart, což bylo HORŠÍ než stav před tou samou opravou. Opraveno `f9f8727`
+  (plný popis v §15.4).
+- **Pád exportu incidentů na `do=9999-12-31`** — nový Od/Do filtr (§10.1) neošetřil horní hranici
+  `DateOnly.MaxValue`, `ArgumentOutOfRangeException` shodilo Přehled i oba export endpointy. Opraveno
+  `e0ccf21` (plný popis v §10.1).
+- **Mezera v pokrytí testy** — rozhodnutí „kdy je poslední deploy-run ještě relevantní chyba" (dlaždice
+  a sloupec na Stanicích, §10.1) žilo jen inline v Razor `@code` bez testů, na rozdíl od zavedené
+  konvence (`StationStatus.cs`, §35.8a). Vytaženo do `DeployOutcome.cs` + testy, commit `cc920e7`.
+
+Že revize ve stejné session odhalila regresi ve VLASTNÍ, o pár hodin starší opravě téhož dne, je konkrétní
+argument pro praxi adversariální sebekontroly obecně: živé ověření (§18.1–18.2) potvrdí, že se systém
+chová správně v testovaných scénářích, ale samo o sobě neprojde každou méně obvyklou kombinaci vstupů
+(maximální datum na kraji reprezentovatelného rozsahu, selhání uprostřed vícekrokové operace, která byla
+předtím jednokroková). Nezávislá revize s explicitním úkolem „zkus to vyvrátit" našla přesně tenhle typ
+chyby dřív, než se dostala do provozu.
+
 ---
 
 ## 19. Omezení, rizika a známé slabiny
@@ -1124,8 +1223,10 @@ Tato kapitola je pro oponenturu klíčová — uvádí **vědomá** omezení, ni
 ### 19.6 Aktualizace klientů
 
 - Čistá automatizace updatu běžícího agenta zatím **chybí** (jen fresh install). `-ReinstallExisting`
-  nezastavuje službu před kopií (zamčený exe). Návrh řešení viz §15.4 — je to **známá mezera**, ne
-  opomenutí.
+  dřív nezastavoval službu před kopií (zamčený exe) — tahle konkrétní mezera zavřena **16.09.2026**.
+  Detail opravy i bezpečnostně relevantní regrese, kterou v ní týž den odhalila adversariální revize
+  (§18.5) a která byla obratem opravena, viz §15.4. Zbytek návrhu z §15.4 (dočasná pauza watchdog tasku
+  během kopie) zůstává **známá mezera**, ne opomenutí.
 
 ### 19.7 Per-serial blocklist
 
@@ -1289,7 +1390,9 @@ startovní sken + reconcile, takže se stav dorovná k serverové pravdě. Ově�
 **Q13: Jak se aktualizují klienti na nové verze agenta?**
 Aktuálně automatizovaná jen čerstvá instalace; update běžícího agenta je navržen (§15.4), ale ještě
 neimplementován — je to **známá mezera**, ne opomenutí. Návrh reusuje gMSA pipeline (update-safe
-reinstall + verzové cílení dle `AgentVersion`).
+reinstall + verzové cílení dle `AgentVersion`). Bezpečné zastavení služby před reinstalací
+(`-ReinstallExisting` už nemůže přepsat jen část balíčku běžícího zamčeného exe) je **opraveno
+16.09.2026** a dostupné z konzole tlačítkem „Nasadit teď" (detail viz §15.4).
 
 **Q14: Deploy přes SMB + sc.exe — není to křehké / bezpečné?**
 Je to důsledek zavřeného WinRM v prostředí. Používá standardní Windows mechanismy (SCM přes named-pipes,
@@ -1548,7 +1651,7 @@ Strukturovaný přehled testovacích případů. Stav „✅ ověřeno živě" =
 | TC | Scénář | Očekávaný výsledek | Stav |
 |----|--------|--------------------|------|
 | TC-40 | Fresh install (fleet) | Služba běží, heartbeat+incidenty | ✅ (PC-01) |
-| TC-41 | Reinstall/update běžícího agenta | Update-safe (stop→copy→start) | ⏳ (mezera §19.6) |
+| TC-41 | Reinstall/update běžícího agenta | Update-safe (stop→copy→start) | ✅ (16.09.2026, §15.4; watchdog pauza při kopii ⏳) |
 | TC-42 | Commit stamp | Footer = git HEAD | ✅ |
 | TC-43 | Watchdog nahodí zastavenou službu | Služba restartována | ⏳ |
 | TC-44 | Auto-enrollment (dry-run → ostrý) | Cíle zapsány, instalace přes gMSA | ✅ (PC-01) |

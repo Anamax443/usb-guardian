@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="cs">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>USB Guardian — myšlenková mapa</title>
+<title>USB Guardian — mind map</title>
 <style>
   :root{
     --bg:#0d1117; --panel:#161b22; --line:#30363d; --ink:#e6edf3; --muted:#8b949e;
@@ -43,7 +43,7 @@
 <header>
   <h1>USB Guardian — <span data-cs="myšlenková mapa" data-en="mind map"></span></h1>
   <span class="tag" data-cs="z čeho se systém skládá a co k čemu patří" data-en="what the system is made of and what belongs where"></span>
-  <div class="lang"><button id="lang-cs" class="on">Čeština</button><button id="lang-en">English</button></div>
+  <div class="lang"><button id="lang-cs">Čeština</button><button id="lang-en" class="on">English</button></div>
 </header>
 <div class="hint" data-cs="Tisk: Ctrl+P (A3 na šířku). Barva větve se drží i u jejích listů."
                   data-en="Print: Ctrl+P (A3 landscape). Each branch keeps its colour down to its leaves."></div>
@@ -55,7 +55,7 @@
 <script>
 (function(){
   "use strict";
-  var LANG='cs';
+  var LANG='en';
 
   // Strom: každá větev jde vlevo nebo vpravo od kořene.
   var TREE = {

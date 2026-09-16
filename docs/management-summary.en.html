@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="cs">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>USB Guardian — shrnutí pro vedení</title>
+<title>USB Guardian — management summary</title>
 <style>
   :root{
     --ink:#14181f; --muted:#5b6675; --line:#d7dce3; --soft:#f4f6f9;
@@ -61,8 +61,8 @@
   <span data-cs="Shrnutí pro vedení — jedna strana A4, připravená k tisku"
         data-en="Management summary — one A4 page, ready to print"></span>
   <span class="sp">
-    <button id="lang-cs" class="on">Čeština</button>
-    <button id="lang-en">English</button>
+    <button id="lang-cs">Čeština</button>
+    <button id="lang-en" class="on">English</button>
     <button onclick="window.print()" data-cs="Tisk" data-en="Print"></button>
   </span>
 </div>
@@ -134,7 +134,7 @@
 <script>
 (function(){
   "use strict";
-  var LANG='cs';
+  var LANG='en';
   function apply(){
     document.querySelectorAll('[data-cs]').forEach(function(e){ e.innerHTML=e.getAttribute('data-'+LANG); });
     document.documentElement.lang=LANG;

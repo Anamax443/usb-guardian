@@ -26,9 +26,9 @@ Serverová konzole agreguje data, drží inventář stanic z AD a ukazuje, kam c
 | **Autorizace konzole** | AD `DOMENA\IT-Admins` + whitelist `DOMENA\it-admin` (+ DB seznam z Nastavení) |
 | **Šifrování agent↔API** | HTTPS + **pinning otisku** (bez CA) — ověřeno end-to-end (heartbeat OK z PC-01) |
 | **AD sync** | zapnutý (`adsync.enabled=true` v DB), 60 min + on-demand; přepínatelné z Nastavení od 11.09.2026 (viz 5.15) |
-| **Live commit** (14.09.2026) | **konzole `00cebc3`** (ping-gated zmlklý agent + PingMonitorService + AD sync přepínatelný z UI + oprava Deploy-Console.cmd/Deploy-Api.cmd, viz 5.14/5.15; HTTPS z `ff53654` zatím nenasazeno) · **API `65b2235`** (nasazeno 14.09.2026 – spool retry `befbeb0`, whitelist endpoint bez nepodepsané verze `11734f2`, sloupce LastPing `4defcfe`; viz 5.16) · **agent beta+stable `924b9b8`** (nezměněno – kroky 3–5 z P1 seznamu čekají na společnou beta vlnu). Bezpečnostní audit + náprava 04.09 — viz 5.12; hlubší průchod 10.–11.09 — viz 5.13/5.15; externí oponentura ověřená proti živému stavu 14.09 — viz 5.16 |
+| **Live commit** (16.09.2026) | **konzole `cc920e7`** (auto-enrollment zamíchané cíle + OFFLINE→Warn, dlaždice „Chyby nasazení"/sloupec „Poslední nasazení" (vylučují ignorované i právě hlásící stanice), Od–Do rozsah pro Přehled/export, `DeployOutcome.cs`; potvrzeno dnešním poklesem dlaždice „Chybí agent" 188→~149, viz 5.17; HTTPS z `ff53654` zatím nenasazeno) · **API `65b2235`** (nezměněno od 14.09.2026, viz 5.16) · **agent beta+stable `924b9b8`** (nezměněno – kroky 3–5 z P1 seznamu čekají na společnou beta vlnu) · **`Deploy-AgentFleet.ps1` na `APP_SERVER`** dnes přepodepsán (stop-před-kopií + bezpečnostní oprava restartu po neúspěšném reinstalu + konkrétní návod pro technika, viz 5.17), `USBGuardian-ManualInstall` nově s `-ReinstallExisting`. Bezpečnostní audit + náprava 04.09 — viz 5.12; hlubší průchod 10.–11.09 — viz 5.13/5.15; externí oponentura ověřená proti živému stavu 14.09 — viz 5.16 |
 | **Rozvoz agenta – osvědčený postup** | balíček → archiv `…\USBGuardianAgentVersions\<commit>` → **beta na jednu stanici** (dočasně přepsaný `update-beta.txt`) → ověřit → beta na zbytek → teprve pak **stable**. Log `…\deploy\update-agent.log`; „Agent verze" v konzoli se projeví až dalším heartbeatem (≤2 min), takže hned po rozvozu tam ještě chvíli svítí stará verze |
-| **Konzole – stránky** | Přehled (filtr+kumulace+řazení, kapacita, **export CSV + manažerský report s grafy**), Stanice (AD inventář + „Zmlklo agentů" + „Vyžádat data" + **Nasazení / hromadné vyřadit-zařadit**), Whitelist (**kapacita + filtr katalogu + auto-publish podepsané verze**), Nastavení (vynucování/přístup/email/alerty/dohled/auto-enrollment+default PC/retence/**Údržba: reload nastavení**), **Databáze**, **Kontroly** (health checks), Dokumentace (+HTML animace) |
+| **Konzole – stránky** | Přehled (filtr+kumulace+řazení+**Od–Do rozsah**, kapacita, **export CSV + manažerský report s grafy**), Stanice (AD inventář + „Zmlklo agentů" + „Vyžádat data" + **Nasazení / hromadné vyřadit-zařadit** + **„Chyby nasazení" / „Poslední nasazení"**), Whitelist (**kapacita + filtr katalogu + auto-publish podepsané verze**), Nastavení (vynucování/přístup/email/alerty/dohled/auto-enrollment+default PC/retence/**Údržba: reload nastavení**), **Databáze**, **Kontroly** (health checks), Dokumentace (+HTML animace) |
 | **Enforcement (F1-3)** | **whitelist 1:1** (auto-podpis serverem, interní RSA klíč na APP_SERVER) → **vynucování** server→agent (`policy.enforce` v heartbeatu) → **break-glass** (lokální konzole 5080, offline, logováno, zruší se při sync) + **auto-re-enable** + reconciliace s whitelistem. Lokální konzole: restart služby, break-glass, seznam whitelistu |
 | **Deploy účty (oddělené vrstvy)** | **klienti:** gMSA `DOMENA\gmsa-deploy$` – v `Workstation-Admins`, admin **jen na stanicích**, task `USBGuardian-AutoDeploy` na `APP_SERVER`. **servery:** gMSA `DOMENA\gmsa-srvdeploy$` – lokální admin **jen na SQL_SERVER**, task `USBGuardian-ApiDeploy` na `APP_SERVER` — **úloha vznikla až 04.09.2026** (do té doby tam byl jen skript `Deploy-Api.cmd`, takže se API od června nenasazovalo; viz 5.10). **Konzole (`APP_SERVER$`) není admin nikde.** Od 03.09.2026 – jeden účet už nedrží fleet i server současně |
 | **Agent (test) PC-01** | **PILOT ÚSPĚŠNÝ** – `PC-01` (vlastní workstation); služba „USB Guardian" RUNNING, heartbeat + **incidenty tečou do DB**. Agent live **`f2bb194`** – atribuce uživatele, klient 100% (watchdog+toast), **enforcement F1-3 + auto-re-enable + spolehlivý unblock + re-blokace připojených médií**. Update agenta chce elevaci (UAC) → spustí uživatel (build staged na APP_SERVER) |
@@ -602,6 +602,80 @@ nefiltruje servery (OU / `OperatingSystem`), takže se je bude pokoušet instalo
 4. „Verze komponent": očekávaná stable verze + počty stanic per verze. Ověření: jedna stanice na jiné verzi = warn s počtem.
 5. Per-agent sequence + server ACK (klient ví, po které číslo server potvrdil zápis do DB).
 6. Integrační test agent → API → výpadek SQL → obnova (100 dávek, 0 ztrát, 0 duplicit).
+
+### 5.17 Auto-enrollment uvázlé na stejných rozbitých stanicích + řetěz oprav nasazení (16.09.2026)
+
+Výchozí stav dneška: **188 ze 228 stanic bez agenta**, přestože auto-enrollment běží 24/7 už od 5.3.
+Kořenová příčina + navazující řetěz oprav (několik z nich odhalila dodatečná **adversariální
+multi-agentní revize** dnešních vlastních změn, ne jen prvotní implementace), **jeden krok = jeden
+commit**:
+
+1. **`6606e99`** – `AgentDeployService.RunOnceAsync` vybíral cíle SQL dotazem BEZ `ORDER BY` a rovnou
+   `Take(MaxPerRun)` – bez řazení vrací SQL Server pořád stejné první N stanic, takže hrstka trvale
+   nedostupných/rozbitých stanic na začátku pořadí navždy vyčerpala všechny sloty každého běhu (à
+   15 min) a zbytek flotily se nikdy nedostal na řadu. Oprava: zamíchat (Fisher-Yates,
+   `Random.Shared`) PŘED `Take()` – 3 nové testy. Zároveň `DeployResultIngestor.LevelForStatus`
+   přeřadil `OFFLINE` z `Error` na `Warn` (stanice zrovna neodpovídá na ping – vypnutá, mimo VPN –
+   nic se nepokazilo; skutečná chyba je `FAIL`, např. chybějící oprávnění).
+2. **`f669683`** – nová dlaždice **„Chyby nasazení"** + sloupec **„Poslední nasazení"** na
+   Stanicích: poslední výsledek pokusu o instalaci přímo u stanice (z Deníku aktivity, zdroj
+   `deploy-run`), zvýrazněná chyba, tooltip s časem a plnou hláškou. Dlaždice „Chybí agent" (Přehled
+   i Stanice) i nová „Chyby nasazení" teď obě vylučují trvale ignorované stanice (servery, kam se
+   agent záměrně neinstaluje) – vyřazení je vědomé rozhodnutí operátora, ne mezera ve flotile.
+3. **`91a2fe6`** – `Deploy-AgentFleet.ps1`: reinstall existující služby šel dosud rovnou na
+   `robocopy` bez zastavení služby (známý nedostatek z dřívější oponentury – běžící/zamčené `.exe`
+   mohlo způsobit, že se přepíše jen část balíčku). Teď nejdřív `sc stop` + čeká na `STOPPED`
+   (max 10 s), stejný vzor jako `Deploy-Console.cmd`, teprve pak kopie.
+4. **`64c6217`** – sloupec „Poslední nasazení" i dlaždice „Chyby nasazení" braly poslední záznam bez
+   ohledu na to, jestli stanice dnes funguje. **Reálný incident:** CERNYSW11 (16.09.2026) hlásila
+   (ozvala se 10:35), ale sloupec pořád ukazoval starý `SKIP` z dřívějšího pokusu a vypadalo to jako
+   aktuální problém. Historie se teď ukazuje/počítá jen u stanic BEZ funkčního agenta – u těch, co
+   hlásí, na tom, co bylo dřív, už nezáleží.
+5. **`5747750`** – Přehled dostal explicitní rozsah **Od–Do** (místní kalendářní datum, celý koncový
+   den včetně), s předností před dosavadními dlaždicemi „posledních N dní". Prosakuje do CSV exportu
+   i manažerského HTML reportu. **Proč:** dotaz orgánu dozoru na konkrétní měsíc („záznamy za
+   březen") jde pohyblivým oknem „posledních 90 dní" reprodukovat jen odhadem, ne přesně. Sdílená
+   logika (`IncidentDateRange.cs`, čistá/testovaná) drží Přehled a oba export endpointy vždy na
+   přesně stejném období.
+6. **`72ae744`** – hláška „SKIP: sluzba uz existuje (pouzij -ReinstallExisting)" (rada na CLI
+   přepínač, v konzoli k ničemu) přepsána na „SKIP: služba existuje — klikni „Nasadit teď"" –
+   tlačítko od dnešní provozní změny (viz níž) skutečně `-ReinstallExisting` předává dál.
+7. **`e0ccf21`** – rozsah s `do=9999-12-31` (maximum, co umí vyrobit `<input type="date">` bez
+   horního limitu) shazoval Přehled (matoucí „nelze načíst data z databáze") a oba export endpointy
+   tvrdě (HTTP 500) – výpočet vyloučené horní hranice počítal „do + 1 den", což u
+   `DateOnly.MaxValue` není reprezentovatelné `DateTime`. Nalezeno multi-agentní revizí dnešních
+   změn.
+8. **`f9f8727`** – **BEZPEČNOSTNĚ RELEVANTNÍ regresní oprava.** Krok 3 (`91a2fe6`) přidal „stop před
+   kopií", ale měl díru: když pak selhal `robocopy` (zámek, ACL, síť, plný disk), skript šel rovnou
+   do `catch` a službu už nikdy nenastartoval zpět – stanice, co předtím aktivně chránila USB porty,
+   skončila trvale BEZ běžící ochrany, hůř než před krokem 3 (ten při selhaném reinstalu aspoň nechal
+   běžet původní funkční službu dál). `catch` teď po zastavení služby zkusí `sc start` jako poslední
+   záchranu, než ohlásí `FAIL`. Nalezeno adversariální multi-agentní revizí.
+9. **`cc920e7`** – rozhodnutí „kdy se poslední deploy-run ještě počítá jako chyba" (krok 4 výše) žilo
+   jen inline v Razor `@code` bloku `Computers.razor`, bez testovací konvence. Vytaženo do
+   `DeployOutcome.cs` (čistá/testovatelná třída, stejný vzor jako existující `StationStatus.cs`) s
+   vlastními testy – aby příště omylem obrácená podmínka `!reports` spadla na `dotnet test`, ne až
+   živě, jako dnes u CERNYSW11. Nalezeno multi-agentní revizí.
+10. **`d86b381`** – hláška „služba se do 10 s nezastavila" dosud říkala jen CO se stalo, ne CO S TÍM
+    – technik u konzole nepoznal, jestli má čekat, klikat znovu, nebo jet na stanici osobně. Teď
+    rovnou radí postup: RDP na stanici, ukončit `USBGuardian.exe` ve Správě úloh (nebo stanici
+    restartovat), pak znovu zkusit „Nasadit teď".
+
+**Provozní změna mimo git (`APP_SERVER`, dnes):** scheduled task `USBGuardian-ManualInstall` (spouští
+ho tlačítko „Nasadit teď" v konzoli, `DeployTrigger.cs`) dosud volal `Deploy-AgentFleet.ps1` BEZ
+`-ReinstallExisting` – u stanice s existující-ale-rozbitou registrací služby tak navždy jen hlásil
+`SKIP` (bod 6 výše), aniž šlo z konzole cokoliv udělat. Argument úlohy upraven přímo na `APP_SERVER`
+(`schtasks /Query … /XML` → cílená úprava `-Command` řetězce → `schtasks /Create … /XML … /F`, se
+zachovaným `Principal`/`LogonType=Password`); sesterská `USBGuardian-AutoDeploy` (bez dohledu, celá
+flotila) `-ReinstallExisting` záměrně nedostala – reinstall zůstává na ručním kliknutí. Skript
+`Deploy-AgentFleet.ps1` **není** výstup `dotnet publish` – je to ruční kopie ze `scripts\` v gitu,
+takže po dnešních třech opravách (body 3, 8, 10) ho bylo potřeba znovu podepsat (Authenticode, firemní
+cert) přes interní podpisovací nástroj a ručně nahrát na `APP_SERVER`, jinak by tam dál běžela stará
+podepsaná verze. Postup zdokumentován v `docs/auto-deploy-setup.md`.
+
+**Efekt viditelný dnes na Stanicích:** dlaždice „Chybí agent" klesla ze 188 směrem k ~149, jak
+auto-enrollment (zamíchaný výběr, bod 1) začal dosahovat na stanice, na které se předtím nikdy
+nedostal; operátor navíc u konkrétní stanice hned vidí PROČ nasazení selhává, ne jen ŽE selhává.
 
 ### 5.5 Roadmapa (pending)
 - **Z oponentury 14.09.2026 (viz 5.16, v tomto pořadí):** per-stanice „poslední přijatá dávka" oddělená od `LastSeen`; `EnsureCreatedAsync` mimo kritickou cestu startu + `/health/live`; `Deploy-Api.cmd` ověří commit po startu; očekávaná verze + počty v „Verze komponent"; sequence/ACK agent↔server; e2e test výpadku SQL.

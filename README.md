@@ -56,6 +56,11 @@ technické opatření pro **NIS2 / zákon 181/2014 Sb. / ISO 27001**.
 | 46 | **Druhá vlna oponentury (11.09.2026)** – CSRF ochrana zapisujících endpointů lokální konzole (Origin/Referer, fail-closed); `DeviceBlocker.RunPowerShell` čtení asynchronní PŘED `WaitForExit` (starý kód mohl na zaseknutém `powershell.exe` viset navěky bez ohledu na deklarovaný timeout) + skutečné zabití procesu (i dětí) po vypršení; oprava zastaralé dokumentace (`architecture.md` ještě popisovala hostname ověření jako warn-only, ačkoli tvrdé 403 běží od 10.09.) | ✅ |
 | 47 | **Třetí vlna oponentury (11.09.2026)** – `IncidentQueueWorker` už nepotřebuje ruční restart po výpadku SQL: `RetrySpoolLoopAsync` běží souběžně po celou dobu provozu, zkouší přehrát spool s ohraničeným exponenciálním odstupem (5 s → strop 5 min, reset po úspěchu), `SemaphoreSlim` drží zpracování sekvenční, ať retry nikdy nezapíše stejný batch souběžně s živou frontou · **nasazeno na SQL_SERVER 14.09.2026** (API `65b2235`, viz HANDOFF 5.16) | ✅ |
 | 48 | **Čtvrtá vlna oponentury (11.09.2026)** – Admin konzole HTTPS self-cert (bez CA, stejný vzor jako agent↔API) + `Admin.Tests` konečně běží v CI; `Whitelist:SigningRequired` (default `true`) – chybějící podpisový klíč je teď `Bad`, ne jen `Off` (nález na APP_SERVER: appsettings.local.json cestu ztratil, nikdo si toho nevšiml); **rollback/replay ochrana whitelistu** – `WhitelistSync` odmítne uložit stažený blob se starším `issuedAt`, než má lokální kopie (platný podpis chrání integritu, ne čerstvost) | ✅ |
+| 49 | **Auto-enrollment nezasekává flotilu** (16.09.2026) – `AgentDeployService` zamíchá stanice bez agenta (Fisher-Yates) PŘED oříznutím na `deploy.maxPerRun`; bez zamíchání SQL dotaz (žádné `ORDER BY`) vracel pořád stejných prvních N stanic – pár trvale rozbitých na začátku pořadí blokovalo zbytek flotily navždy (nalezeno živě: 188 z 228 stanic bez agenta). `OFFLINE` v Deníku aktivity přeřazeno z Error na Warn (stanice zrovna neodpovídá na ping, nic se nerozbilo) – `FAIL` (např. chybějící oprávnění) zůstává Error | ✅ |
+| 50 | **Nasazení viditelné per stanice** (16.09.2026) – nová dlaždice **„Chyby nasazení"** + sloupec **„Poslední nasazení"** na Stanicích (výsledek posledního pokusu z Deníku aktivity, zdroj `deploy-run`); dlaždice „Chybí agent" i „Chyby nasazení" nepočítají trvale ignorované stanice; historie posledního pokusu se u stanice, co teď agenta reálně hlásí, **neukazuje** (stará SKIP/FAIL matla operátora u stanice, co mezitím naběhla – incident CERNYSW11); rozhodovací logika vytažena do testované `DeployOutcome.cs` (po vzoru `StationStatus.cs`) | ✅ |
+| 51 | **Reinstall agenta bezpečněji** (16.09.2026) – `Deploy-AgentFleet.ps1` u reinstallu existující služby nejdřív **zastaví a počká na STOPPED**, teprve pak kopíruje (jinak zamčené běžící `.exe` nechalo na stanici směs starých a nových souborů); UI hláška „SKIP: use -ReinstallExisting" (CLI přepínač, v konzoli k ničemu) nahrazena „SKIP: služba již existuje — klikni „Nasadit teď"" a hláška o nezastavené službě teď radí i **co s tím** (RDP na stanici, ukončit `USBGuardian.exe` nebo restart, pak znovu Nasadit teď) | ✅ |
+| 52 | **BEZPEČNOSTNÍ oprava regrese z #51** (16.09.2026, opraveno týž den) – zastavení služby před kopírováním mělo mezeru: když pak selhal `robocopy`, skript skočil rovnou do catch bloku a **nikdy službu znovu nenastartoval** – stanice, co předtím aktivně chránila USB porty, zůstala BEZ jakékoli běžící ochrany, hůř než stav před opravou #51. Catch blok teď dělá **best-effort `sc start`** před nahlášením FAIL | ✅ |
+| 53 | **Přesný rozsah Od–Do v Přehledu** (16.09.2026) – vedle posuvných „posledních N dní" jde zadat kalendářní **Od–Do**, promítá se i do CSV exportu a manažerského reportu (odpověď na dotaz orgánu dozoru typu „záznamy za březen", co posuvné okno nezvládne zopakovat); okrajová hodnota `do=9999-12-31` (maximum z `<input type="date">`) dřív shazovala Přehled i oba export endpointy (HTTP 500) přetečením při výpočtu vyloučené horní hranice – opraveno | ✅ |
 | – | Per-serial **blocklist** + blokace už-připojeného média | 🔜 |
 | – | Monitoring expirace podpisového certu | 🔜 |
 | – | **Retence deníku** – `sp_PurgeActivityLog` existuje, ale nikdo ji nevolá | 🔜 |
@@ -108,16 +113,21 @@ dark/light přepínač `axima.theme` bez FOUC, tisk = light, semafor stavů). St
 
 - **Přehled** – dlaždicový souhrn napříč listy (Stanic v AD / Chybí agent / Schválených médií /
   Deaktivovaných / Incidentů / Blokováno / Varování, prokliky na listy). **Filtr** (období
-  30/90/rok/vše, akce, fulltext) + **kumulace** (seskupení médium+stanice+uživatel s počtem) +
-  identifikátory **VID/PID/sériové číslo** + **velikost média** + sloupec **„Schváleno"** (aktuálně dle whitelistu).
-  Tabulka **„Detailně" má řaditelné hlavičky**. **Export:** `⬇ CSV` (Excel) a `📊 Report` =
-  **manažerský souhrn** (KPI + grafy: vývoj incidentů, donut akcí, top uživatelé/stanice + sekce Databáze;
-  inline SVG, tisknutelné na **1–2 A4**) – oba dědí aktivní filtr.
-- **Stanice** – inventář z AD; dlaždice filtrují (vše / hlásí / **zmlklo agentů** / chybí agent),
-  **hledání**, **cesta v AD** (OU) vedle hostname, **ikona komunikace** (zelená ≤ práh / žlutá zmlkl
-  / šedá žádný kontakt; práh `comm.silentAfterMinutes` v Nastavení), tlačítko **Aktualizovat z AD**
-  a **„Vyžádat data"** (řádek/hromadně). Sloupec **„Nasazení"** + hromadné **„Vyřadit / Zařadit vše"** =
-  řízení auto-enrollmentu per stanice (výjimka proti výchozímu `deploy.defaultEnroll`).
+  30/90/rok/vše, přesný kalendářní rozsah **Od–Do** pro audit/kontrolu, akce, fulltext) + **kumulace**
+  (seskupení médium+stanice+uživatel s počtem) + identifikátory **VID/PID/sériové číslo** + **velikost
+  média** + sloupec **„Schváleno"** (aktuálně dle whitelistu). Tabulka **„Detailně" má řaditelné
+  hlavičky**. **Export:** `⬇ CSV` (Excel) a `📊 Report` = **manažerský souhrn** (KPI + grafy: vývoj
+  incidentů, donut akcí, top uživatelé/stanice + sekce Databáze; inline SVG, tisknutelné na **1–2 A4**)
+  – oba dědí aktivní filtr **včetně Od–Do** (pro přesnou odpověď na dotaz typu „záznamy za březen").
+- **Stanice** – inventář z AD; dlaždice filtrují (vše / hlásí / **zmlklo agentů** / chybí agent /
+  **chyby nasazení**), **hledání**, **cesta v AD** (OU) vedle hostname, **ikona komunikace** (zelená
+  ≤ práh / žlutá zmlkl / šedá žádný kontakt; práh `comm.silentAfterMinutes` v Nastavení), tlačítko
+  **Aktualizovat z AD** a **„Vyžádat data"** (řádek/hromadně). Sloupec **„Nasazení"** + hromadné
+  **„Vyřadit / Zařadit vše"** = řízení auto-enrollmentu per stanice (výjimka proti výchozímu
+  `deploy.defaultEnroll`). Sloupec **„Poslední nasazení"** + dlaždice **„Chyby nasazení"** ukazují
+  výsledek posledního pokusu o instalaci (z Deníku aktivity, zdroj `deploy-run`) přímo u stanice –
+  obě dlaždice („Chybí agent" i „Chyby nasazení") vynechávají trvale ignorované stanice a historie
+  se neukazuje u stanice, co agenta teď reálně hlásí (stará chyba by jinak matla operátora).
 - **Whitelist** – schválená média; **stačí zadat sériové číslo** (VID/PID/název se dotáhnou
   z incidentů, i zpětně), **kapacita** (z incidentů), **hromadný import**, **editace polí** inline,
   **checkbox Aktivní** (dočasná deaktivace bez mazání).
@@ -219,10 +229,17 @@ Stanice bez agenta jsou vidět na **Stanicích** (dlaždice „Chybí agent"). N
 - **Hromadně:** `scripts\Deploy-AgentFleet.ps1 -TargetsFile … -SourcePath …` – paralelní rollout přes
   `\\HOST\C$` + `sc.exe \\HOST create`; registruje **PS-free** scheduled tasky (watchdog à 3 min `sc start`
   + **ToastHelper** logon/unlock přes `schtasks /XML`); přeskočí offline/už-nainstalované; audit CSV. (PS 5.1 i 7.)
+  **Reinstall existující služby** (`-ReinstallExisting`, to používá i tlačítko **„Nasadit teď"** v konzoli)
+  ji nejdřív **zastaví a počká na STOPPED**, teprve pak kopíruje – jinak zamčené běžící `.exe` nechá na
+  stanici směs starých a nových souborů. Pokud pak kopírování stejně selže, skript se **best-effort pokusí
+  službu znovu nastartovat**, aby stanice po neúspěšném reinstallu nezůstala úplně bez ochrany.
 - **Auto-enrollment (konzole nasazuje sama):** `AgentDeployService` po AD syncu najde stanice bez agenta,
-  uplatní **výchozí `deploy.defaultEnroll` + výjimky** (`includeHosts`/`excludeHosts` spravované v Stanicích) a
-  (v ostrém režimu) zapíše cíle do `deploy.targetsFile`; instalaci provede **scheduled task na APP_SERVER pod dedikovaným
-  gMSA** (least-privilege). **Default VYPNUTO + dry-run.** Nastavení: [docs/auto-deploy-setup.md](docs/auto-deploy-setup.md).
+  uplatní **výchozí `deploy.defaultEnroll` + výjimky** (`includeHosts`/`excludeHosts` spravované v Stanicích),
+  **zamíchá pořadí** (Fisher-Yates) a teprve pak ořízne na `deploy.maxPerRun` – bez zamíchání SQL dotaz bez
+  `ORDER BY` vracel pořád stejných prvních N stanic, takže pár trvale rozbitých na začátku pořadí blokovalo
+  zbytek flotily navždy – a (v ostrém režimu) zapíše cíle do `deploy.targetsFile`; instalaci provede
+  **scheduled task na APP_SERVER pod dedikovaným gMSA** (least-privilege). **Default VYPNUTO + dry-run.**
+  Nastavení: [docs/auto-deploy-setup.md](docs/auto-deploy-setup.md).
 - **Aktualizace už nasazeného agenta:** `scripts\Update-Agent.cmd <ZDROJ> <HOST|SOUBOR> [SLUŽBA]` – zastaví službu,
   **počká na `STOPPED`**, zkopíruje a **ověří `RUNNING`**. Bez toho je běžící `.exe` zamčený, přepíše se jen část
   souborů a na stanici zůstane **směs verzí**, zatímco deploy hlásí úspěch. Stanici bez služby přeskočí.
@@ -386,6 +403,12 @@ GRANT INSERT, UPDATE ON dbo.WhitelistVersions TO [DOMENA\APP_SERVER$];          
   wildcard fallbackem, audit mohl zaznamenat `Blocked` dřív, než enforcement doopravdy proběhl,
   `POST /api/whitelist/devices` mohl aktivovat nepodepsanou verzi whitelistu. Sedmý (spool retry
   po SQL výpadku) opraven v `befbeb0` a nasazen 14.09.2026 — viz `docs/oponentura.md` kap. 35.7.
+- **Regrese v reinstallu agenta, opravena týž den** (16.09.2026) – oprava „zastavit službu před
+  kopírováním" (proti napůl přepsanému balíčku na zamčeném běžícím `.exe`) měla mezeru: když pak
+  selhal `robocopy`, skript skočil rovnou do catch bloku a **nikdy službu znovu nenastartoval** –
+  stanice, co předtím aktivně chránila USB porty, zůstala BEZ jakékoli běžící ochrany, hůř než stav
+  před tou opravou. `Deploy-AgentFleet.ps1` teď v catch bloku dělá **best-effort `sc start`** před
+  nahlášením FAIL.
 
 ## Repo struktura
 
@@ -402,7 +425,8 @@ usb-guardian/
 │       ├── Components/        # Pages (Home, Computers, Whitelist, Settings, Database, Docs), Layout
 │       ├── AdSync/            # AdSyncRunner + AdSyncService
 │       ├── Deploy/            # AgentDeployService (auto-enrollment), PingMonitorService,
-│       │                      #   StationStatus (Silent/ProbablyOff klasifikace), DeployTrigger
+│       │                      #   StationStatus (Silent/ProbablyOff klasifikace),
+│       │                      #   DeployOutcome (chyba nasazení klasifikace), DeployTrigger
 │       ├── Export/            # ExportEndpoints (CSV + manažerský report)
 │       ├── Notifications/     # IncidentAlertService + EmailSender
 │       └── appsettings.local.json.example

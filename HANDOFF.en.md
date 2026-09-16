@@ -26,9 +26,9 @@ The server console aggregates data, keeps a station inventory from AD and shows 
 | **Console authorization** | AD `DOMENA\IT-Admins` + whitelist `DOMENA\it-admin` (+ DB list from Settings) |
 | **Agent↔API encryption** | HTTPS + **thumbprint pinning** (no CA) — verified end-to-end (heartbeat OK from PC-01) |
 | **AD sync** | enabled (`adsync.enabled=true` in DB), 60 min + on-demand; toggleable from Settings since 2026-09-11 (see 5.15) |
-| **Live commit** (2026-09-14) | **console `00cebc3`** (ping-gated silent agent + PingMonitorService + AD sync toggleable from the UI + fix for Deploy-Console.cmd/Deploy-Api.cmd, see 5.14/5.15; HTTPS from `ff53654` not deployed yet) · **API `65b2235`** (deployed 2026-09-14 – spool retry `befbeb0`, whitelist endpoint no longer creates an unsigned version `11734f2`, LastPing columns `4defcfe`; see 5.16) · **agent beta+stable `924b9b8`** (unchanged – steps 3–5 of the P1 list are waiting for a joint beta wave). Security audit + remediation 2026-09-04 — see 5.12; deeper review pass 2026-09-10–11 — see 5.13/5.15; external review verified against the live state 2026-09-14 — see 5.16 |
+| **Live commit** (2026-09-16) | **console `cc920e7`** (shuffled auto-enrollment targets + OFFLINE→Warn, "Deploy errors" tile / "Last deployment" column (excluding ignored and currently-reporting stations), From–To range for Overview/export, `DeployOutcome.cs`; confirmed by today's "Missing agent" drop 188→~149, see 5.17; HTTPS from `ff53654` not deployed yet) · **API `65b2235`** (unchanged since 2026-09-14, see 5.16) · **agent beta+stable `924b9b8`** (unchanged – steps 3–5 of the P1 list are waiting for a joint beta wave) · **`Deploy-AgentFleet.ps1` on `APP_SERVER`** re-signed today (stop-before-copy + a security fix restarting the service after a failed reinstall + concrete next steps for a technician, see 5.17), `USBGuardian-ManualInstall` now carries `-ReinstallExisting`. Security audit + remediation 2026-09-04 — see 5.12; deeper review pass 2026-09-10–11 — see 5.13/5.15; external review verified against the live state 2026-09-14 — see 5.16 |
 | **Agent rollout – the routine that works** | package → archive `…\USBGuardianAgentVersions\<commit>` → **beta to a single station** (temporarily overwritten `update-beta.txt`) → verify → beta to the rest → only then **stable**. Log `…\deploy\update-agent.log`; the console's "Agent version" only catches up on the next heartbeat (≤2 min), so right after a rollout it still shows the old one |
-| **Console – pages** | Overview (filter+aggregation+sort, capacity, **CSV export + manager report with charts**), Stations (AD inventory + "Agents gone silent" + "Request data" + **Deployment / bulk exclude-include**), Whitelist (**capacity + catalog filter + auto-published signed version**), Settings (enforcement/access/email/alerts/monitoring/auto-enrollment+default PC/retention/**Maintenance: reload settings**), **Database**, **Health checks**, Documentation (+HTML animation) |
+| **Console – pages** | Overview (filter+aggregation+sort+**From–To range**, capacity, **CSV export + manager report with charts**), Stations (AD inventory + "Agents gone silent" + "Request data" + **Deployment / bulk exclude-include** + **"Deploy errors" / "Last deployment"**), Whitelist (**capacity + catalog filter + auto-published signed version**), Settings (enforcement/access/email/alerts/monitoring/auto-enrollment+default PC/retention/**Maintenance: reload settings**), **Database**, **Health checks**, Documentation (+HTML animation) |
 | **Enforcement (P1-3)** | **whitelist 1:1** (server-side auto-sign, internal RSA key on APP_SERVER) → **enforcement** server→agent (`policy.enforce` in heartbeat) → **break-glass** (local console 5080, offline, logged, cleared on sync) + **auto-re-enable** + whitelist reconciliation. Local console: service restart, break-glass, whitelist list |
 | **Deploy account (auto-enroll)** | **gMSA `DOMENA\gmsa-deploy$`** – in `Workstation-Admins` (admin on clients) **and local admin on SQL_SERVER** (API deploy); installed on `APP_SERVER`; deploy task `USBGuardian-AutoDeploy` (under gMSA, via CIM) |
 | **Agent (test) PC-01** | **PILOT SUCCESSFUL** – `PC-01` (own workstation); service "USB Guardian" RUNNING, heartbeat + **incidents flowing into DB**. Agent live **`f2bb194`** – user attribution, client 100% (watchdog+toast), **enforcement P1-3 + auto-re-enable + reliable unblock + re-block of connected media**. Updating the agent needs elevation (UAC) → run by the user (build staged on APP_SERVER) |
@@ -641,6 +641,89 @@ that is item 1 below.
    version = warn with the count.
 5. Per-agent sequence + server ACK (the client knows up to which number the server confirmed the DB write).
 6. Integration test agent → API → SQL outage → recovery (100 batches, 0 lost, 0 duplicates).
+
+### 5.17 Auto-enrollment stuck on the same broken stations + a chain of deploy fixes (2026-09-16)
+
+Where today started: **188 of 228 stations without an agent**, even though auto-enrollment has been
+running 24/7 since 5.3. Root cause plus the chain of fixes that followed (several found by an
+**adversarial multi-agent review** of today's own changes, not just the first pass), **one step = one
+commit**:
+
+1. **`6606e99`** – `AgentDeployService.RunOnceAsync` picked targets with a SQL query that had no
+   `ORDER BY`, then went straight to `Take(MaxPerRun)` – without ordering, SQL Server keeps returning
+   the same first N stations, so a handful of permanently unreachable/broken stations at the front of
+   that order used up every slot of every run (every 15 min) forever, and the rest of the fleet never
+   got a turn. Fix: shuffle (Fisher-Yates, `Random.Shared`) BEFORE `Take()` – 3 new tests. At the same
+   time `DeployResultIngestor.LevelForStatus` reclassified `OFFLINE` from `Error` to `Warn` (the
+   station just isn't answering ping right now – off, off the VPN – nothing broke; the real error is
+   `FAIL`, e.g. missing permissions).
+2. **`f669683`** – new **"Deploy errors"** tile + **"Last deployment"** column on Stations: the latest
+   install-attempt outcome right on the station row (from the Activity log, source `deploy-run`),
+   highlighted when it's an error, with a tooltip showing the time and the full message. Both the
+   "Missing agent" tile (Overview and Stations) and the new "Deploy errors" tile now exclude
+   permanently-ignored stations (servers the agent is deliberately never installed on) – exclusion is
+   a deliberate operator decision, not a gap in the fleet.
+3. **`91a2fe6`** – `Deploy-AgentFleet.ps1`: reinstalling an already-existing service used to go
+   straight into `robocopy` without stopping the service first (a known gap from the earlier review –
+   a running/locked `.exe` could mean only part of the package got overwritten). Now it does `sc stop`
+   + waits for `STOPPED` (up to 10 s) first, the same pattern as `Deploy-Console.cmd`, only then
+   copies.
+4. **`64c6217`** – the "Last deployment" column and the "Deploy errors" tile both took the latest
+   record regardless of whether the station is actually working today. **Real incident:** CERNYSW11
+   (2026-09-16) was reporting fine (last seen 10:35), but the column still showed an old `SKIP` from an
+   earlier attempt and looked like a live problem. History is now shown/counted only for stations
+   WITHOUT a working agent – once a station reports, whatever happened before no longer matters.
+5. **`5747750`** – the Overview page gained an explicit **From–To** range (local calendar date, the
+   whole end day inclusive), taking precedence over the existing "last N days" chips. It flows through
+   to the CSV export and the manager HTML report too. **Why:** a compliance/regulator request for a
+   specific month ("records for March") can only be approximated with a rolling "last 90 days" window,
+   never reproduced exactly. The shared logic (`IncidentDateRange.cs`, pure and tested) keeps the
+   Overview page and both export endpoints looking at exactly the same period.
+6. **`72ae744`** – the message "SKIP: sluzba uz existuje (pouzij -ReinstallExisting)" (a CLI-flag hint,
+   meaningless inside the console) was reworded to "SKIP: service already exists — click 'Deploy now'"
+   – thanks to today's operational change below, the button genuinely does pass `-ReinstallExisting`
+   now.
+7. **`e0ccf21`** – a range with `do=9999-12-31` (the maximum a browser `<input type="date">` without an
+   upper limit can produce) crashed the Overview page (a misleading "cannot load database" banner) and
+   both export endpoints outright (HTTP 500) – computing the exclusive upper bound as "do + 1 day"
+   isn't representable as a `DateTime` once `do` is already `DateOnly.MaxValue`. Found by a multi-agent
+   review of today's changes.
+8. **`f9f8727`** – **SECURITY-RELEVANT regression fix.** Step 3 (`91a2fe6`) added "stop before copy",
+   but left a gap: if the subsequent `robocopy` then failed (a lock, an ACL, the network, a full disk),
+   the script went straight to its `catch` block and never restarted the service – a station that had
+   been actively protecting USB ports ended up with NO running protection at all, worse than before
+   step 3 (which at least left the original working service running on a failed reinstall). The
+   `catch` block now makes a best-effort `sc start` attempt after stopping the service, before
+   reporting `FAIL`. Found by an adversarial multi-agent review.
+9. **`cc920e7`** – the decision "when does the last deploy-run record still count as an error" (step 4
+   above) lived only inline in `Computers.razor`'s Razor `@code` block, with no test coverage.
+   Extracted into `DeployOutcome.cs` (a pure, testable class, matching the existing `StationStatus.cs`
+   convention) with its own tests – so that an accidentally-flipped `!reports` condition next time
+   fails `dotnet test`, instead of only showing up live the way it did today with CERNYSW11. Found by
+   a multi-agent review.
+10. **`d86b381`** – the message "service didn't stop within 10s" used to say only WHAT happened, not
+    what to do about it – a technician at the console couldn't tell whether to wait, click again, or
+    go to the station in person. It now gives the steps directly: RDP to the station, end
+    `USBGuardian.exe` in Task Manager (or reboot the station), then retry "Deploy now".
+
+**Operational change outside git (`APP_SERVER`, today):** the `USBGuardian-ManualInstall` scheduled
+task (triggered by the console's "Deploy now" button, `DeployTrigger.cs`) used to call
+`Deploy-AgentFleet.ps1` WITHOUT `-ReinstallExisting` – a station with an existing-but-broken service
+registration would just report `SKIP` forever (item 6 above), with nothing an operator could do about
+it from the console. The task's argument was edited directly on `APP_SERVER` (`schtasks /Query ...
+/XML` → a targeted edit of the `-Command` string → `schtasks /Create ... /XML ... /F`, preserving the
+existing `Principal`/`LogonType=Password`); the unattended, whole-fleet `USBGuardian-AutoDeploy` task
+deliberately did not get the same change – reinstalling stays a human-triggered action.
+`Deploy-AgentFleet.ps1` is **not** a `dotnet publish` output – it's a manual copy of the one in
+`scripts\` in git – so after today's three script fixes (items 3, 8, 10) it had to be re-signed
+(Authenticode, the company cert) via the internal signing tool and copied onto `APP_SERVER` by hand,
+otherwise the old signed version would keep running there. Procedure documented in
+`docs/auto-deploy-setup.en.md`.
+
+**Effect visible on Stations today:** the "Missing agent" tile dropped from 188 toward ~149 as
+auto-enrollment (the shuffled selection, item 1) started reaching stations it could never get to
+before; an operator can now also see WHY a specific station's deployment is failing, not just THAT it
+is failing.
 
 ### 5.5 Roadmap (pending)
 - **From the 2026-09-14 review (see 5.16, in this order):** per-station "last received batch" separate from `LastSeen`; `EnsureCreatedAsync` out of the startup critical path + `/health/live`; `Deploy-Api.cmd` verifies the commit after start; expected version + counts in "Component versions"; agent↔server sequence/ACK; e2e SQL-outage test.

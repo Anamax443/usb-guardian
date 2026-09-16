@@ -772,6 +772,37 @@ the DB list from Settings get in.
 - **Documentation** — `.md` rendered (Markdig) + the interactive "How it works" animation, plus a mind map,
   a flowchart and a management summary.
 
+> **A "Deployment errors" tile and column (16 Sep 2026):** the Stations page got a new "Deployment errors"
+> tile + filter and a "Last deployment" column — the last installation-attempt result shown right next to
+> the station (from the activity log, source `deploy-run`), with the error highlighted and a tooltip
+> showing the time and the full message. Both the "Missing agent" tile and the new "Deployment errors" tile
+> now also exclude permanently ignored stations (servers the agent is deliberately never installed on) —
+> that exclusion is a deliberate operator decision, not a gap in the fleet. The same day exposed a real
+> defect in the new column: it took the last record regardless of whether the station is working today —
+> CERNYSW11 had since checked in (at 10:35), but the column kept showing the old `SKIP` from an earlier
+> attempt and looked like a live problem. Fix: the history is now shown/counted only for stations WITHOUT a
+> working agent — once a station reports, an old `FAIL`/`SKIP` no longer means anything. The decision of
+> "when is the last deploy-run record still a relevant error" lived only inline in Razor `@code`, with no
+> tests — unlike the analogous decision for "silent agents" (`StationStatus.cs`, §35.8a), which does have
+> the test convention. Extracted into `DeployOutcome.cs` and covered by tests (`DeployOutcomeTests`), so an
+> accidental future deletion/inversion of the "only while not reporting" guard would no longer pass a green
+> `dotnet test` and only surface live — exactly what happened with CERNYSW11. Both the finding and the fix
+> came out of this session's own adversarial multi-agent review (§18.5).
+
+> **An exact From/To range for the incident export (16 Sep 2026):** the previous period filter on the
+> Overview page only knew "the last N days from now" or "all" — not enough for a supervisory authority
+> asking about one specific month (there is no way to reproduce "1 Mar–31 Mar", only to estimate how many
+> days back that is today). An explicit From/To (a local calendar date from `<input type="date">`) was
+> added, taking precedence over the 30/90/365/all tiles and flowing unchanged into both the CSV and the
+> management report (the shared, tested `IncidentDateRange`) — so the Overview page and both export
+> endpoints always see exactly the same period. This session's own adversarial multi-agent review (§18.5)
+> found a real bug in the new logic the same day: `do=9999-12-31` (the maximum a `<input type="date">` can
+> submit) broke the exclusive-upper-bound calculation (`+1 day` past the representable `DateTime` range →
+> `ArgumentOutOfRangeException`) — hidden on the Overview page behind a misleading "cannot load data from
+> the database" (the database was never actually touched), and uncaught outright on both export endpoints
+> (an HTTP 500, no try/catch there at all). Fixed with a guard that returns `DateTime.MaxValue` directly for
+> `DateOnly.MaxValue` instead of computing past the boundary.
+
 ### 10.2 `AdSyncRunner` / `AdSyncService`
 
 Reads computers from AD (`new DirectoryEntry()` — the ambient domain, nothing hardcoded), upserts into
@@ -789,6 +820,18 @@ A 24/7 orchestrator (default OFF + dry-run). After the AD sync it finds stations
 (`InActiveDirectory && LastSeen==null && AgentVersion==""`), applies `defaultEnroll` + include/exclude
 exceptions and (in live mode) writes the targets into `deploy.targetsFile`. The installation is performed by
 a scheduled task on APP_SERVER under a gMSA (see §6.12, §15).
+
+> **A missing candidate order permanently starved the fleet (found and fixed 16 Sep 2026):** the candidate
+> query above has no `ORDER BY` — SQL without ordering reliably returns the SAME row order every time, so
+> the subsequent `Take(MaxPerRun)` kept picking the same handful of first stations. A few permanently
+> unreachable/broken stations at the front of that order thus permanently occupied every slot, and the rest
+> of the fleet never got a turn — in practice 188 of 228 stations had no agent, with the same ~10 retried
+> over and over while the other ~178 were never even attempted. Fix:
+> `AgentDeployService.ShuffleInPlace` (Fisher-Yates, `Random.Shared`) shuffles the candidates BEFORE
+> `Take()`, so every run also reaches the ones behind the broken stations. A side fix the same day in
+> `DeployResultIngestor.LevelForStatus`: `OFFLINE` (a station simply not answering a ping) is now reported
+> as `Warn`, not `Error` — nothing actually failed, the station may just be switched off; a genuine
+> deployment failure (`FAIL`, e.g. access denied) stays `Error`.
 
 ### 10.5 `IncidentAlertService` + `EmailSender`
 
@@ -1012,14 +1055,45 @@ At the time of version 1.0 only a **fresh installation** was fully automated; **
 was on the roadmap. The proposed procedure (reusing the existing pipeline):
 
 1. **An update-safe `Deploy-AgentFleet.ps1 -ReinstallExisting`:** `sc stop` → wait for `STOPPED` →
-   `robocopy` → `sc start`, with the **watchdog task temporarily disabled** during the copy (otherwise the
-   watchdog brings the old service back within 3 minutes and locks the exe). (The existing
-   `-ReinstallExisting` did not stop the service before copying — a known gap, see §19.)
+   `robocopy` → `sc start` — this core part is **fixed as of 16 Sep 2026** (detail below). Still open:
+   **temporarily disabling the watchdog task** during the copy — today the watchdog keeps running for the
+   whole stop/copy window; otherwise it would bring an old/locked version back within 3 minutes. The risk
+   is low (the copy itself takes on the order of seconds, the watchdog's cycle is 3 minutes), but it is not
+   formally ruled out — this part remains open.
 2. **Version targeting in the console:** compare `Computers.AgentVersion` (from the heartbeat) against the
    target commit; stale stations → update targets → the gMSA task runs the reinstall. The same
    least-privilege model.
 3. **A controlled rollout:** dry-run/opt-in, ring deployment, an audit CSV; the commit stamp serves as
    confirmation of success (the console shows who is up to date).
+
+> **Reinstall now stops the service BEFORE copying (fixed 16 Sep 2026):** until then, `-ReinstallExisting`
+> went straight to `robocopy` without stopping the service first — precisely the "existing gap" described
+> above and in §19.6 (a running/locked `USBGuardian.exe` could mean only part of the package got
+> overwritten). Fix (`91a2fe6`): `sc stop` → wait for `STOPPED` (max 10 s, polled every 500 ms) → only then
+> copy, the same pattern `Deploy-Console.cmd` already uses for the console itself.
+>
+> This session's own adversarial multi-agent review (§18.5), run later the same day, found a
+> SECURITY-RELEVANT regression in that very fix: if the subsequent `robocopy` then failed (a locked file,
+> an ACL hiccup, a network blip, a full disk), the script fell straight into `catch` and never started the
+> service back up — a station that had previously been actively protecting its ports ended up with NO
+> running service and no attempt to bring it back. That was WORSE than the behaviour before fix `91a2fe6`
+> (which never stopped the service in the first place, so a failed `robocopy` at least left the original,
+> working service running). Fixed (`f9f8727`): the `catch` block now makes a best-effort `sc start` after a
+> failure that happened post-stop (on whatever is currently on disk) before reporting `FAIL` — a station
+> left unprotected is still a worse outcome than anything else.
+>
+> A same-day side fix (`72ae744`): the "the service already exists (use -ReinstallExisting)" message told
+> operators to use a CLI switch they have no way to invoke from the console. It now points instead at the
+> "Deploy now" button — its scheduled task on APP_SERVER (`USBGuardian-ManualInstall`) genuinely forwards
+> `-ReinstallExisting` as of the same day (which required re-signing the script and changing the task
+> definition on the server). The last message about a service failing to stop (`d86b381`) now also tells
+> the technician the next step directly (RDP to the station, end `USBGuardian.exe` in Task Manager or
+> reboot it, then click "Deploy now" again), instead of just stating what happened.
+>
+> This fix is distinct from the `Update-Agent.cmd` path described just below (§34.2): that path handles the
+> "Update" action for an already-healthy running agent and has had a safe stop-before-copy pattern since
+> 09/2026. `Deploy-AgentFleet.ps1 -ReinstallExisting` above serves the separate "Install"/reinstall action
+> and only gained the same safety today.
 
 The **"self-update by the agent"** alternative (downloading and overwriting its own exe) was considered and
 **rejected** as riskier (a service overwriting its own binary, the need for a hosted and signed build); a
@@ -1132,6 +1206,42 @@ match, the separated API, the queue) is **designed** but **has not yet been full
 500 agents** — an open point (see §19). Automated tests (unit/integration) are limited; the centre of
 gravity is the live end-to-end test — which is deliberate and stated in the document.
 
+### 18.5 Adversarial multi-agent review of this session's own changes (16 Sep 2026)
+
+An addition to the methodology in §18.1: after a debugging session that found and fixed the auto-enrollment
+starvation bug (§10.4) and the follow-on work on Stations and the Overview page (§10.1), a separate review
+was run of that SAME session's OWN changes — not live verification of the resulting behaviour (that is
+covered by §18.1–18.2), but a systematic attempt to find a bug in the fresh diff before production, or a
+reviewer, would.
+
+Method: N independent "finder" agents went through the session's diff across three dimensions —
+correctness, production safety, test coverage. Each of their findings was then independently re-examined by
+3 further "skeptic" agents explicitly instructed to try to REFUTE it; a finding was accepted only if a
+majority of skeptics failed to refute it. This adversarial step is deliberately separated from the finding
+step — the agent that proposed a finding does not get to defend it itself.
+
+Result: **5 real, non-obvious findings (2 of high severity)**, each verified against the current code
+before being fixed, not simply taken at face value:
+
+- **A security-relevant regression in this session's own, earlier fix** — commit `91a2fe6` (stopping the
+  agent service before the copy during a reinstall, §15.4) left a station with no running service and no
+  restart attempt if the following `robocopy` then failed, which was WORSE than the state before that same
+  fix. Fixed by `f9f8727` (full account in §15.4).
+- **The incident export crashing on `do=9999-12-31`** — the new From/To filter (§10.1) did not handle the
+  `DateOnly.MaxValue` upper bound, and an `ArgumentOutOfRangeException` broke both the Overview page and
+  both export endpoints. Fixed by `e0ccf21` (full account in §10.1).
+- **A test-coverage gap** — the decision of "when is the last deploy-run record still a relevant error"
+  (the Stations tile and column, §10.1) lived only inline in Razor `@code` with no tests, unlike the
+  established convention (`StationStatus.cs`, §35.8a). Extracted into `DeployOutcome.cs` plus tests, commit
+  `cc920e7`.
+
+That the review caught a regression in this session's OWN fix from just a few hours earlier the same day is
+a concrete argument for adversarial self-review as a practice: live verification (§18.1–18.2) confirms the
+system behaves correctly in the scenarios that get tested, but it does not by itself exercise every
+less-obvious combination of inputs (a maximum date at the edge of the representable range, a failure
+partway through an operation that used to be a single step). An independent review with the explicit brief
+"try to refute this" found exactly that class of bug before it reached production.
+
 ---
 
 ## 19. Limitations, risks and known weaknesses
@@ -1175,8 +1285,12 @@ This chapter is key for a review — it lists **deliberate** limitations, not om
 ### 19.6 Updating clients
 
 - Clean automation of updating a running agent is **missing** (fresh install only). `-ReinstallExisting`
-  does not stop the service before copying (a locked exe). For the proposed solution see §15.4 — a **known
-  gap**, not an omission. *(Implemented in 09/2026 — see §34.2.)*
+  used to not stop the service before copying (a locked exe) — that specific gap is **closed as of
+  16 Sep 2026**. For the detail of the fix, plus a security-relevant regression this session's own
+  adversarial review (§18.5) found in it the same day and which was fixed right away, see §15.4. The rest
+  of the §15.4 proposal (temporarily pausing the watchdog task during the copy) remains a **known gap**,
+  not an omission. *(The separate `Update-Agent.cmd` path, used for the "Update" action rather than this
+  `-ReinstallExisting` reinstall path, already had this same safety since 09/2026 — see §34.2.)*
 
 ### 19.7 A per-serial blocklist
 
@@ -1351,7 +1465,11 @@ re-blocking).
 **Q13: How are clients updated to new agent versions?**
 At the time of v1.0 only a fresh installation was automated; updating a running agent was designed (§15.4)
 but not yet implemented — a **known gap**, not an omission. The design reuses the gMSA pipeline (an
-update-safe reinstall + version targeting by `AgentVersion`). *(Implemented in 09/2026 — see §34.2.)*
+update-safe reinstall + version targeting by `AgentVersion`). *(The separate "Update" action /
+`Update-Agent.cmd` path already got this safety in 09/2026 — see §34.2.)* Safely stopping the service
+before a REINSTALL — the separate "Install" action's `-ReinstallExisting`, which can no longer overwrite
+only part of the package of a running locked exe — is **fixed as of 16 Sep 2026** and available from the
+console via the "Deploy now" button (detail in §15.4).
 
 **Q14: Deployment over SMB + sc.exe — is that not fragile / safe?**
 It is a consequence of WinRM being closed in the environment. It uses standard Windows mechanisms (the SCM
@@ -1624,7 +1742,7 @@ A structured overview of test cases. The state "✅ verified live" = confirmed o
 | TC | Scenario | Expected result | State |
 |----|----------|-----------------|-------|
 | TC-40 | A fresh install (fleet) | The service runs, heartbeat+incidents | ✅ (PC-01) |
-| TC-41 | Reinstall/update of a running agent | Update-safe (stop→copy→start) | ⏳ (the gap in §19.6) *(implemented 09/2026, §34.2)* |
+| TC-41 | Reinstall/update of a running agent | Update-safe (stop→copy→start) | ✅ (16 Sep 2026, §15.4; watchdog pause during copy ⏳ — the separate Update-Agent.cmd path was already safe since 09/2026, §34.2) |
 | TC-42 | The commit stamp | The footer = git HEAD | ✅ |
 | TC-43 | The watchdog brings a stopped service back | The service is restarted | ⏳ |
 | TC-44 | Auto-enrollment (dry-run → live) | Targets written, installation through the gMSA | ✅ (PC-01) |
