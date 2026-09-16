@@ -25,6 +25,8 @@ else
             <div class="num">@_silent</div><div class="lbl">Zmlklo agentů</div></a>
         <a class="card tile bad @(Stav == "chybi" ? "active" : "")" href="@Url(stav: "chybi")">
             <div class="num">@_missing</div><div class="lbl">Chybí agent</div></a>
+        <a class="card tile @(_deployErrors > 0 ? "bad" : "") @(Stav == "chyba" ? "active" : "")" href="@Url(stav: "chyba")">
+            <div class="num">@_deployErrors</div><div class="lbl">Chyby nasazení</div></a>
     </div>
 
     <div class="toolbar">
@@ -107,7 +109,7 @@ else
             <tr>
                 <th data-no-print title="Zaškrtni stanice pro hromadné Zařadit/Vyřadit vybrané výše">Vybrat</th>
                 <th>Kom.</th><th title="Síťová dostupnost (ping) – odděleno od komunikace agenta">Ping</th><th>Hostname</th><th>Cesta v AD</th><th>OS</th><th>Doména</th>
-                <th>Stav</th><th>Agent verze</th><th>Poslední kontakt</th><th data-no-print title="Trvalé vyřazení – hromadné akce se ho nedotknou">Ignorovat</th><th data-no-print>Nasazení</th><th data-no-print>Data</th>
+                <th>Stav</th><th>Agent verze</th><th>Poslední kontakt</th><th title="Výsledek posledního pokusu o instalaci agenta (auto-nasazení nebo „Nasadit teď")">Poslední nasazení</th><th data-no-print title="Trvalé vyřazení – hromadné akce se ho nedotknou">Ignorovat</th><th data-no-print>Nasazení</th><th data-no-print>Data</th>
             </tr>
             <tr class="filtry" data-no-print>
                 <td></td>
@@ -124,10 +126,12 @@ else
                         <option value="zmlkl"  selected="@(Stav == "zmlkl")">zmlklý (PC běží)</option>
                         <option value="vypnuto" selected="@(Stav == "vypnuto")">vypnuto? (ping neodpovídá)</option>
                         <option value="chybi"  selected="@(Stav == "chybi")">chybí agent</option>
+                        <option value="chyba"  selected="@(Stav == "chyba")">chyba nasazení</option>
                         <option value="neniad" selected="@(Stav == "neniad")">není v AD</option>
                     </select>
                 </td>
                 <td><input class="f" form="fstanice" name="ver" value="@FVer" placeholder="commit" /></td>
+                <td></td>
                 <td></td>
                 <td data-no-print>
                     <select class="f" form="fstanice" name="ign" onchange="this.form.requestSubmit()">
@@ -173,6 +177,17 @@ else
                     </td>
                     <td>@(string.IsNullOrEmpty(c.AgentVersion) ? "—" : c.AgentVersion)</td>
                     <td>@(c.LastSeen is null ? "—" : c.LastSeen.Value.ToLocalTime().ToString("dd.MM.yyyy HH:mm"))</td>
+                    <td>
+                        @{ var dep = DeployInfo(c); }
+                        @if (dep is null)
+                        {
+                            <span class="muted">—</span>
+                        }
+                        else
+                        {
+                            <span class="pill @DeployPillClass(dep)" title="@($"{dep.Message} ({dep.Timestamp.ToLocalTime():dd.MM.yyyy HH:mm})")">@Kratce(dep.Message)</span>
+                        }
+                    </td>
                     <td data-no-print>
                         @* Zaškrtávátko = trvalý úmysl operátora. Uloženo na řádku stanice,
                            takže ho "Zařadit vše" nepřepíše. *@
@@ -341,6 +356,23 @@ else
     private string CommClass(Computer c) =>
         StationStatus.CommDotClass(c.LastSeen is not null, Reports(c), Fresh(c), c.LastPingOk);
 
+    // Výsledek posledního pokusu o instalaci - čte se z Deníku aktivity (Source
+    // "deploy-run", zapisuje DeployResultIngestor), ne z vlastního sloupce v DB.
+    // Poslední záznam PER STANICE stačí, historii má Aktivita.
+    private sealed record DeployStatus(string Level, string Message, DateTime Timestamp);
+    private Dictionary<string, DeployStatus> _lastDeploy = new(StringComparer.OrdinalIgnoreCase);
+    private int _deployErrors;
+
+    private DeployStatus? DeployInfo(Computer c) => _lastDeploy.GetValueOrDefault(c.Hostname);
+    private bool DeployFailed(Computer c) => DeployInfo(c)?.Level == "error";
+    private static string DeployPillClass(DeployStatus d) => d.Level switch
+    {
+        "error" => "bad",
+        "warn"  => "warn",
+        _       => "ok",
+    };
+    private static string Kratce(string s, int max = 60) => s.Length <= max ? s : s[..max] + "…";
+
     private string CommTitle(Computer c)
     {
         if (c.LastSeen is null) return "Žádný kontakt s agentem";
@@ -358,7 +390,8 @@ else
             "hlasi" => _all.Where(Reports),
             "zmlkl" => _all.Where(Silent),
             "vypnuto" => _all.Where(ProbablyOff),
-            "chybi" => _all.Where(c => c.InActiveDirectory && !Reports(c)),
+            "chybi" => _all.Where(c => c.InActiveDirectory && !Reports(c) && !c.DeployIgnored),
+            "chyba" => _all.Where(c => DeployFailed(c) && !c.DeployIgnored),
             "neniad" => _all.Where(c => !c.InActiveDirectory),
             _       => _all
         };
@@ -636,7 +669,22 @@ else
             _all = await db.Computers.OrderBy(c => c.Hostname).ToListAsync();
             _reporting = _all.Count(Reports);
             _silent    = _all.Count(Silent);
-            _missing   = _all.Count(c => c.InActiveDirectory && !Reports(c));
+            // Ignorované stanice se do "chybí agent" nepočítají - vyřazení je vědomé
+            // rozhodnutí operátora (viz Filtered() case "chybi", stejné pravidlo).
+            _missing   = _all.Count(c => c.InActiveDirectory && !Reports(c) && !c.DeployIgnored);
+
+            // Nejnovější "deploy-run" záznam pro každou stanici - zdroj je Deník aktivity,
+            // stejná data jako na stránce Aktivita, jen sbalená na "co platí teď" per stanice.
+            var deployRows = await db.ActivityLog
+                .Where(a => a.Source == "deploy-run" && a.Hostname != null)
+                .OrderByDescending(a => a.Timestamp)
+                .Select(a => new { a.Hostname, a.Level, a.Message, a.Timestamp })
+                .ToListAsync();
+            _lastDeploy = deployRows
+                .GroupBy(a => a.Hostname!, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(g => g.Key, g => new DeployStatus(g.First().Level, g.First().Message, g.First().Timestamp),
+                              StringComparer.OrdinalIgnoreCase);
+            _deployErrors = _all.Count(c => DeployFailed(c) && !c.DeployIgnored);
             _error = null;
         }
         catch (Exception ex) { _error = ex.Message; }

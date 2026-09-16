@@ -202,7 +202,9 @@ else
 
             // souhrnné dlaždice z ostatních listů (dlaždicový přehled)
             _compTotal   = await db.Computers.CountAsync();
-            _compMissing = await db.Computers.CountAsync(c => c.InActiveDirectory && c.AgentVersion == "" && c.LastSeen == null);
+            // Trvale ignorované stanice (Stanice → zaškrtávátko Ignorovat) se do "chybí" nepočítají -
+            // je to vědomé rozhodnutí operátora (typicky server, kam se agent nemá instalovat), ne mezera.
+            _compMissing = await db.Computers.CountAsync(c => c.InActiveDirectory && c.AgentVersion == "" && c.LastSeen == null && !c.DeployIgnored);
             _wlActive    = await db.WhitelistDevices.CountAsync(d => d.IsActive);
             _wlPending   = await db.WhitelistDevices.CountAsync(d => !d.IsActive);
 
