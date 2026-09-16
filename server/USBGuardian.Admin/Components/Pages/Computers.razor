@@ -188,7 +188,7 @@ else
                         }
                         else
                         {
-                            <span class="pill @DeployPillClass(dep)" title="@($"{dep.Message} ({dep.Timestamp.ToLocalTime():dd.MM.yyyy HH:mm})")">@Kratce(dep.Message)</span>
+                            <span class="pill @DeployPillClass(dep)" title="@($"{dep.Message} ({dep.Timestamp.ToLocalTime():dd.MM.yyyy HH:mm})")">@Kratce(FriendlyDeployMessage(dep.Message))</span>
                         }
                     </td>
                     <td data-no-print>
@@ -377,6 +377,14 @@ else
         _       => "ok",
     };
     private static string Kratce(string s, int max = 60) => s.Length <= max ? s : s[..max] + "…";
+
+    // Hláška ze skriptu radí "-ReinstallExisting" - to je CLI přepínač, ne něco, co jde v konzoli
+    // zmáčknout. V UI je ekvivalent tlačítko "Nasadit teď" (od 16.09.2026 ho vždy používá), tak ať
+    // to radí to, co operátor reálně vidí, ne vnitřek skriptu.
+    private static string FriendlyDeployMessage(string raw) =>
+        raw.Contains("-ReinstallExisting", StringComparison.OrdinalIgnoreCase)
+            ? "SKIP: služba existuje — klikni „Nasadit teď“"
+            : raw;
 
     private string CommTitle(Computer c)
     {
