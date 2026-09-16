@@ -34,7 +34,7 @@ else
         <span class="muted">Období:</span>
         @foreach (var (d, lbl) in new[] { (30, "30 dní"), (90, "90 dní"), (365, "rok"), (0, "vše") })
         {
-            <a class="chip @(_days == d ? "active" : "")" href="@Url(days: d)">@lbl</a>
+            <a class="chip @(!JeRozsah && _days == d ? "active" : "")" href="@Url(days: d)">@lbl</a>
         }
         <span class="sep"></span>
         <a class="chip @(_group ? "active" : "")" href="@Url(group: !_group)">@(_group ? "kumulováno" : "detailně")</a>
@@ -45,9 +45,15 @@ else
             @if (_sort != "time") { <input type="hidden" name="sort" value="@_sort" /> }
             @if (!_desc) { <input type="hidden" name="dir" value="asc" /> }
             <input class="inp" name="q" value="@_q" placeholder="hledat stanice / uživatel / médium / S/N" />
+            @* Přesné datumové rozsahy - pro kontrolu/audit, kdy nestačí pohyblivé "posledních N dní"
+               (kdo se ptá "za březen", chce 1.3.–31.3., ne odhad kolika dní zpátky to dneska je). *@
+            <span class="muted">Od</span>
+            <input class="inp" type="date" name="od" value="@_od" title="Přesné období od (přebije volbu výše)" />
+            <span class="muted">Do</span>
+            <input class="inp" type="date" name="do" value="@_do" title="Přesné období do (včetně celého dne)" />
             <button class="btn" type="submit">Hledat</button>
         </form>
-        @if (_action is not null || !string.IsNullOrEmpty(_q) || _days != 30 || !_group)
+        @if (_action is not null || !string.IsNullOrEmpty(_q) || _days != 30 || !_group || JeRozsah)
         {
             <a class="chip" href="">✕ zrušit filtry</a>
         }
@@ -147,6 +153,8 @@ else
     [SupplyParameterFromQuery(Name = "group")]  public int? GroupParam { get; set; }
     [SupplyParameterFromQuery(Name = "sort")]   public string? SortParam { get; set; }
     [SupplyParameterFromQuery(Name = "dir")]    public string? DirParam { get; set; }
+    [SupplyParameterFromQuery(Name = "od")]     public string? OdParam { get; set; }
+    [SupplyParameterFromQuery(Name = "do")]     public string? DoParam { get; set; }
 
     private string? _action;
     private int _days;
@@ -154,6 +162,10 @@ else
     private bool _group;
     private string _sort = "time";
     private bool _desc = true;
+    // Přesný rozsah (pro audit/kontrolu) - když je zadaný, přebije volbu "posledních N dní".
+    private string? _od;
+    private string? _do;
+    private bool JeRozsah => !string.IsNullOrEmpty(_od) || !string.IsNullOrEmpty(_do);
 
     private string? _error;
     private int _total, _blocked, _warned;
@@ -165,7 +177,7 @@ else
     // Aktuálně schváleno = aktivní položka whitelistu se stejným sériovým číslem
     private bool Approved(string serial) => !string.IsNullOrWhiteSpace(serial) && _approvedSerials.Contains(serial.Trim());
 
-    private string WindowLabel => _days == 0 ? "vše" : _days == 365 ? "rok" : $"{_days} dní";
+    private string WindowLabel => IncidentDateRange.Resolve(_days, _od, _do).Label;
 
     private record Agg(string Name, string Vendor, string Product, string Serial,
                        string Hostname, string Username, int Count, int Blocked, int Warned, long Size, DateTime Last);
@@ -178,13 +190,15 @@ else
         _group  = (GroupParam ?? 1) == 1;
         _sort   = string.IsNullOrWhiteSpace(SortParam) ? "time" : SortParam.Trim().ToLowerInvariant();
         _desc   = !string.Equals(DirParam, "asc", StringComparison.OrdinalIgnoreCase);
+        _od     = string.IsNullOrWhiteSpace(OdParam) ? null : OdParam.Trim();
+        _do     = string.IsNullOrWhiteSpace(DoParam) ? null : DoParam.Trim();
 
         try
         {
             await using var db = await DbFactory.CreateDbContextAsync();
-            var from = _days == 0 ? DateTime.MinValue : DateTime.UtcNow.AddDays(-_days);
+            var (from, to, _) = IncidentDateRange.Resolve(_days, _od, _do);
 
-            var baseq = db.Incidents.Where(i => i.Timestamp >= from);
+            var baseq = db.Incidents.Where(i => i.Timestamp >= from && i.Timestamp < to);
             if (_action is not null) baseq = baseq.Where(i => i.Action == _action);
             if (_q is not null)
                 baseq = baseq.Where(i =>
@@ -192,7 +206,7 @@ else
                     i.FriendlyName.Contains(_q) || i.SerialNumber.Contains(_q));
 
             // dlaždice počítají přes okno (bez action filtru, ale s hledáním)
-            var win = db.Incidents.Where(i => i.Timestamp >= from);
+            var win = db.Incidents.Where(i => i.Timestamp >= from && i.Timestamp < to);
             if (_q is not null)
                 win = win.Where(i => i.Hostname.Contains(_q) || i.Username.Contains(_q) ||
                                      i.FriendlyName.Contains(_q) || i.SerialNumber.Contains(_q));
@@ -246,10 +260,13 @@ else
         catch (Exception ex) { _error = ex.Message; }
     }
 
-    // sestaví query string se zachováním ostatních filtrů
+    // sestaví query string se zachováním ostatních filtrů. Kliknutí na dlaždici konkrétního
+    // počtu dní (days: zadáno) záměrně OPOUŠTÍ přesný rozsah od/do - jsou to dva alternativní
+    // způsoby výběru období, ne kombinovatelné filtry.
     private string Url(string? action = "_keep", int? days = null, bool? group = null)
     {
         var a = action == "_keep" ? _action : (string.IsNullOrEmpty(action) ? null : action);
+        var clearRange = days.HasValue;
         var d = days ?? _days;
         var g = group ?? _group;
         var parts = new List<string>();
@@ -259,6 +276,11 @@ else
         if (!g) parts.Add("group=0");
         if (_sort != "time") parts.Add($"sort={_sort}");
         if (!_desc) parts.Add("dir=asc");
+        if (!clearRange)
+        {
+            if (_od is not null) parts.Add($"od={_od}");
+            if (_do is not null) parts.Add($"do={_do}");
+        }
         return parts.Count > 0 ? "?" + string.Join("&", parts) : "";
     }
 
@@ -273,6 +295,8 @@ else
         if (!_group) parts.Add("group=0");
         if (key != "time") parts.Add($"sort={key}");
         if (!desc) parts.Add("dir=asc");
+        if (_od is not null) parts.Add($"od={_od}");
+        if (_do is not null) parts.Add($"do={_do}");
         return parts.Count > 0 ? "?" + string.Join("&", parts) : "";
     }
 
@@ -286,6 +310,8 @@ else
         if (_action is not null) parts.Add($"action={Uri.EscapeDataString(_action)}");
         if (_days != 30) parts.Add($"days={_days}");
         if (_q is not null) parts.Add($"q={Uri.EscapeDataString(_q)}");
+        if (_od is not null) parts.Add($"od={_od}");
+        if (_do is not null) parts.Add($"do={_do}");
         return parts.Count > 0 ? basePath + "?" + string.Join("&", parts) : basePath;
     }
 

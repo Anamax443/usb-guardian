@@ -105,8 +105,11 @@ body { margin: 0; background: Canvas; color: CanvasText; }
 }
 .ui .chip:hover { background: var(--hover); color: var(--text); }
 .ui .chip.active { background: var(--accent); color: var(--accfg); border-color: var(--accent); }
-.ui .searchform { display: flex; gap: 6px; margin: 0; }
+.ui .searchform { display: flex; align-items: center; gap: 6px; margin: 0; flex-wrap: wrap; }
 .ui .searchform .inp { min-width: 280px; }
+/* datumy (Od/Do, přesný rozsah pro audit) - 240-280px je pro <input type="date"> zbytečně
+   široké, přirozená šířka datového pickeru stačí. */
+.ui .searchform .inp[type="date"] { min-width: 0; width: 152px; }
 
 /* ── tabulky (stejné míry jako mřížka banky) ── */
 .ui table { width: 100%; border-collapse: collapse; background: var(--pane); border: var(--border-w) solid var(--border); }

@@ -12,6 +12,7 @@
 using System.Globalization;
 using System.Text;
 using Microsoft.EntityFrameworkCore;
+using USBGuardian.Admin;
 using USBGuardian.Api.Data;
 using USBGuardian.Api.Models;
 
@@ -22,10 +23,10 @@ public static class ExportEndpoints
     public static void MapExportEndpoints(this WebApplication app)
     {
         app.MapGet("/export/incidents.csv", async (
-            IDbContextFactory<AppDbContext> factory, int? days, string? action, string? q) =>
+            IDbContextFactory<AppDbContext> factory, int? days, string? action, string? q, string? od, string? @do) =>
         {
             await using var db = await factory.CreateDbContextAsync();
-            var rows = await Filter(db, days, action, q)
+            var rows = await Filter(db, days, action, q, od, @do)
                 .OrderByDescending(i => i.Timestamp).Take(50_000).ToListAsync();
 
             var sb = new StringBuilder();
@@ -50,11 +51,11 @@ public static class ExportEndpoints
         });
 
         app.MapGet("/export/manager", async (
-            IDbContextFactory<AppDbContext> factory, int? days, string? q) =>
+            IDbContextFactory<AppDbContext> factory, int? days, string? q, string? od, string? @do) =>
         {
             await using var db = await factory.CreateDbContextAsync();
             var d   = days ?? 30;
-            var all = await Filter(db, d, null, q).ToListAsync();
+            var all = await Filter(db, d, null, q, od, @do).ToListAsync();
 
             var approved = new HashSet<string>(
                 (await db.WhitelistDevices.Where(w => w.IsActive && w.SerialNumber != "")
@@ -62,9 +63,12 @@ public static class ExportEndpoints
                 StringComparer.OrdinalIgnoreCase);
             bool Approved(string s) => !string.IsNullOrWhiteSpace(s) && approved.Contains(s.Trim());
 
+            var (_, _, periodLabel) = IncidentDateRange.Resolve(d, od, @do);
             var m = new ManagerData
             {
-                Period     = d == 0 ? "celá historie" : $"posledních {d} dní",
+                Period     = (string.IsNullOrEmpty(od) && string.IsNullOrEmpty(@do))
+                             ? (d == 0 ? "celá historie" : $"posledních {d} dní")
+                             : periodLabel,
                 Query      = q,
                 Total      = all.Count,
                 Blocked    = all.Count(i => i.Action == "Blocked"),
@@ -105,11 +109,11 @@ public static class ExportEndpoints
         });
     }
 
-    private static IQueryable<Incident> Filter(AppDbContext db, int? days, string? action, string? q)
+    private static IQueryable<Incident> Filter(AppDbContext db, int? days, string? action, string? q,
+                                                string? od = null, string? doParam = null)
     {
-        var d = days ?? 30;
-        var from = d == 0 ? DateTime.MinValue : DateTime.UtcNow.AddDays(-d);
-        var query = db.Incidents.Where(i => i.Timestamp >= from);
+        var (from, to, _) = IncidentDateRange.Resolve(days ?? 30, od, doParam);
+        var query = db.Incidents.Where(i => i.Timestamp >= from && i.Timestamp < to);
         if (!string.IsNullOrWhiteSpace(action))
             query = query.Where(i => i.Action == action);
         if (!string.IsNullOrWhiteSpace(q))
