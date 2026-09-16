@@ -100,6 +100,24 @@ $perHost = {
             $r.Status = 'WOULD-DEPLOY'; $r.Detail = $(if ($exists) { 'reinstall' } else { 'fresh' }); return [pscustomobject]$r
         }
 
+        # Reinstall existujici sluzby: zastavit PRED kopirovanim, jinak muze byt exe
+        # zamcene (bezici proces) a robocopy prepise jen cast souboru - stejny "stop,
+        # pak kopie" vzor jako Deploy-Console.cmd. Bez tohohle sel reinstall rovnou na
+        # robocopy (znamy nedostatek z oponentury, ridil se jen tim, ze sluzba porad
+        # bezela a exe drzela zamcene, coz teprve selhalo na "Access is denied").
+        if ($exists) {
+            & sc.exe "\\$h" stop $ServiceName 2>&1 | Out-Null
+            $stopTries = 0
+            do {
+                Start-Sleep -Milliseconds 500
+                $stopTries++
+                $stq = (& sc.exe "\\$h" query $ServiceName 2>&1 | Out-String)
+            } while ($stq -notmatch 'STOPPED' -and $stopTries -lt 20)
+            if ($stq -notmatch 'STOPPED') {
+                throw "sluzba se pred reinstalem do 10 s nezastavila - nekopiruji (zustala by pulka nove verze)"
+            }
+        }
+
         # Vystup se NEzahazuje (drivejsi | Out-Null) - je to jediny zdroj informace PROC
         # kopirovani selhalo (napr. "Access is denied" na cilovem sdileni). Cas se meri
         # sami (Stopwatch), ne parsovanim robocopy souhrnu - ten je lokalizovany dle
