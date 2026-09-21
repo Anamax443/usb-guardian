@@ -171,6 +171,7 @@ else
                     <td>
                         @if (Silent(c)) { <span class="pill bad" title="Hlásí agenta, dlouho se neozval, ale PC odpovídá na ping">zmlklý</span> }
                         else if (ProbablyOff(c)) { <span class="pill off" title="Hlásí agenta, dlouho se neozval, a neodpovídá ani na ping">vypnuto?</span> }
+                        else if (PingPending(c)) { <span class="pill warn" title="Hlásí agenta, dlouho se neozval, dostupnost (ping) se ještě ověřuje">zmlklý?</span> }
                         else if (Reports(c)) { <span class="pill ok">hlásí</span> }
                         else if (c.InActiveDirectory) { <span class="pill bad">chybí agent</span> }
                         else { <span class="pill warn">není v AD</span> }
@@ -356,6 +357,7 @@ else
     // (viz database/10_ping_status.sql, PingMonitorService).
     private bool Silent(Computer c) => StationStatus.Silent(Reports(c), Fresh(c), c.LastPingOk);
     private bool ProbablyOff(Computer c) => StationStatus.ProbablyOff(Reports(c), Fresh(c), c.LastPingOk);
+    private bool PingPending(Computer c) => StationStatus.PingPending(Reports(c), Fresh(c), c.LastPingOk);
     private string CommClass(Computer c) =>
         StationStatus.CommDotClass(c.LastSeen is not null, Reports(c), Fresh(c), c.LastPingOk);
 

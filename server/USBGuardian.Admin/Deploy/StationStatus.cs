@@ -18,6 +18,11 @@ public static class StationStatus
     public static bool ProbablyOff(bool reports, bool fresh, bool? lastPingOk) =>
         reports && !fresh && lastPingOk == false;
 
+    /// <summary>Zmlklý, ale dostupnost (ping) se ještě neověřila - PingMonitorService na
+    /// stanici zatím nedošel. Nesmí se tvářit jako "hlásí" (viz CommDotClass "warn").</summary>
+    public static bool PingPending(bool reports, bool fresh, bool? lastPingOk) =>
+        reports && !fresh && lastPingOk is null;
+
     /// <summary>Vizuál sloupce "Kom." - `hasContact` = agent se OD ŽIVOTA aspoň jednou ozval (LastSeen not null).</summary>
     public static string CommDotClass(bool hasContact, bool reports, bool fresh, bool? lastPingOk)
     {

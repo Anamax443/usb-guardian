@@ -41,6 +41,24 @@ public class StationStatusTests
     }
 
     [Fact]
+    public void Stale_station_not_yet_pinged_is_ping_pending()
+    {
+        // Nález 21.09.2026: Stav pill v Computers.razor na tenhle případ neměl vlastní
+        // větev a spadl do "hlásí" (Reports(c) == true), i když je stanice dávno tichá -
+        // stejná díra, kterou CommDotClass ("warn") už dřív správně řešil jen pro tečku.
+        Assert.True(StationStatus.PingPending(reports: true, fresh: false, lastPingOk: null));
+    }
+
+    [Fact]
+    public void Confirmed_or_fresh_station_is_never_ping_pending()
+    {
+        Assert.False(StationStatus.PingPending(reports: true, fresh: false, lastPingOk: true));
+        Assert.False(StationStatus.PingPending(reports: true, fresh: false, lastPingOk: false));
+        Assert.False(StationStatus.PingPending(reports: true, fresh: true, lastPingOk: null));
+        Assert.False(StationStatus.PingPending(reports: false, fresh: false, lastPingOk: null));
+    }
+
+    [Fact]
     public void Fresh_station_is_never_silent_regardless_of_ping()
     {
         Assert.False(StationStatus.Silent(reports: true, fresh: true, lastPingOk: false));
