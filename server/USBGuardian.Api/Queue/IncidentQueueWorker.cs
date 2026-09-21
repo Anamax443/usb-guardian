@@ -10,6 +10,7 @@
 // vícenásobné přehrání neškodným.
 // ============================================================
 
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using USBGuardian.Api.Data;
 using USBGuardian.Api.Models;
@@ -263,15 +264,61 @@ public class IncidentQueueWorker : BackgroundService
             }
         }
 
+        var savedCount = newIncidents.Count;
+
         if (newIncidents.Count > 0)
         {
             db.Incidents.AddRange(newIncidents);
-            await db.SaveChangesAsync(ct);
+            try
+            {
+                await db.SaveChangesAsync(ct);
+            }
+            catch (DbUpdateException ex) when (IsDuplicateKeyViolation(ex))
+            {
+                // existingLookup výš hledá jen posledních 24 h (viz `since`) – batch uvízlý ve
+                // spoolu déle (výpadek SQL, chybějící index apod.) proto může nést incident, který
+                // MEZITÍM už do DB zapsala jiná cesta. Dedup nad 24 h okno by ho neviděl a blind
+                // insert na to narazí přes UNIQUE index. Batch NEZAHAZUJEME – zkusíme řádek po
+                // řádku, ať kolidující (= už uložený) nezablokuje ostatní, opravdu nové incidenty.
+                _logger.LogWarning(
+                    "Hromadný insert pro {Hostname} narazil na duplicitní klíč (incident mimo 24h dedup okno, ale už v DB) – zkouším po jednom",
+                    request.Hostname);
+
+                foreach (var incident in newIncidents)
+                    db.Entry(incident).State = EntityState.Detached;
+
+                savedCount = await SaveIncidentsOneByOneAsync(db, newIncidents, ct);
+            }
         }
 
         _logger.LogInformation(
             "Worker hotov: {Hostname} – {New} nových, {Upd} disconnect aktualizací, {Dup} duplikátů",
-            request.Hostname, newIncidents.Count, updatedCount, duplicatesCount);
+            request.Hostname, savedCount, updatedCount, duplicatesCount);
+    }
+
+    private static bool IsDuplicateKeyViolation(DbUpdateException ex) =>
+        ex.InnerException is SqlException sqlEx && (sqlEx.Number == 2601 || sqlEx.Number == 2627);
+
+    private async Task<int> SaveIncidentsOneByOneAsync(AppDbContext db, List<Incident> incidents, CancellationToken ct)
+    {
+        var saved = 0;
+        foreach (var incident in incidents)
+        {
+            db.Incidents.Add(incident);
+            try
+            {
+                await db.SaveChangesAsync(ct);
+                saved++;
+            }
+            catch (DbUpdateException ex) when (IsDuplicateKeyViolation(ex))
+            {
+                db.Entry(incident).State = EntityState.Detached;
+                _logger.LogInformation(
+                    "Incident {Hostname}/{Serial}/{Timestamp:o} už v DB existuje (mimo dedup okno) – přeskakuji",
+                    incident.Hostname, incident.SerialNumber, incident.Timestamp);
+            }
+        }
+        return saved;
     }
 
     // Audit 04.09.2026: chyběly ProductId/PnpDeviceId - dvě různá zařízení stejného vendoru se
