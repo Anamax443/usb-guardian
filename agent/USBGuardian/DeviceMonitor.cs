@@ -406,14 +406,16 @@ public class DeviceMonitor : BackgroundService
     {
         try
         {
+            // Bez InterfaceType filtru ve WQL – SCSI zahrnuje jak interní SATA/NVMe disky,
+            // tak UASP USB krabičky; rozliší je až IsRemovableMedia přes BusType.
             using var searcher = new ManagementObjectSearcher(
-                "root\\cimv2",
-                "SELECT * FROM Win32_DiskDrive WHERE InterfaceType='USB' OR InterfaceType='SD'");
+                "root\\cimv2", "SELECT * FROM Win32_DiskDrive");
+            var busTypeBySerial = GetUsbBusTypeBySerial();
 
             var found = 0;
             foreach (ManagementBaseObject wmi in searcher.Get())
             {
-                if (!IsRemovableMedia(wmi)) continue;
+                if (!IsRemovableMedia(wmi, busTypeBySerial)) continue;
 
                 var device = ParseDeviceFromWmi(wmi);
                 foreach (var dl in GetDriveLettersForDisk(wmi["DeviceID"]?.ToString() ?? string.Empty))
@@ -450,13 +452,13 @@ public class DeviceMonitor : BackgroundService
         {
             var blocked = _blocker.GetBlocked();
             using var searcher = new ManagementObjectSearcher(
-                "root\\cimv2",
-                "SELECT * FROM Win32_DiskDrive WHERE InterfaceType='USB' OR InterfaceType='SD'");
+                "root\\cimv2", "SELECT * FROM Win32_DiskDrive");
+            var busTypeBySerial = GetUsbBusTypeBySerial();
 
             var n = 0;
             foreach (ManagementBaseObject wmi in searcher.Get())
             {
-                if (!IsRemovableMedia(wmi)) continue;
+                if (!IsRemovableMedia(wmi, busTypeBySerial)) continue;
 
                 var device = ParseDeviceFromWmi(wmi);
                 // Vypršelý whitelist neschvaluje nic - i "je na (starem) seznamu" musi projit
@@ -593,11 +595,86 @@ public class DeviceMonitor : BackgroundService
         return device;
     }
 
-    private bool IsRemovableMedia(ManagementBaseObject wmi)
+    // MSFT_PhysicalDisk.BusType (root\Microsoft\Windows\Storage) hodnota pro USB.
+    private const ushort UsbBusType = 7;
+
+    // UASP (USB Attached SCSI) krabičky – např. USB-SATA redukce s UAS bridge čipem – se ve
+    // Win32_DiskDrive hlásí jako InterfaceType='SCSI', k nerozeznání od interního SATA/NVMe disku.
+    // Win32_DiskDrive.InterfaceType proto pro tyhle disky nestačí; MSFT_PhysicalDisk.BusType
+    // (novější Storage Management API) je pozná správně i tak. Bez tohoto fallbacku agent
+    // takový disk vůbec nezaeviduje – žádný log, žádné varování, žádná blokace.
+    private bool IsRemovableMedia(ManagementBaseObject wmi, IReadOnlyDictionary<string, ushort>? busTypeBySerial = null)
     {
         var interfaceType = wmi["InterfaceType"]?.ToString() ?? string.Empty;
-        return interfaceType.Equals("USB", StringComparison.OrdinalIgnoreCase)
-            || interfaceType.Equals("SD",  StringComparison.OrdinalIgnoreCase);
+        var serial        = wmi["SerialNumber"]?.ToString()?.Trim() ?? string.Empty;
+
+        ushort? busType = null;
+        if (busTypeBySerial != null)
+        {
+            if (!string.IsNullOrEmpty(serial) && busTypeBySerial.TryGetValue(serial, out var bt))
+                busType = bt;
+        }
+        else if (!string.IsNullOrEmpty(serial))
+        {
+            busType = LookupUsbBusType(serial);
+        }
+
+        return IsUsbAttached(interfaceType, busType);
+    }
+
+    // Čistá rozhodovací logika – bez WMI, snadno testovatelná.
+    internal static bool IsUsbAttached(string interfaceType, ushort? busType)
+    {
+        if (interfaceType.Equals("USB", StringComparison.OrdinalIgnoreCase)
+            || interfaceType.Equals("SD",  StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        return busType == UsbBusType;
+    }
+
+    // Jednotlivý dotaz na BusType podle sériového čísla (real-time WMI eventy – jeden disk).
+    private ushort? LookupUsbBusType(string serialNumber)
+    {
+        try
+        {
+            var escaped = serialNumber.Replace("'", "''");
+            using var searcher = new ManagementObjectSearcher(
+                new ManagementScope(@"root\Microsoft\Windows\Storage"),
+                new ObjectQuery($"SELECT BusType FROM MSFT_PhysicalDisk WHERE SerialNumber='{escaped}'"));
+
+            foreach (ManagementBaseObject disk in searcher.Get())
+                return Convert.ToUInt16(disk["BusType"]);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "MSFT_PhysicalDisk BusType lookup selhal pro serial {Serial}", serialNumber);
+        }
+        return null;
+    }
+
+    // Hromadný dotaz – pro dávkové skenování (startovní sken, re-enforcement), aby se
+    // MSFT_PhysicalDisk nedotazoval zvlášť pro každý disk zvlášť.
+    private Dictionary<string, ushort> GetUsbBusTypeBySerial()
+    {
+        var map = new Dictionary<string, ushort>();
+        try
+        {
+            using var searcher = new ManagementObjectSearcher(
+                new ManagementScope(@"root\Microsoft\Windows\Storage"),
+                new ObjectQuery("SELECT BusType, SerialNumber FROM MSFT_PhysicalDisk"));
+
+            foreach (ManagementBaseObject disk in searcher.Get())
+            {
+                var serial = disk["SerialNumber"]?.ToString()?.Trim();
+                if (string.IsNullOrEmpty(serial)) continue;
+                map[serial] = Convert.ToUInt16(disk["BusType"]);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "MSFT_PhysicalDisk hromadný dotaz selhal – UASP disky nemusí být rozpoznány");
+        }
+        return map;
     }
 
     private void ExtractVidPid(string pnpId, DeviceInfo device)
