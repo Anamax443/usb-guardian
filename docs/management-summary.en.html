@@ -129,7 +129,10 @@
 
   <div class="foot">
     <span data-cs="USB Guardian · vlastní vývoj AXIMA · Milan Trnka" data-en="USB Guardian · developed in-house at AXIMA · Milan Trnka"></span>
-    <span data-cs="Podrobnosti: technická dokumentace v konzoli nástroje" data-en="Details: technical documentation inside the tool's console"></span>
+    <span>
+      <span data-cs="Konzole: " data-en="Console: "></span><span id="console-url"></span>
+      · <span data-cs="technická dokumentace v konzoli nástroje" data-en="technical documentation inside the tool's console"></span>
+    </span>
   </div>
 </div>
 
@@ -158,6 +161,15 @@
   document.getElementById('lang-cs').onclick=function(){ LANG='cs'; apply(); };
   document.getElementById('lang-en').onclick=function(){ LANG='en'; apply(); };
   apply();
+
+  // Adresa konzole se čte z prohlížeče (location.origin), ne natvrdo zapsana - tenhle
+  // soubor je v public repu, realny hostname APP_SERVERu tam nepatri (viz ostatni docs,
+  // placeholder "APP_SERVER"). Kdyz se stranka otevre jako lokalni soubor (file://), necha
+  // se prazdne misto zavadejiciho "null".
+  (function(){
+    var u=document.getElementById('console-url');
+    if (u && /^https?:$/.test(location.protocol)) u.textContent = location.origin;
+  })();
 
   // Zivá čísla místo rucne zapsaných a casem zastaralych - viz /api/public/summary-kpi
   // (anonymni endpoint, stejny vzor jako /api/version). Pri chybe (offline, server nedostupny)
