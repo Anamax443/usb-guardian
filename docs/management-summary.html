@@ -69,19 +69,21 @@
 
 <div class="page">
   <h1>USB Guardian</h1>
-  <p class="sub" data-cs="Kontrola paměťových médií na firemních počítačích · shrnutí pro vedení · stav k 11. 9. 2026"
-                 data-en="Control of removable media on company computers · management summary · status as of 11 Sep 2026"></p>
+  <p class="sub">
+    <span data-cs="Kontrola paměťových médií na firemních počítačích · shrnutí pro vedení · stav k "
+          data-en="Control of removable media on company computers · management summary · status as of "></span><span id="asof">—</span>
+  </p>
 
   <p class="lead" data-cs="Cizí USB flash disk zapojený do firemního počítače je nejjednodušší cesta, jak z firmy odejdou data — a zároveň jak se do ní dostane škodlivý kód. USB Guardian dává IT přehled o tom, jaká média se ve firmě používají, umožní schválit jen ta vlastní a ostatní zablokovat. Vše je doložitelné: kdo, kdy, jaké médium a co se s ním stalo."
                     data-en="A foreign USB stick plugged into a company computer is the easiest way for data to leave the company — and for malicious code to enter it. USB Guardian gives IT a picture of which media are in use, lets it approve only company-owned ones and block the rest. Everything is evidenced: who, when, which medium and what happened."></p>
 
   <h2 data-cs="Kde jsme dnes" data-en="Where we are today"></h2>
   <div class="kpi">
-    <div><b>228</b><span data-cs="počítačů v evidenci" data-en="computers on record"></span></div>
-    <div><b>4</b><span data-cs="s nainstalovaným agentem" data-en="with the agent installed"></span></div>
-    <div><b>146</b><span data-cs="uložených incidentů celkem" data-en="incidents on record, total"></span></div>
-    <div><b>4</b><span data-cs="schválená média" data-en="approved media"></span></div>
-    <div><b>16</b><span data-cs="automatických kontrol provozu" data-en="automated operations checks"></span></div>
+    <div><b id="kpi-total">—</b><span data-cs="počítačů v evidenci" data-en="computers on record"></span></div>
+    <div><b id="kpi-agent">—</b><span data-cs="s nainstalovaným agentem" data-en="with the agent installed"></span></div>
+    <div><b id="kpi-incidents">—</b><span data-cs="uložených incidentů celkem" data-en="incidents on record, total"></span></div>
+    <div><b id="kpi-whitelist">—</b><span data-cs="schválená média" data-en="approved media"></span></div>
+    <div><b id="kpi-checks">—</b><span data-cs="automatických kontrol provozu" data-en="automated operations checks"></span></div>
   </div>
   <p data-cs="Systém je hotový a v provozu: server, databáze i konzole běží, čtyři pilotní stanice hlásí data spolehlivě. Bezpečnost prošla dvěma nezávislými kontrolami: první (4. 9.) našla šest zlepšení, všechna opravená, a poslední z nich se po týdnu bez jediného falešného poplachu navíc zpřísnilo na plné vynucení. Druhá, hlubší kontrola (10.–11. 9., hodnocení 8,1 z 10) prověřila přímo kód vynucování a whitelistu — ze sedmi nálezů je šest opravených a nasazených, poslední (výjimečný případ výpadku databáze) se dnes řeší ručním zásahem, než přibude automatické zotavení. Plošné rozvezení agenta na zbytek počítačů dlouho brzdila přehlédnutá chyba — pořád zkoušela jen stejnou hrstku nedostupných stanic. Oprava (16. 9.) je nasazená a pokrytí agentem už roste napříč flotilou; operátor navíc u každé stanice vidí i důvod neúspěchu. Přibyla i automatická kontrola při každé změně kódu (CI); dnešní oprava navíc prošla ještě jednou, dodatečnou revizí, která v ní sama odhalila a opravila jednu chybu ještě před nasazením."
      data-en="The system is finished and running: server, database and console are live and four pilot workstations report reliably. Security has been through two independent reviews: the first (4 Sep) found six areas to improve, all fixed, and the last of those was also tightened to full enforcement after a week with zero false alarms. A second, deeper review (10-11 Sep, scoring 8.1 out of 10) examined the enforcement and whitelist code directly — six of seven findings are fixed and deployed, and the last one (a rare case of a database outage) is being handled today with a manual step until automatic recovery is added. The fleet-wide agent rollout had long been stuck on an overlooked bug that kept retrying the same handful of unreachable stations. The fix (16 Sep) is deployed, agent coverage is now growing across the fleet, and operators can see the reason for each station's failure. Every code change is now also checked automatically (CI); today's fix also went through one more, additional review, which itself found and fixed a flaw in it before deployment."></p>
@@ -135,16 +137,43 @@
 (function(){
   "use strict";
   var LANG='cs';
+  var asOfDate=null; // Date|null - doplni se po uspesnem fetchi KPI, do te doby zustava "-"
+
+  function fmtDate(d){
+    if (!d) return null;
+    if (LANG==='cs') return d.getDate()+'. '+(d.getMonth()+1)+'. '+d.getFullYear();
+    var m=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    return d.getDate()+' '+m[d.getMonth()]+' '+d.getFullYear();
+  }
+
   function apply(){
     document.querySelectorAll('[data-cs]').forEach(function(e){ e.innerHTML=e.getAttribute('data-'+LANG); });
     document.documentElement.lang=LANG;
     document.title = LANG==='cs' ? 'USB Guardian — shrnutí pro vedení' : 'USB Guardian — management summary';
     document.getElementById('lang-cs').classList.toggle('on', LANG==='cs');
     document.getElementById('lang-en').classList.toggle('on', LANG==='en');
+    var asofEl=document.getElementById('asof');
+    if (asofEl) asofEl.textContent = fmtDate(asOfDate) || '—';
   }
   document.getElementById('lang-cs').onclick=function(){ LANG='cs'; apply(); };
   document.getElementById('lang-en').onclick=function(){ LANG='en'; apply(); };
   apply();
+
+  // Zivá čísla místo rucne zapsaných a casem zastaralych - viz /api/public/summary-kpi
+  // (anonymni endpoint, stejny vzor jako /api/version). Pri chybe (offline, server nedostupny)
+  // zustanou pomlcky - stranka se da poznat, ze nejsou aktualni, misto aby tvarila stara cisla
+  // za cerstva.
+  fetch('/api/public/summary-kpi').then(function(r){ return r.ok ? r.json() : null; }).then(function(d){
+    if (!d) return;
+    var set=function(id,val){ var el=document.getElementById(id); if (el) el.textContent=val; };
+    set('kpi-total', d.totalComputers);
+    set('kpi-agent', d.withAgent);
+    set('kpi-incidents', d.totalIncidents);
+    set('kpi-whitelist', d.approvedMedia);
+    set('kpi-checks', d.checksTotal);
+    asOfDate = new Date(d.asOf);
+    apply();
+  }).catch(function(){ /* staticky otevreny soubor / server nedostupny - necha pomlcky */ });
 })();
 </script>
 </body>

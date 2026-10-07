@@ -725,6 +725,59 @@ auto-enrollment (the shuffled selection, item 1) started reaching stations it co
 before; an operator can now also see WHY a specific station's deployment is failing, not just THAT it
 is failing.
 
+### 5.18 Backfilled write-ups (09-21) + a live whitelist-key incident + live numbers in the management summary (2026-10-07)
+
+**Backfilled retroactively — three fixes from 2026-09-21 sat in git without a HANDOFF entry (and
+unpushed to GitHub for 16 days, see below):**
+1. **`69e9a5d`** – the agent never saw UASP disks (USB-SATA/UAS bridges) at all. `Win32_DiskDrive.
+   InterfaceType` reports UASP enclosures as `SCSI`, indistinguishable from an internal disk –
+   `IsRemovableMedia` and both WQL queries only filtered `InterfaceType='USB'/'SD'`. Live proof on
+   TRNKAMW11 (a WD Blue SA510 in a UASP enclosure): zero records in the queue log or Event Log on
+   attach. Fix: `MSFT_PhysicalDisk.BusType` (root\Microsoft\Windows\Storage) reliably recognizes the
+   USB bus even for UASP (BusType=7), plus a serial-number correlation fallback.
+2. **`24e4168`** – a spool batch older than 24h never self-healed again. Live production incident:
+   after fixing the `UX_Incidents_Dedup` index, 7 batches in the spool kept failing on "Cannot insert
+   duplicate key row" – the dedup query in `ProcessBatch` only looks back 24h, so an older batch hit a
+   row some other path had meanwhile written, and since a retried batch's content never changes, it
+   failed forever. Fix: a bulk insert that fails on a duplicate key now retries row by row – the
+   colliding row is skipped and logged, the rest insert normally.
+3. **`9d01067`** – the console kept showing "reporting" for a station that had gone silent long ago.
+   `CommDotClass` (the small dot in the Comm column) already had the right `warn` branch for "ping not
+   yet confirmed", but the text status pill in `Computers.razor` didn't and fell straight through to
+   "reporting". Added `PingPending()` to `StationStatus.cs` (symmetric to `Silent`/`ProbablyOff`) and
+   the matching pill branch. The "Agents gone silent" counter deliberately stays unchanged
+   (conservative by design).
+
+**Found today (2026-10-07) – those same three commits had sat local-only, unpushed to GitHub, for 16
+days**, even though the running production API already contained `24e4168` (deployed from a local
+build, not from the repo – found via `/api/health` → `API 24e4168` while the console was still on
+`cc920e7`). GitHub therefore no longer matched what was actually running (GitHub is meant to be the source of truth) – fixed today, all three plus today's two new commits pushed.
+
+**Live incident 2026-10-07 – whitelist auto-signing OFF again:** the Whitelist page showed a red
+banner, "Auto-signing OFF: private key missing". Diagnosis (read-only over UNC on `.213`):
+`whitelist_private.pem` on APP_SERVER was untouched (3271 B, last written 2026-03-17), but
+`Whitelist:PrivateKeyPath` was missing from `appsettings.local.json` – **an exact recurrence of the
+2026-09-11 finding** (see the `SigningRequired` note in `architecture.en.md`); the key itself was never
+lost, the config just "forgot" about it again. The user added the line back on APP_SERVER and restarted
+`USB Guardian Console`; verified via `/api/health`: signing key `ok`, whitelist republished as
+`2026-10-07-v9`, valid until 2026-10-07 next year. **Since the same thing happened twice, it's worth
+considering whether the existing "Whitelist signing key" check on /kontroly is enough, or whether a
+missing config deserves its own email alert instead of just a passive status on the page.**
+
+**New feature: the "Management summary" (A4) now generates current numbers instead of frozen ones.**
+The document (`docs/management-summary(.en).html`, a static page meant for printing/sharing without
+login) had its KPI tiles hand-written as of 2026-09-11 – today's live check (`/api/health`) showed how
+far that had drifted: **4 → 117 stations with an agent, 146 → 1024 incidents total, 4 → 7 approved
+media, 16 → 17 operational checks.** Fix: a new anonymous endpoint `GET /api/public/summary-kpi` (same
+pattern as `/api/version`/`/api/cert-info` – the document is deliberately reachable without login,
+`UseStaticFiles()` runs before `UseAuthentication()`) returns the current counts plus `asOf`; the page
+fetches them via JS on every open, and even the "status as of" date is computed from `asOf`. If the
+server is unreachable (file opened offline, an outage), the tiles show dashes instead — better an
+honest "unknown" than an old number dressed up as fresh. **Status: code written and committed, but NOT
+deployed** – the console on APP_SERVER is still running the older commit (`cc920e7`) and needs a fresh
+`dotnet publish` + `robocopy` + `USB Guardian Console` restart under the established split (deployment
+on APP_SERVER is done by the user, not by AI) before the live numbers actually show up on the page.
+
 ### 5.5 Roadmap (pending)
 - **From the 2026-09-14 review (see 5.16, in this order):** per-station "last received batch" separate from `LastSeen`; `EnsureCreatedAsync` out of the startup critical path + `/health/live`; `Deploy-Api.cmd` verifies the commit after start; expected version + counts in "Component versions"; agent↔server sequence/ACK; e2e SQL-outage test.
 - **Monitoring of signing cert expiry** – `CN=powershell.domena.loc` valid until 2028-06-17; alert via e-mail from the console.

@@ -677,6 +677,57 @@ podepsaná verze. Postup zdokumentován v `docs/auto-deploy-setup.md`.
 auto-enrollment (zamíchaný výběr, bod 1) začal dosahovat na stanice, na které se předtím nikdy
 nedostal; operátor navíc u konkrétní stanice hned vidí PROČ nasazení selhává, ne jen ŽE selhává.
 
+### 5.18 Dohnané zápisy (21.09.) + živý whitelist-klíč incident + živá čísla ve shrnutí pro vedení (07.10.2026)
+
+**Dohnáno zpětně – tři opravy z 21.09.2026 ležely v gitu nezapsané v HANDOFF (a 16 dní i nepushnuté
+na GitHub, viz níž):**
+1. **`69e9a5d`** – UASP disky (USB-SATA/UAS redukce) agent vůbec neviděl. `Win32_DiskDrive.InterfaceType`
+   hlásí UASP krabičky jako `SCSI`, k nerozeznání od interního disku – `IsRemovableMedia` i oba WQL
+   dotazy filtrovaly jen `InterfaceType='USB'/'SD'`. Živý důkaz na TRNKAMW11 (WD Blue SA510 v UASP
+   krabičce): nula záznamů v queue logu i Event Logu při připojení. Oprava: `MSFT_PhysicalDisk.BusType`
+   (root\Microsoft\Windows\Storage) pozná USB bus spolehlivě i pro UASP (BusType=7), + fallback přes
+   korelaci sériovým číslem.
+2. **`24e4168`** – batch ve spoolu starší 24 h se už nikdy sám neopravil. Živý produkční incident: po
+   opravě `UX_Incidents_Dedup` indexu zůstalo 7 batchů ve spoolu dál padat na „Cannot insert duplicate
+   key row" – dedup dotaz v `ProcessBatch` hledá jen posledních 24 h, takže starší batch narazil na
+   řádek, co mezitím zapsala jiná cesta, a protože obsah batche je při retry pořád stejný, selhávalo to
+   navždy. Oprava: hromadný insert, co spadne na duplicitní klíč, se zkusí znovu po jednom řádku –
+   kolidující se přeskočí a zaloguje, ostatní uloží normálně.
+3. **`9d01067`** – stav „hlásí" se v konzoli zobrazoval i u dávno zmlklé stanice. `CommDotClass` (malá
+   tečka ve sloupci Kom.) už měl pro stav „ping se ještě neověřil" správnou `warn` větev, ale textový
+   pill stavu v `Computers.razor` ji neměl a spadl rovnou do „hlásí". Doplněna `PingPending()` do
+   `StationStatus.cs` (symetrická k `Silent`/`ProbablyOff`) a odpovídající větev v pillu. Počítadlo
+   „Zmlklo agentů" se záměrně NEMĚNÍ (zůstává konzervativní).
+
+**Zjištěno dnes (07.10.2026) – tytéž tři commity 16 dní ležely jen lokálně, nepushnuté na GitHub**,
+přestože běžící produkční API už `24e4168` obsahovalo (nasazeno z lokálního buildu, ne z repa – zjištěno
+přes `/api/health` → `API 24e4168`, zatímco konzole ještě na `cc920e7`). GitHub tedy neodpovídal tomu,
+co skutečně běží (GitHub má být zdroj pravdy) – dnes napraveno, všechny tři + dnešní dvě
+nové commity pushnuté.
+
+**Živý incident 07.10.2026 – whitelist auto-podpis znovu VYPNUTÝ:** na stránce Whitelist se objevila
+červená hláška „Auto-podpis VYPNUTÝ: chybí privátní klíč". Diagnóza (jen čtení přes UNC na `.213`):
+soubor `whitelist_private.pem` na APP_SERVERu nedotčený (3271 B, naposledy zapsán 17.03.2026), ale
+`Whitelist:PrivateKeyPath` v `appsettings.local.json` chyběl – **přesná recidiva nálezu z 11.09.2026**
+(viz `architecture.md` pozn. u `SigningRequired`), klíč se neztratil, jen o něm config znovu „zapomněl".
+Uživatel řádek na APP_SERVERu doplnil a restartoval `USB Guardian Console`; ověřeno přes `/api/health`:
+podpisový klíč `ok`, whitelist republikován jako `2026-10-07-v9`, platí do 07.10.2027. **Protože se stejná
+věc stala podruhé, stojí za zvážení, jestli existující kontrola „Podpisový klíč whitelistu" na /kontroly
+nestačí a chybějící config by si zasloužil i vlastní e-mailový alert, ne jen pasivní stav na stránce.**
+
+**Nová funkce: „Shrnutí pro vedení" (A4) teď generuje aktuální čísla, ne zamrzlá.** Dokument
+(`docs/management-summary(.en).html`, statická stránka pro tisk/sdílení bez přihlášení) měl KPI
+dlaždice ručně napsané ke dni 11.09.2026 – dnešní živá kontrola (`/api/health`) ukázala, jak moc se to
+rozjelo: **4 → 117 stanic s agentem, 146 → 1024 incidentů celkem, 4 → 7 schválených médií, 16 → 17
+kontrol provozu.** Řešení: nový anonymní endpoint `GET /api/public/summary-kpi` (stejný vzor jako
+`/api/version`/`/api/cert-info` – dokument je úmyslně dostupný bez přihlášení, `UseStaticFiles()` běží
+před `UseAuthentication()`) vrací aktuální počty + `asOf`; stránka si je natáhne JS fetchem při každém
+otevření a i datum „stav k" dopočítá z `asOf`. Při nedostupnosti serveru (offline otevřený soubor,
+výpadek) zůstanou v dlaždicích pomlčky – radši čitelně „nevím" než tvářit staré číslo za čerstvé.
+**Stav: kód hotový a commitnutý, ale NEnasazený** – konzole na APP_SERVERu běží pořád na starším
+commitu (`cc920e7`), potřebuje nové `dotnet publish` + `robocopy` + restart `USB Guardian Console`
+podle zavedeného dělení práce (nasazení na APP_SERVER dělá uživatel, ne AI), než se živá čísla na stránce skutečně objeví.
+
 ### 5.5 Roadmapa (pending)
 - **Z oponentury 14.09.2026 (viz 5.16, v tomto pořadí):** per-stanice „poslední přijatá dávka" oddělená od `LastSeen`; `EnsureCreatedAsync` mimo kritickou cestu startu + `/health/live`; `Deploy-Api.cmd` ověří commit po startu; očekávaná verze + počty v „Verze komponent"; sequence/ACK agent↔server; e2e test výpadku SQL.
 - **Monitoring expirace podpisového certu** – `CN=powershell.domena.loc` platí do 2028-06-17; alert e-mailem z konzole.

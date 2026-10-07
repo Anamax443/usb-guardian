@@ -194,6 +194,24 @@ app.Logger.LogWarning(
     "=== Admin konzole TLS self-cert (otisk pro Trusted Root import): {Tp} | platí do {Exp} ===",
     tlsCert.Thumbprint, tlsCert.NotAfter);
 
+// Souhrnná čísla pro veřejné "Shrnutí pro vedení" (docs/management-summary(.en).html) – anonymní,
+// stejný vzor jako /api/version. Dřív měl dokument čísla zapsaná ručně do HTML a zůstala zamrzlá
+// na datu poslední editace (nález 07.10.2026) – teď je natahuje živě při každém otevření stránky.
+app.MapGet("/api/public/summary-kpi", async (IDbContextFactory<AppDbContext> dbf, CancellationToken ct) =>
+{
+    await using var db = await dbf.CreateDbContextAsync(ct);
+    return Results.Json(new
+    {
+        totalComputers = await db.Computers.CountAsync(ct),
+        withAgent      = await db.Computers.CountAsync(c => c.AgentVersion != "" || c.LastSeen != null, ct),
+        totalIncidents = await db.Incidents.CountAsync(ct),
+        approvedMedia  = await db.WhitelistDevices.CountAsync(d => d.IsActive, ct),
+        checksTotal    = USBGuardian.Admin.Health.HealthService.TotalChecks,
+        asOf           = DateTime.UtcNow,
+    });
+})
+.AllowAnonymous();
+
 // ── Kontroly stavu strojově (/api/health) – dědí FallbackPolicy jako zbytek konzole.
 // 200 = vše OK nebo jen varování, 503 = aspoň jedna kontrola hlásí chybu
 // (kontrakt, na který umí reagovat externí dohled).
