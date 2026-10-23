@@ -102,6 +102,35 @@ public sealed class ServiceRestartConfig
     }
 }
 
+/// <summary>Co se má se službou udělat, čistá funkce bez ServiceControlleru (testovatelná).</summary>
+public enum RestartDecision { Restart, StartOnly, SkipSelfRunning, UnexpectedState }
+
+public static class RestartPolicy
+{
+    /// <summary>
+    /// 23.10.2026 živý incident: konzole měla sama sebe v svc.restart.targets (lokální cíl,
+    /// prázdný host). V 03:30 plánovač zjistil "běží" → zavolal sc.Stop() na VLASTNÍ službu →
+    /// to spustí SCM shutdown hostitelského procesu (AddWindowsService → IHostApplicationLifetime)
+    /// → proces, co měl o řádek dál zavolat sc.Start(), mezitím umírá. Je to závod: 7.10. v 10:37
+    /// náhodou vyhrál (zalogováno "restartována"), 23.10. v noci prohrál - konzole zůstala STOPPED
+    /// 8 hodin, dokud si toho nikdo nevšiml (vlastní "záchrana výpadku" běží taky jen UVNITŘ
+    /// konzole, takže se nemá kdo zachránit sám).
+    ///
+    /// Služba nemůže bezpečně restartovat sama sebe voláním Stop()+Start() ve vlastním procesu -
+    /// to umí jen vnější mechanismus (watchdog scheduled task na jiném/stejném stroji, ale mimo
+    /// tenhle proces). Lokální cíl je tu vždy "já sama" (jediné reálné použití), proto IsLocal
+    /// samo o sobě stačí jako vodítko - přesnější "je to fakt moje vlastní jméno služby" by
+    /// potřebovalo dotaz na SCM podle PID, což je zbytečná složitost pro jediný known use-case.
+    /// </summary>
+    public static RestartDecision Decide(bool isLocal, ServiceControllerStatus status) => (isLocal, status) switch
+    {
+        (true, ServiceControllerStatus.Running) => RestartDecision.SkipSelfRunning,
+        (_, ServiceControllerStatus.Running)     => RestartDecision.Restart,
+        (_, ServiceControllerStatus.Stopped)     => RestartDecision.StartOnly,
+        _                                         => RestartDecision.UnexpectedState,
+    };
+}
+
 /// <summary>
 /// Vlastní provedení restartu. Singleton, ať jde spustit i ručně z UI
 /// (tlačítko "Restartovat teď") stejným kódem jako plánovaný běh.
@@ -169,23 +198,26 @@ public sealed class ServiceRestartRunner
 
             var status = sc.Status; // první dotaz zároveň ověří dostupnost a práva
 
-            if (status == ServiceControllerStatus.Running)
+            switch (RestartPolicy.Decide(t.IsLocal, status))
             {
-                sc.Stop();
-                sc.WaitForStatus(ServiceControllerStatus.Stopped, WaitTimeout);
-                sc.Start();
-                sc.WaitForStatus(ServiceControllerStatus.Running, WaitTimeout);
-                return $"{label}: restartována";
-            }
+                case RestartDecision.Restart:
+                    sc.Stop();
+                    sc.WaitForStatus(ServiceControllerStatus.Stopped, WaitTimeout);
+                    sc.Start();
+                    sc.WaitForStatus(ServiceControllerStatus.Running, WaitTimeout);
+                    return $"{label}: restartována";
 
-            if (status == ServiceControllerStatus.Stopped)
-            {
-                sc.Start();
-                sc.WaitForStatus(ServiceControllerStatus.Running, WaitTimeout);
-                return $"{label}: NEBĚŽELA → nastartována";
-            }
+                case RestartDecision.StartOnly:
+                    sc.Start();
+                    sc.WaitForStatus(ServiceControllerStatus.Running, WaitTimeout);
+                    return $"{label}: NEBĚŽELA → nastartována";
 
-            return $"{label}: CHYBA – nečekaný stav {status}, nechávám být";
+                case RestartDecision.SkipSelfRunning:
+                    return $"{label}: běží, self-restart přeskočen (služba nemůže bezpečně restartovat sama sebe)";
+
+                default:
+                    return $"{label}: CHYBA – nečekaný stav {status}, nechávám být";
+            }
         }
         catch (Exception ex) when (IsAccessDenied(ex))
         {

@@ -727,6 +727,41 @@ výpadek) zůstanou v dlaždicích pomlčky – radši čitelně „nevím" než
 **Stav: kód hotový a commitnutý, ale NEnasazený** – konzole na APP_SERVERu běží pořád na starším
 commitu (`cc920e7`), potřebuje nové `dotnet publish` + `robocopy` + restart `USB Guardian Console`
 podle zavedeného dělení práce (nasazení na APP_SERVER dělá uživatel, ne AI), než se živá čísla na stránce skutečně objeví.
+(Pozn.: nasazeno dodatečně téhož dne, `0d23d28`→`0b3579e` – uživatel pro tenhle konkrétní zásah udělil
+výslovnou výjimku z pravidla, viz 5.19.)
+
+### 5.19 Konzole si neumí bezpečně restartovat sama sebe – 8hodinový výpadek (23.10.2026)
+
+**Živý nález:** uživatel ráno otevřel RDCMan na APP_SERVER a uviděl `USBGuardianConsole` ve Services
+zastavenou. Konfigurace služby `START_TYPE: AUTO_START` (ne Disabled, jak se zdálo z prvního pohledu
+na screenshot – to „Disabled" patřilo sousednímu `UPnP Device Host`). Task Scheduler (`AutoDeploy` a
+další) běžel normálně dál – jen konzole byla dole.
+
+**Kořenová příčina:** `svc.restart.targets` (plánovaný restart služeb, `ServiceRestartService.cs`,
+zavedeno 28.08.2026 kvůli jinému výpadku) obsahuje i **samu konzoli** jako lokální cíl (prázdný host).
+Denní běh v 03:30 zjistí stav „Running" → zavolá `sc.Stop()` na **vlastní** Windows službu. To ale
+spustí SCM shutdown hostitelského procesu (`AddWindowsService` → `IHostApplicationLifetime`) – proces,
+co má o řádek dál zavolat `sc.Start()`, mezitím umírá. Je to závod: 07.10.2026 v 10:37 náhodou vyhrál
+(zalogováno „restartována", viz 5.18), v noci na 23.10. prohrál – `Stop()` proběhl, `Start()` se už
+neprovedl. Vestavěná „záchrana výpadku" (STOPPED → Start) na to nemohla zareagovat, protože běží taky
+jen UVNITŘ konzole – služba, co je dole, se nemá čím sama zachránit. Odhadovaný výpadek: ~8 hodin
+(03:30–11:16), než si toho uživatel všiml. Agent-side ochrana (blokování/varování na stanicích) tím
+nebyla dotčena – jen admin funkce (Whitelist, Kontroly, nové živé KPI z 5.18).
+
+**Okamžitá záchrana:** `sc.exe \\APP_SERVER start USBGuardianConsole` (s výslovným svolením uživatele –
+„tak to nechám na tobě, mám toho moc" – proveden přímo, ne jen staženo).
+
+**Oprava v kódu (`ServiceRestartService.cs`):** rozhodovací logika vytažena do čisté funkce
+`RestartPolicy.Decide(isLocal, status)` (6 testů, `RestartPolicyTests.cs`) – lokální cíl (vždy „já
+sama", jediné reálné použití) ve stavu „Running" teď **nikdy** nejde do větve `Stop()+Start()`, jen se
+zaloguje „self-restart přeskočen". Lokální cíl ve stavu „Stopped" se nastartuje normálně (neškodné,
+i když v praxi nedosažitelné – kód, co by to spustil, by zrovna neběžel). Vzdálené cíle (API na
+SQL_SERVERu) se chovají beze změny.
+
+**Co zůstává otevřené:** služba, která spadne (crash, OOM, cokoli mimo plánovaný restart), se pořád
+nemá jak sama zvednout – potřebovala by vnější watchdog (scheduled task mimo tenhle proces, stejný vzor
+jako `USBGuardian-Watchdog` na klientech, viz Deploy-AgentFleet.ps1). Zatím to chybí, zvážit přidání
+do Roadmapy.
 
 ### 5.5 Roadmapa (pending)
 - **Z oponentury 14.09.2026 (viz 5.16, v tomto pořadí):** per-stanice „poslední přijatá dávka" oddělená od `LastSeen`; `EnsureCreatedAsync` mimo kritickou cestu startu + `/health/live`; `Deploy-Api.cmd` ověří commit po startu; očekávaná verze + počty v „Verze komponent"; sequence/ACK agent↔server; e2e test výpadku SQL.

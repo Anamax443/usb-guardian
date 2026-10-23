@@ -777,6 +777,43 @@ honest "unknown" than an old number dressed up as fresh. **Status: code written 
 deployed** – the console on APP_SERVER is still running the older commit (`cc920e7`) and needs a fresh
 `dotnet publish` + `robocopy` + `USB Guardian Console` restart under the established split (deployment
 on APP_SERVER is done by the user, not by AI) before the live numbers actually show up on the page.
+(Note: deployed later the same day anyway, `0d23d28`→`0b3579e` – the user granted an explicit
+one-off exception to that rule for this specific action, see 5.19.)
+
+### 5.19 The console can't safely restart itself – an 8-hour outage (2026-10-23)
+
+**Live finding:** the user opened RDCMan on APP_SERVER in the morning and saw `USBGuardianConsole`
+stopped in Services. The service config showed `START_TYPE: AUTO_START` (not Disabled, as a first
+glance at the screenshot suggested – that "Disabled" belonged to the neighboring `UPnP Device Host`).
+Task Scheduler (`AutoDeploy` and the rest) kept running normally – only the console was down.
+
+**Root cause:** `svc.restart.targets` (the scheduled service restart, `ServiceRestartService.cs`,
+introduced 2026-08-28 after a different outage) includes **the console itself** as a local target
+(empty host). The daily 03:30 run sees status "Running" → calls `sc.Stop()` on **its own** Windows
+service. But that triggers an SCM shutdown of the hosting process (`AddWindowsService` →
+`IHostApplicationLifetime`) – the process that's supposed to call `sc.Start()` a line later is dying
+in the meantime. It's a race: on 2026-09-07 at 10:37 it happened to win (logged "restarted", see 5.18);
+on the night of 10-23 it lost – `Stop()` ran, `Start()` never did. The built-in "outage rescue"
+(STOPPED → Start) couldn't react, because it also only runs INSIDE the console – a service that's down
+has nothing left to rescue itself with. Estimated outage: ~8 hours (03:30–11:16) before anyone noticed.
+Agent-side protection (blocking/warning on stations) was unaffected – only admin functions (Whitelist,
+Checks, the new live KPIs from 5.18).
+
+**Immediate rescue:** `sc.exe \\APP_SERVER start USBGuardianConsole` (with the user's explicit
+go-ahead – "I'll leave it to you, I've got too much on my plate" – carried out directly, not just
+handed back as a step).
+
+**Code fix (`ServiceRestartService.cs`):** the decision logic was pulled out into a pure function,
+`RestartPolicy.Decide(isLocal, status)` (6 tests, `RestartPolicyTests.cs`) – a local target (always
+"myself", the only real use case) in state "Running" now **never** goes into the `Stop()+Start()`
+branch, it just logs "self-restart skipped". A local target in state "Stopped" still starts normally
+(harmless, if practically unreachable – the code that would trigger it wouldn't be running). Remote
+targets (the API on SQL_SERVER) behave unchanged.
+
+**Still open:** a service that crashes (OOM, anything outside the scheduled restart) still has no way
+to lift itself back up – that would need an external watchdog (a scheduled task outside this process,
+the same pattern as `USBGuardian-Watchdog` on the clients, see Deploy-AgentFleet.ps1). Missing for now;
+worth adding to the Roadmap.
 
 ### 5.5 Roadmap (pending)
 - **From the 2026-09-14 review (see 5.16, in this order):** per-station "last received batch" separate from `LastSeen`; `EnsureCreatedAsync` out of the startup critical path + `/health/live`; `Deploy-Api.cmd` verifies the commit after start; expected version + counts in "Component versions"; agent↔server sequence/ACK; e2e SQL-outage test.
