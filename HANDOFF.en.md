@@ -815,6 +815,40 @@ to lift itself back up – that would need an external watchdog (a scheduled tas
 the same pattern as `USBGuardian-Watchdog` on the clients, see Deploy-AgentFleet.ps1). Missing for now;
 worth adding to the Roadmap.
 
+### 5.20 Console/API: HTTP 500 on every page when reached by hostname (2026-11-12)
+
+**Live finding:** the user opened `https://b-s-w-mikos:4200/` in a browser → HTTP ERROR 500 on
+every single page. The `USB Guardian Console` service was running normally (Running, Automatic) –
+this was not a recurrence of 5.19. Access via IP (`https://10.8.2.213:4200/`) from PowerShell worked
+fine; only the browser-via-hostname path failed.
+
+**Root cause (Event Log on APP_SERVER, `Microsoft.AspNetCore.Authentication.Negotiate.
+NegotiateHandler`, recurring even across a process restart):**
+```
+System.InvalidOperationException: An anonymous request was received in between
+authentication handshake requests.
+```
+Negotiate (Kerberos/NTLM) keeps handshake state **per TCP connection** – it expects the next request
+on the same connection to carry the handshake's continuation. But Kestrel on `:4200` had no
+`Protocols` restriction, so with a modern browser (ALPN offers HTTP/2) several requests (the main
+page, `_blazor`, static assets) get multiplexed onto a SINGLE TCP connection at once – another
+anonymous request arrives while the first one's handshake hasn't finished yet, and
+`NegotiateHandler` throws, surfacing as a 500. Over IP from PowerShell the client never offered
+HTTP/2, so it never showed up there – hence the difference in behavior.
+
+Negotiate and HTTP/2 are fundamentally incompatible (per-connection state vs. multiplexing) – the
+recommended fix is to restrict such an endpoint to HTTP/1.1.
+
+**Fix:** `listen.Protocols = HttpProtocols.Http1;` on the Kestrel endpoint in `USBGuardian.Admin/
+Program.cs` (port 4200) and the same in `USBGuardian.Api/Program.cs` (ports 5050 dev, 5443
+production) – not observed live there (the agent's `HttpClient` doesn't offer HTTP/2 on its own),
+but the identical pattern, same risk, fixed for consistency. This isn't logic a unit test could
+cover (Kestrel endpoint config) – verified by a clean build and the existing 69/69 tests passing
+unchanged.
+
+**Status: code done, awaiting deployment** (not yet verified live – needs a console redeploy on
+APP_SERVER under the established split of work).
+
 ### 5.5 Roadmap (pending)
 - **From the 2026-09-14 review (see 5.16, in this order):** per-station "last received batch" separate from `LastSeen`; `EnsureCreatedAsync` out of the startup critical path + `/health/live`; `Deploy-Api.cmd` verifies the commit after start; expected version + counts in "Component versions"; agent↔server sequence/ACK; e2e SQL-outage test.
 - **Monitoring of signing cert expiry** – `CN=powershell.domena.loc` valid until 2028-06-17; alert via e-mail from the console.

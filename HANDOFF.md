@@ -763,6 +763,38 @@ nemá jak sama zvednout – potřebovala by vnější watchdog (scheduled task m
 jako `USBGuardian-Watchdog` na klientech, viz Deploy-AgentFleet.ps1). Zatím to chybí, zvážit přidání
 do Roadmapy.
 
+### 5.20 Konzole/API: HTTP 500 na každou stránku při přístupu přes hostname (12.11.2026)
+
+**Živý nález:** uživatel otevřel `https://b-s-w-mikos:4200/` v prohlížeči → HTTP ERROR 500 na
+úplně každou stránku. Služba `USB Guardian Console` přitom běžela normálně (Running, Automatic) –
+nebyla to recidiva 5.19. Přístup přes IP (`https://10.8.2.213:4200/`) z PowerShellu fungoval bez
+problému, jen přes hostname z prohlížeče padalo.
+
+**Kořenová příčina (Event Log na APP_SERVERu, `Microsoft.AspNetCore.Authentication.Negotiate.
+NegotiateHandler`, opakovaně i po restartu procesu):**
+```
+System.InvalidOperationException: An anonymous request was received in between
+authentication handshake requests.
+```
+Negotiate (Kerberos/NTLM) drží stav handshake **per TCP spojení** – očekává, že další request na
+tomtéž spojení ponese pokračování handshake. Ale Kestrel na `:4200` neměl `Protocols` omezené, takže
+s moderním prohlížečem (ALPN nabídne HTTP/2) se víc požadavků (hlavní stránka, `_blazor`, statické
+soubory) multiplexuje na JEDNO TCP spojení současně – další anonymní request dorazí, zatímco
+handshake prvního ještě neskončil, a `NegotiateHandler` na to spadne s 500. Přes IP z PowerShellu
+klient HTTP/2 nenabízel, takže se to neprojevilo – odtud ten rozdíl v chování.
+
+Negotiate a HTTP/2 spolu principiálně nejdou dohromady (per-connection stav vs. multiplexing) –
+doporučený postup je takový endpoint omezit na HTTP/1.1.
+
+**Oprava:** `listen.Protocols = HttpProtocols.Http1;` na Kestrel endpointu v `USBGuardian.Admin/
+Program.cs` (port 4200) a stejně v `USBGuardian.Api/Program.cs` (porty 5050 dev, 5443 produkce) –
+tam živě neprojevené (agent `HttpClient` HTTP/2 sám od sebe nenabízí), ale identický vzor, stejné
+riziko, opraveno pro konzistenci. Není to logika, která by šla pokrýt jednotkovým testem (konfigurace
+Kestrelu) – ověřeno buildem a 69/69 stávajících testů prošlo beze změny.
+
+**Stav: kód hotový, čeká na nasazení** (živě netestováno – potřebuje redeploy konzole na APP_SERVER
+podle zavedeného dělení práce).
+
 ### 5.5 Roadmapa (pending)
 - **Z oponentury 14.09.2026 (viz 5.16, v tomto pořadí):** per-stanice „poslední přijatá dávka" oddělená od `LastSeen`; `EnsureCreatedAsync` mimo kritickou cestu startu + `/health/live`; `Deploy-Api.cmd` ověří commit po startu; očekávaná verze + počty v „Verze komponent"; sequence/ACK agent↔server; e2e test výpadku SQL.
 - **Monitoring expirace podpisového certu** – `CN=powershell.domena.loc` platí do 2028-06-17; alert e-mailem z konzole.

@@ -9,6 +9,7 @@
 using System.Security.Principal;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -169,9 +170,16 @@ builder.WebHost.ConfigureKestrel(o =>
     // HTTP jen ve vývoji (Windows služba v produkci ASPNETCORE_ENVIRONMENT nenastavuje,
     // takže defaultně Production) – incidenty, hostname, sériová čísla i policy metadata
     // by jinak šla po síti nešifrovaně. NIS2. Stejný vzor jako Swagger níž.
+    // Http1 natvrdo – Negotiate drží handshake per-connection, HTTP/2 multiplexuje víc
+    // požadavků na jedno spojení a rozbíjí to ("anonymous request in between handshake
+    // requests", živě chyceno 12.11.2026 na konzoli, stejný Kestrel+Negotiate vzor zde).
     if (builder.Environment.IsDevelopment())
-        o.ListenAnyIP(5050);                                   // HTTP – jen dev
-    o.ListenAnyIP(5443, listen => listen.UseHttps(tlsCert));  // HTTPS – self-cert
+        o.ListenAnyIP(5050, listen => listen.Protocols = HttpProtocols.Http1);        // HTTP – jen dev
+    o.ListenAnyIP(5443, listen =>
+    {
+        listen.Protocols = HttpProtocols.Http1;
+        listen.UseHttps(tlsCert);
+    });  // HTTPS – self-cert
 });
 
 var app = builder.Build();

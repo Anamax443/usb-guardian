@@ -15,6 +15,7 @@
 using System.Security.Principal;
 using Microsoft.AspNetCore.Authentication.Negotiate;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.EntityFrameworkCore;
 using USBGuardian.Admin.AdSync;
 using USBGuardian.Admin.Components;
@@ -41,7 +42,19 @@ var tlsCertPath = builder.Configuration["tls:certPath"] ?? @"C:\ProgramData\USBG
 var tlsCert     = USBGuardian.Api.SelfCert.LoadOrCreate(tlsCertPath, Environment.MachineName);
 builder.WebHost.ConfigureKestrel(o =>
 {
-    o.ListenAnyIP(4200, listen => listen.UseHttps(tlsCert));
+    // Http1 natvrdo (12.11.2026 živý incident): Negotiate (Kerberos/NTLM) drží stav handshake
+    // PER CONNECTION, ale HTTP/2 multiplexuje víc požadavků na jedno spojení najednou -
+    // prohlížeč (ALPN h2) poslal další anonymní request na stejné spojení, zatímco předchozí
+    // handshake ještě nedoběhl, a NegotiateHandler spadl na
+    // "An anonymous request was received in between authentication handshake requests"
+    // (HTTP 500 na každou stránku, reprodukovatelné přes hostname, kde prohlížeč h2 nabídne;
+    // přes IP z PowerShellu problém nebyl vidět, protože tam h2 nenastalo). Negotiate a HTTP/2
+    // spolu principiálně nejdou dohromady - oficiální doporučení je endpoint omezit na Http1.
+    o.ListenAnyIP(4200, listen =>
+    {
+        listen.Protocols = HttpProtocols.Http1;
+        listen.UseHttps(tlsCert);
+    });
 });
 
 // ── Windows Service hosting ───────────────────────────────────
