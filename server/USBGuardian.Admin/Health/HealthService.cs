@@ -201,6 +201,14 @@ public sealed class HealthService
           + "shodí nasazení potichu – incident 10.09.2026, kdy se to zjistilo až ručním klikem.",
             false, CheckDeployScriptsAsync),
 
+        new(GOps, "Poslední nasazení API",
+            "Scheduled task USBGuardian-ApiDeploy nasazuje API na SQL_SERVER bez dozoru. Živý incident "
+          + "12.11.2026: vadná Action v XML úlohy (zdvojené \"cmd\") shazovala úlohu s ERROR_INVALID_FUNCTION "
+          + "hned po startu, celé 2 měsíce, aniž by si toho kdokoli všiml – deploy-log mlčel, protože "
+          + "selhání nastalo dřív, než skript stihl zapsat první řádek. Tahle kontrola se ptá přímo "
+          + "Scheduleru (Last Result), ne logu.",
+            false, CheckApiDeployTaskAsync),
+
         new(GOps, "Plánovaný restart služeb",
             "Denní restart hlídaných služeb. Zastavenou službu i nastartuje — pojistka proti "
           + "výpadku typu služba spadla a nikdo si nevšiml.",
@@ -747,6 +755,83 @@ public sealed class HealthService
     }
 
     private sealed record Ps1CheckResult(string Name, bool Signed, bool Parses, string Detail);
+
+    /// <summary>
+    /// Čte stav naplánované úlohy USBGuardian-ApiDeploy přes schtasks.exe BEZ /S – úloha běží na
+    /// tomhle stroji (APP_SERVER), stejně jako tahle konzole. Živý incident 12.11.2026: Last Result
+    /// byl != 0 celé dva měsíce (vadná Action v XML, zdvojené "cmd" před /c), aniž by si toho kdokoli
+    /// všiml – soubor api-deploy.log zůstal beze změny, protože selhání nastalo dřív, než skript
+    /// stihl zapsat první řádek. Kontrola se proto ptá přímo Scheduleru, ne logu.
+    /// </summary>
+    private static async Task<CheckOutcome> CheckApiDeployTaskAsync(Ctx c, CancellationToken ct)
+    {
+        const string taskName = @"\USBGuardian\USBGuardian-ApiDeploy";
+        string stdout;
+        int exitCode;
+        try
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName = "schtasks.exe",
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true,
+            };
+            psi.ArgumentList.Add("/Query");
+            psi.ArgumentList.Add("/TN");
+            psi.ArgumentList.Add(taskName);
+            psi.ArgumentList.Add("/FO");
+            psi.ArgumentList.Add("LIST");
+            psi.ArgumentList.Add("/V");
+
+            using var p = Process.Start(psi);
+            if (p is null) return new CheckOutcome(HealthState.Bad, "schtasks proces nevznikl");
+            stdout = await p.StandardOutput.ReadToEndAsync(ct);
+            await p.WaitForExitAsync(ct);
+            exitCode = p.ExitCode;
+        }
+        catch (Exception ex)
+        {
+            return new CheckOutcome(HealthState.Bad, "nelze zjistit stav úlohy ApiDeploy", Short(ex.Message));
+        }
+
+        return EvaluateApiDeployTask(exitCode, stdout, taskName);
+    }
+
+    /// <summary>
+    /// Čistá interpretace výstupu `schtasks /Query ... /FO LIST /V` (žádné I/O) – testovatelná
+    /// odděleně od skutečného spuštění schtasks.exe. Živý incident 12.11.2026: Last Result byl
+    /// != 0 (ERROR_INVALID_FUNCTION, vadná Action v XML) celé dva měsíce, aniž by si toho kdokoli
+    /// všiml, protože se díval jen do deploy-logu, ne na Scheduler samotný.
+    /// </summary>
+    internal static CheckOutcome EvaluateApiDeployTask(int exitCode, string schtasksStdout, string taskName)
+    {
+        if (exitCode != 0)
+            return new CheckOutcome(HealthState.Off, "úloha ApiDeploy na tomhle stroji neexistuje",
+                $"Pokud se API nasazuje jinudy, nech Off. Jinak zkontroluj {taskName} v Task Scheduleru.");
+
+        string? lastResult = null, lastRun = null;
+        foreach (var raw in schtasksStdout.Split('\n'))
+        {
+            var line = raw.Trim();
+            if (line.StartsWith("Last Result:", StringComparison.OrdinalIgnoreCase))
+                lastResult = line["Last Result:".Length..].Trim();
+            else if (line.StartsWith("Last Run Time:", StringComparison.OrdinalIgnoreCase))
+                lastRun = line["Last Run Time:".Length..].Trim();
+        }
+
+        if (string.IsNullOrEmpty(lastRun) || lastRun.Equals("N/A", StringComparison.OrdinalIgnoreCase))
+            return new CheckOutcome(HealthState.Warn, "úloha ještě nikdy neproběhla",
+                "Spusť ji aspoň jednou (schtasks /Run) a ověř, že projde.");
+
+        var ok = lastResult == "0";
+        return new CheckOutcome(
+            ok ? HealthState.Ok : HealthState.Bad,
+            (ok ? "OK" : $"CHYBA (kód {lastResult})") + $" · naposledy {lastRun}",
+            ok ? "" : "Zkontroluj Action v XML úlohy (schtasks /Query /TN \"" + taskName + "\" /XML ONE) – "
+                    + @"známá past: zdvojené ""cmd"" v příkazu. Log na C:\ProgramData\USBGuardian\deploy\api-deploy.log.");
+    }
 
     private static async Task<CheckOutcome> CheckVersionsAsync(Ctx c, CancellationToken ct)
     {
